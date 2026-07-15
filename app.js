@@ -139,8 +139,8 @@
 
   function buildEmailBody(rows) {
     const header = fields.map(([, label]) => label).join("\t");
-    const values = rows.map(row => fields.map(([name]) => rowValue(row, name) || "Quote").join("\t"));
-    return ["Dear Team,", "", "Please quote the following transaction(s):", "", header, ...values, "", "Best regards,"].join("\r\n");
+    const values = rows.map(row => fields.map(([name]) => rowValue(row, name)).join("\t"));
+    return [header, ...values].join("\r\n");
   }
 
   function escapeHtml(value) {
@@ -155,7 +155,7 @@
     ).join("");
     const dataRows = rows.map((row, rowIndex) => {
       const cells = fields.map(([name]) => {
-        const value = rowValue(row, name) || "Quote";
+        const value = rowValue(row, name);
         return `<td style="border:1px solid #b7c9d3;padding:8px 6px;font:11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(value)}</td>`;
       }).join("");
       return `<tr style="background:${rowIndex % 2 ? "#f6fafc" : "#ffffff"};">${cells}</tr>`;
@@ -163,13 +163,10 @@
 
     return `<!doctype html>
 <html><body style="margin:0;font-family:Arial,Calibri,sans-serif;color:#000000;">
-  <p style="margin:0 0 14px;font-size:12px;">Dear Team,</p>
-  <p style="margin:0 0 14px;font-size:12px;">Please quote the following transaction(s):</p>
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #b7c9d3;font-family:Arial,Calibri,sans-serif;">
     <thead><tr>${headerCells}</tr></thead>
     <tbody>${dataRows}</tbody>
   </table>
-  <p style="margin:18px 0 0;font-size:12px;">Best regards,</p>
 </body></html>`;
   }
 

@@ -197,10 +197,8 @@
       rows.forEach(validateRow);
       const plainText = buildEmailBody(rows);
       const clipboardFormat = await copyEmailTable(buildEmailHtml(rows), plainText).catch(() => "none");
-      const instruction = clipboardFormat === "html"
-        ? "已複製 HTML 格式的詢價表格。請在此郵件本文中貼上後再寄送。"
-        : plainText;
-      const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(MAIL_SUBJECT)}&body=${encodeURIComponent(instruction)}`;
+      const mailBody = clipboardFormat === "html" ? "" : plainText;
+      const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(MAIL_SUBJECT)}&body=${encodeURIComponent(mailBody)}`;
       window.location.href = uri;
       setStatus(
         clipboardFormat === "html"

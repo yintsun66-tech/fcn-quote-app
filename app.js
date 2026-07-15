@@ -143,15 +143,71 @@
     return ["Dear Team,", "", "Please quote the following transaction(s):", "", header, ...values, "", "Best regards,"].join("\r\n");
   }
 
-  function confirmAndSend() {
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[character]));
+  }
+
+  function buildEmailHtml(rows) {
+    const headerCells = fields.map(([, label]) =>
+      `<th style="border:1px solid #ffffff;background:#184e77;color:#ffffff;padding:8px 6px;font:700 11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(label)}</th>`
+    ).join("");
+    const dataRows = rows.map((row, rowIndex) => {
+      const cells = fields.map(([name]) => {
+        const value = rowValue(row, name) || "Quote";
+        return `<td style="border:1px solid #b7c9d3;padding:8px 6px;font:11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(value)}</td>`;
+      }).join("");
+      return `<tr style="background:${rowIndex % 2 ? "#f6fafc" : "#ffffff"};">${cells}</tr>`;
+    }).join("");
+
+    return `<!doctype html>
+<html><body style="margin:0;font-family:Arial,Calibri,sans-serif;color:#000000;">
+  <p style="margin:0 0 14px;font-size:12px;">Dear Team,</p>
+  <p style="margin:0 0 14px;font-size:12px;">Please quote the following transaction(s):</p>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #b7c9d3;font-family:Arial,Calibri,sans-serif;">
+    <thead><tr>${headerCells}</tr></thead>
+    <tbody>${dataRows}</tbody>
+  </table>
+  <p style="margin:18px 0 0;font-size:12px;">Best regards,</p>
+</body></html>`;
+  }
+
+  async function copyEmailTable(html, plainText) {
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      const item = new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([plainText], { type: "text/plain" }),
+      });
+      await navigator.clipboard.write([item]);
+      return "html";
+    }
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(plainText);
+      return "text";
+    }
+    return "none";
+  }
+
+  async function confirmAndSend() {
     setStatus();
     const rows = [...tableBody.rows];
     try {
       if (rows.length < 1 || rows.length > MAX_ROWS) throw new Error("詢價交易筆數必須介於 1 至 20 筆。");
       rows.forEach(validateRow);
-      const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(MAIL_SUBJECT)}&body=${encodeURIComponent(buildEmailBody(rows))}`;
+      const plainText = buildEmailBody(rows);
+      const clipboardFormat = await copyEmailTable(buildEmailHtml(rows), plainText).catch(() => "none");
+      const instruction = clipboardFormat === "html"
+        ? "已複製 HTML 格式的詢價表格。請在此郵件本文中貼上後再寄送。"
+        : plainText;
+      const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(MAIL_SUBJECT)}&body=${encodeURIComponent(instruction)}`;
       window.location.href = uri;
-      setStatus("已開啟郵件草稿，請於郵件 App 中確認後傳送。", true);
+      setStatus(
+        clipboardFormat === "html"
+          ? "已開啟郵件草稿並複製 HTML 表格；請在郵件本文貼上後寄送。"
+          : "已開啟郵件草稿；此裝置無法複製 HTML 表格，已改帶入文字格式內容。",
+        true
+      );
     } catch (error) { setStatus(error.message); }
   }
 

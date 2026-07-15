@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FCN / DAC 詢價系統使用說明</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="guide-shell">
+      <a class="back-link" href="./index.html">← 返回詢價表格</a>
+      <h1>FCN / DAC 詢價系統使用說明</h1>
+      <p class="guide-intro">本頁說明詢價條件的填寫方式、價格求值規則及郵件發送流程。</p>
+
+      <section class="guide-section">
+        <h2>快速操作</h2>
+        <ol>
+          <li>在表格第一列輸入一筆交易條件。</li>
+          <li>需要多筆詢價時，點選「新增一筆交易」；新列會完整複製第 1 筆交易，可再個別修改。</li>
+          <li>點選「確認所有詢價條件」或「發送詢價條件」進行驗證。</li>
+          <li>驗證通過後會開啟郵件草稿；在本文貼上已複製的內容，即可帶入 HTML 格式表格後寄送。</li>
+        </ol>
+      </section>
+
+      <section class="guide-section">
+        <h2>欄位說明</h2>
+        <div class="guide-table-scroll"><table class="guide-table">
+          <thead><tr><th>欄位</th><th>填寫規則</th></tr></thead>
+          <tbody>
+            <tr><td>Product</td><td>選擇 FCN 或 DAC。</td></tr>
+            <tr><td>Currency</td><td>預設 USD；可選 JPY、EUR、HKD、CNH、CAD、GBP、AUD。</td></tr>
+            <tr><td>Guaranteed Periods (m)</td><td>預設 1；最小為 1，且不得大於 Tenor。</td></tr>
+            <tr><td>BBG Code 1–5</td><td>至少填一個。輸入美股 ticker 後離開欄位，系統會依交易所檔案自動補上交易所代碼。</td></tr>
+            <tr><td>Strike (%)</td><td>可留白求值；若填寫，數值須介於 50 至 100。</td></tr>
+            <tr><td>KO Type</td><td>預設 Daily Memory；可選 Daily、Daily Memory、Period End、Period End Memory。</td></tr>
+            <tr><td>KO Barrier (%)、Coupon p.a. (%)</td><td>可留白求值。</td></tr>
+            <tr><td>Upfront / NotePrice (%)</td><td>預設 98；可留白求值。</td></tr>
+            <tr><td>Tenor (m)</td><td>必填，範圍為 1 至 24。</td></tr>
+            <tr><td>Barrier Type</td><td>預設 NONE；可選 EKI、AKI、NONE。當 KI Barrier 大於 0 時，不得選 NONE。</td></tr>
+            <tr><td>KI Barrier (%)</td><td>可留白求值；Barrier Type 為 NONE 時必須留白。</td></tr>
+            <tr><td>Observation Frequency (m)</td><td>固定為 1。</td></tr>
+            <tr><td>OTC</td><td>固定為 Note。</td></tr>
+            <tr><td>Effective Date Offset</td><td>固定為 7 個 Calendar Days。</td></tr>
+            <tr><td>Trade Date</td><td>預設為今天，可調整；格式為 DD-MMM-YY，例如 15-Jul-26。</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="guide-section">
+        <h2>價格求值規則</h2>
+        <ul>
+          <li>Barrier Type 為 EKI 或 AKI 時：Strike、KO Barrier、Coupon、Upfront / NotePrice、KI Barrier 五欄必須且只能留一欄空白。</li>
+          <li>Barrier Type 為 NONE 時：KI Barrier 必須空白；Strike、KO Barrier、Coupon、Upfront / NotePrice 四欄必須且只能留一欄空白。</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

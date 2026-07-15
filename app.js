@@ -32,7 +32,8 @@
     status.classList.toggle("success", success);
   }
 
-  function createRow() {
+  function createRow(copyFirstRow = false) {
+    const firstRow = copyFirstRow ? tableBody.rows[0] : null;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td class="row-number"></td>
@@ -45,18 +46,23 @@
       <td>${input("bbgCode4", 'autocomplete="off" placeholder="選填"')}</td>
       <td>${input("bbgCode5", 'autocomplete="off" placeholder="選填"')}</td>
       <td>${input("strike", 'type="number" min="50" max="100" step="0.01" placeholder="求值留白"')}</td>
-      <td>${select("koType", ["Daily", "Daily Memory", "Period End", "Period End Memory"], "Daily")}</td>
+      <td>${select("koType", ["Daily", "Daily Memory", "Period End", "Period End Memory"], "Daily Memory")}</td>
       <td>${input("koBarrier", 'type="number" step="0.01" placeholder="求值留白"')}</td>
       <td>${input("coupon", 'type="number" step="0.01" placeholder="求值留白"')}</td>
-      <td>${input("upfront", 'type="number" step="0.01" placeholder="求值留白"')}</td>
+      <td>${input("upfront", 'type="number" step="0.01" value="98" placeholder="求值留白"')}</td>
       <td>${input("tenor", 'type="number" min="1" max="24" value="12" required')}</td>
-      <td>${select("barrierType", ["EKI", "AKI", "NONE"], "EKI")}</td>
+      <td>${select("barrierType", ["EKI", "AKI", "NONE"], "NONE")}</td>
       <td>${input("kiBarrier", 'type="number" step="0.01" placeholder="求值留白"')}</td>
       <td>${input("observationFrequency", 'value="1" readonly')}</td>
       <td>${input("otc", 'value="Note" readonly')}</td>
       <td>${input("effectiveDateOffset", 'value="7" readonly')}</td>
       <td>${input("tradeDate", `value="${formatDate()}" placeholder="DD-MMM-YY" required`)}</td>`;
     tableBody.append(row);
+    if (firstRow) {
+      fields.forEach(([name]) => {
+        rowField(row, name).value = rowField(firstRow, name).value;
+      });
+    }
     renumberRows();
   }
 
@@ -208,7 +214,7 @@
 
   document.querySelector("#addRow").addEventListener("click", () => {
     if (tableBody.rows.length >= MAX_ROWS) return setStatus("最多只能新增 20 筆詢價交易。");
-    createRow(); setStatus();
+    createRow(true); setStatus("已複製第 1 筆交易作為新交易預設值。", true);
     tableBody.lastElementChild.scrollIntoView({ behavior: "smooth", block: "center" });
   });
   document.querySelector("#removeRow").addEventListener("click", () => {

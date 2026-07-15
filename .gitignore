@@ -1,0 +1,7 @@
+# Reference Outlook messages are not needed by the deployed static site.
+*.msg
+
+# Local editor and operating-system files.
+.vscode/
+.DS_Store
+Thumbs.db

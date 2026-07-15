@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b4a6f" />
+    <title>FCN / DAC 詢價條件</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">FIRST COMMERCIAL BANK</p>
+          <h1>FCN / DAC 詢價條件</h1>
+          <p>填寫交易條件後，確認並直接開啟郵件草稿。</p>
+        </div>
+        <div class="quote-count" aria-live="polite"><strong id="quoteCount">1</strong> / 20 筆</div>
+      </header>
+
+      <section class="notice" aria-label="填寫說明">
+        <strong>求值規則：</strong>以空白欄位表示求值；每筆交易的價格相關欄位必須且只能留一欄空白。
+        <button id="showHelp" type="button" class="link-button">查看詳細規則</button>
+      </section>
+
+      <section class="toolbar" aria-label="交易操作">
+        <button id="addRow" type="button" class="secondary">＋ 新增一筆交易</button>
+        <button id="removeRow" type="button" class="secondary">－ 刪除最後一筆</button>
+        <button id="confirmAllQuotes" type="button" class="secondary">確認所有詢價條件</button>
+        <button id="sendQuotes" type="button" class="primary">發送詢價條件</button>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section class="table-card" aria-label="詢價交易表格">
+        <div class="table-scroll">
+          <table id="quoteTable">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Product *</th>
+                <th scope="col">Currency *</th>
+                <th scope="col">Guaranteed<br>Periods (m) *</th>
+                <th scope="col">BBG Code 1 *</th>
+                <th scope="col">BBG Code 2</th>
+                <th scope="col">BBG Code 3</th>
+                <th scope="col">BBG Code 4</th>
+                <th scope="col">BBG Code 5</th>
+                <th scope="col">Strike (%)</th>
+                <th scope="col">KO Type *</th>
+                <th scope="col">KO Barrier (%)</th>
+                <th scope="col">Coupon p.a. (%)</th>
+                <th scope="col">Upfront /<br>NotePrice (%)</th>
+                <th scope="col">Tenor (m) *</th>
+                <th scope="col">Barrier Type *</th>
+                <th scope="col">KI Barrier (%)</th>
+                <th scope="col">Observation<br>Frequency (m)</th>
+                <th scope="col">OTC</th>
+                <th scope="col">Effective Date Offset<br>(Calendar Days)</th>
+                <th scope="col">Trade Date *</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="helpDialog">
+      <div class="dialog-content">
+        <h2>填寫規則</h2>
+        <ul>
+          <li>每筆至少填寫一個 BBG Code；輸入美股 ticker 後會依交易所查詢檔自動補正，例如 <code>AAPL</code> → <code>AAPL UW</code>。</li>
+          <li>Barrier Type 為 EKI／AKI：Strike、KO Barrier、Coupon、Upfront / NotePrice、KI Barrier 五欄中，必須且只能空白一欄。</li>
+          <li>Barrier Type 為 NONE：KI Barrier 必須空白；Strike、KO Barrier、Coupon、Upfront / NotePrice 四欄中，必須且只能空白一欄。</li>
+          <li>Observation Frequency、OTC、Effective Date Offset 分別固定為 1、Note、7。</li>
+        </ul>
+        <button id="closeHelp" type="button" class="primary">知道了</button>
+      </div>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

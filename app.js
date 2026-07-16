@@ -127,6 +127,30 @@
     }
   }
 
+  // 產圖僅驗證資料完整性與數值範圍；價格求值的留白規則只在寄送詢價時檢查。
+  function validateRowForQuoteImage(row) {
+    row.querySelectorAll(".invalid").forEach(el => el.classList.remove("invalid"));
+    const get = name => rowValue(row, name);
+    const number = name => Number(get(name));
+    const required = ["product", "currency", "guaranteedPeriods", "koType", "tenor", "barrierType", "tradeDate"];
+    for (const name of required) if (!get(name)) markInvalid(row, name, "此欄位為必填。");
+    if (!["bbgCode1", "bbgCode2", "bbgCode3", "bbgCode4", "bbgCode5"].some(get)) {
+      markInvalid(row, "bbgCode1", "BBG Code 1 至 BBG Code 5 至少需填寫一個。");
+    }
+    if (!/^\d{2}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2}$/.test(get("tradeDate"))) {
+      markInvalid(row, "tradeDate", "Trade Date 格式須為 DD-MMM-YY，例如 15-Jul-26。");
+    }
+    if (!Number.isInteger(number("tenor")) || number("tenor") < 1 || number("tenor") > 24) {
+      markInvalid(row, "tenor", "Tenor 必須為 1 至 24 的整數。");
+    }
+    if (!Number.isInteger(number("guaranteedPeriods")) || number("guaranteedPeriods") < 1 || number("guaranteedPeriods") > number("tenor")) {
+      markInvalid(row, "guaranteedPeriods", "Guaranteed Periods 必須為 1 至 Tenor 的整數。");
+    }
+    if (get("strike") && (number("strike") < 50 || number("strike") > 100)) {
+      markInvalid(row, "strike", "Strike 必須介於 50% 至 100%。");
+    }
+  }
+
   function normaliseBbgCode(field) {
     const raw = field.value.trim().toUpperCase().replace(/\s+/g, " ");
     if (!raw) return;
@@ -227,7 +251,7 @@
   function ensureQuoteRowsValid() {
     const rows = [...tableBody.rows];
     if (!rows.length) throw new Error("至少需有一筆詢價交易才可產圖。");
-    rows.forEach(validateRow);
+    rows.forEach(validateRowForQuoteImage);
   }
 
   async function downloadQuoteImage() {

@@ -27,6 +27,7 @@
         <button id="removeRow" type="button" class="secondary">－ 刪除最後一筆</button>
         <button id="confirmAllQuotes" type="button" class="secondary">確認所有詢價條件</button>
         <button id="sendQuotes" type="button" class="primary">發送詢價條件</button>
+        <button id="generateQuoteImage" type="button" class="quote-image-button">產出報價圖</button>
         <a class="secondary guide-link" href="./guide.html" target="_blank" rel="noopener">使用說明</a>
       </section>
 
@@ -64,6 +65,19 @@
           </table>
         </div>
       </section>
+
+      <section id="quotePreviewPanel" class="quote-preview-panel" hidden aria-label="報價圖預覽">
+        <div class="preview-heading">
+          <div>
+            <p class="eyebrow">QUOTE IMAGE PREVIEW</p>
+            <h2>報價單預覽</h2>
+          </div>
+          <p>此版面會依目前表格資料即時更新，圖片只會包含下方報價卡。</p>
+        </div>
+        <div class="quote-capture-scroll">
+          <div id="quoteSheet" class="quote-sheet" aria-live="polite"></div>
+        </div>
+      </section>
     </main>
 
     <dialog id="helpDialog">
@@ -79,6 +93,26 @@
       </div>
     </dialog>
 
-    <script src="./app.js"></script>
+    <dialog id="issuerDialog" class="issuer-dialog">
+      <form id="issuerForm" class="dialog-content">
+        <h2>選擇發行機構</h2>
+        <p>此選擇只會套用至報價圖，不會影響詢價郵件內容。</p>
+        <label for="issuerSelect">發行機構</label>
+        <select id="issuerSelect" name="issuer">
+          <option value="BNP">BNP</option>
+          <option value="BARCLAYS">BARCLAYS</option>
+          <option value="MS">MS（OBU不得承做）</option>
+          <option value="JPM">JPM</option>
+        </select>
+        <p id="issuerWarning" class="issuer-warning" hidden>提醒：MS 產品 OBU 不得承做。</p>
+        <div class="dialog-actions">
+          <button id="cancelIssuer" type="button" class="secondary">取消</button>
+          <button id="confirmIssuer" type="submit" class="primary">產出 PNG</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
+    <script src="./app.js" defer></script>
   </body>
 </html>

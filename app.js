@@ -7,6 +7,19 @@
   const tableBody = document.querySelector("#quoteTable tbody");
   const status = document.querySelector("#status");
   const bbgLookup = new Map();
+  const quotePreviewPanel = document.querySelector("#quotePreviewPanel");
+  const quoteSheet = document.querySelector("#quoteSheet");
+  const issuerDialog = document.querySelector("#issuerDialog");
+  const issuerSelect = document.querySelector("#issuerSelect");
+  const issuerWarning = document.querySelector("#issuerWarning");
+  let selectedIssuer = "BNP";
+
+  const issuerProfiles = {
+    BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
+    BARCLAYS: { name: "BARCLAYS", shortName: "BARCLAYS", theme: "barclays" },
+    MS: { name: "MORGAN STANLEY", shortName: "MS", theme: "ms", disclaimer: "OBU 不得承做" },
+    JPM: { name: "J.P. MORGAN", shortName: "JPM", theme: "jpm" },
+  };
 
   const fields = [
     ["product", "Product"], ["currency", "Currency"], ["guaranteedPeriods", "Guaranteed Periods (m)"],
@@ -128,6 +141,134 @@
     }
   }
 
+  function displayValue(value, fallback = "—") {
+    return value === "" || value == null ? fallback : value;
+  }
+
+  function displayPercent(value) {
+    if (value === "" || value == null) return "—";
+    return `${value}%`;
+  }
+
+  function displayTicker(value) {
+    return value ? value.replace(/\s+[A-Z]{2,3}$/i, "") : "";
+  }
+
+  function quoteDataFromRow(row) {
+    const get = name => rowValue(row, name);
+    const barrierType = get("barrierType");
+    const kiBarrier = get("kiBarrier");
+    const underlyings = ["bbgCode1", "bbgCode2", "bbgCode3", "bbgCode4", "bbgCode5"]
+      .map(name => displayTicker(get(name)))
+      .filter(Boolean);
+    const guaranteedPeriods = get("guaranteedPeriods");
+
+    return {
+      product: get("product"),
+      currency: get("currency"),
+      tenor: get("tenor"),
+      strike: get("strike"),
+      koType: get("koType"),
+      koBarrier: get("koBarrier"),
+      coupon: get("coupon"),
+      barrierType,
+      kiBarrier,
+      guaranteedPeriods,
+      tradeDate: get("tradeDate"),
+      underlyings,
+      isDac: get("product") === "DAC",
+    };
+  }
+
+  function quoteCardHtml(data, index, profile) {
+    const underlyingHtml = data.underlyings.length
+      ? data.underlyings.map(ticker => `<li>${escapeHtml(ticker)}</li>`).join("")
+      : "<li>—</li>";
+    const kiValue = data.barrierType === "NONE" || !data.kiBarrier ? "—" : displayPercent(data.kiBarrier);
+    const kiType = data.barrierType === "NONE" ? "—" : data.barrierType;
+    const dacNote = data.isDac && data.guaranteedPeriods
+      ? `<p class="quote-dac-note">* DAC 第 ${Number(data.guaranteedPeriods) + 1} 個月起為浮動收益</p>`
+      : "";
+
+    return `<article class="quote-card">
+      <header class="quote-card-header">
+        <div><span class="quote-card-number">#${index + 1}</span><strong>${escapeHtml(data.product)} 報價</strong><small>(${escapeHtml(data.currency)} 本金)</small></div>
+        <span class="quote-card-issuer">${escapeHtml(profile.shortName)}</span>
+      </header>
+      <div class="quote-card-summary">
+        <div><span>期間</span><strong>${displayValue(data.tenor)} 個月</strong></div>
+        <div><span>年化收益率</span><strong class="quote-highlight">${displayPercent(data.coupon)}</strong></div>
+      </div>
+      <div class="quote-card-details">
+        <div class="quote-detail underlyings"><span>連結標的</span><ul>${underlyingHtml}</ul></div>
+        <div class="quote-detail"><span>執行價</span><strong>${displayPercent(data.strike)}</strong></div>
+        <div class="quote-detail"><span>觸及生效價 KI</span><strong>${kiValue}</strong><em>${escapeHtml(kiType)}</em></div>
+        <div class="quote-detail"><span>保證配息期間</span><strong>${displayValue(data.guaranteedPeriods)} 個月</strong>${dacNote}</div>
+        <div class="quote-detail"><span>提前出場價 KO</span><strong>${displayPercent(data.koBarrier)}</strong><em>${escapeHtml(displayValue(data.koType))}</em></div>
+        <div class="quote-detail"><span>每月 KO 調降</span><strong>0%</strong></div>
+      </div>
+      <footer class="quote-card-footer"><span>發行機構：${escapeHtml(profile.name)}${profile.disclaimer ? `（${profile.disclaimer}）` : ""}</span><span>報價日期：${escapeHtml(displayValue(data.tradeDate, ""))}</span></footer>
+    </article>`;
+  }
+
+  function renderQuoteSheet() {
+    const profile = issuerProfiles[selectedIssuer];
+    const quotes = [...tableBody.rows].map(quoteDataFromRow);
+    quotePreviewPanel.hidden = false;
+    quoteSheet.className = `quote-sheet theme-${profile.theme}`;
+    quoteSheet.innerHTML = `<header class="quote-sheet-header">
+      <div><p>STRUCTURED PRODUCT INDICATIVE QUOTATION</p><h2>${escapeHtml(profile.name)}</h2></div>
+      <div class="quote-sheet-header-note"><strong>${quotes.length}</strong><span>筆詢價條件</span></div>
+    </header>
+    <div class="quote-card-grid">${quotes.map((quote, index) => quoteCardHtml(quote, index, profile)).join("")}</div>
+    <footer class="quote-sheet-disclaimer">本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer>`;
+  }
+
+  function ensureQuoteRowsValid() {
+    const rows = [...tableBody.rows];
+    if (!rows.length) throw new Error("至少需有一筆詢價交易才可產圖。");
+    rows.forEach(validateRow);
+  }
+
+  async function downloadQuoteImage() {
+    const generateButton = document.querySelector("#generateQuoteImage");
+    if (typeof window.html2canvas !== "function") {
+      throw new Error("報價圖元件載入失敗，請確認網路連線後重新整理頁面。");
+    }
+    renderQuoteSheet();
+    generateButton.disabled = true;
+    generateButton.classList.add("is-loading");
+    generateButton.setAttribute("aria-busy", "true");
+    const originalText = generateButton.textContent;
+    generateButton.textContent = "產圖中…";
+    try {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const canvas = await window.html2canvas(quoteSheet, {
+        backgroundColor: "#ffffff",
+        scale: Math.max(2, Math.min(3, window.devicePixelRatio || 2)),
+        useCORS: true,
+        logging: false,
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        windowWidth: quoteSheet.scrollWidth,
+        windowHeight: quoteSheet.scrollHeight,
+      });
+      const link = document.createElement("a");
+      const datePart = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+      link.download = `FCN-DAC-${issuerProfiles[selectedIssuer].shortName}-Quote-${datePart}.png`;
+      link.href = canvas.toDataURL("image/png");
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setStatus("已產出並下載高解析度報價圖。", true);
+    } finally {
+      generateButton.disabled = false;
+      generateButton.classList.remove("is-loading");
+      generateButton.removeAttribute("aria-busy");
+      generateButton.textContent = originalText;
+    }
+  }
+
   async function loadBbgLookup() {
     try {
       const response = await fetch("./交易所查詢0715.csv");
@@ -223,9 +364,28 @@
   });
   document.querySelector("#confirmAllQuotes").addEventListener("click", confirmAndSend);
   document.querySelector("#sendQuotes").addEventListener("click", confirmAndSend);
+  document.querySelector("#generateQuoteImage").addEventListener("click", () => {
+    try {
+      ensureQuoteRowsValid();
+      issuerSelect.value = selectedIssuer;
+      issuerWarning.hidden = issuerSelect.value !== "MS";
+      issuerDialog.showModal();
+    } catch (error) { setStatus(error.message); }
+  });
+  issuerSelect.addEventListener("change", () => { issuerWarning.hidden = issuerSelect.value !== "MS"; });
+  document.querySelector("#cancelIssuer").addEventListener("click", () => issuerDialog.close());
+  document.querySelector("#issuerForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    selectedIssuer = issuerSelect.value;
+    issuerDialog.close();
+    try { await downloadQuoteImage(); } catch (error) { setStatus(error.message); }
+  });
   tableBody.addEventListener("blur", event => {
     if (/^bbgCode[1-5]$/.test(event.target.name)) normaliseBbgCode(event.target);
   }, true);
+  ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, () => {
+    if (!quotePreviewPanel.hidden) renderQuoteSheet();
+  }));
 
   const dialog = document.querySelector("#helpDialog");
   document.querySelector("#showHelp").addEventListener("click", () => dialog.showModal());

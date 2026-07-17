@@ -3,7 +3,7 @@
 
   const MAX_ROWS = 20;
   const MAIL_TO = "i14053@firstbank.com.tw";
-  const MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
+  const DEFAULT_MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
   const tableBody = document.querySelector("#quoteTable tbody");
   const status = document.querySelector("#status");
   const bbgLookup = new Map();
@@ -12,13 +12,27 @@
   const issuerDialog = document.querySelector("#issuerDialog");
   const issuerSelect = document.querySelector("#issuerSelect");
   const issuerWarning = document.querySelector("#issuerWarning");
+  const emailIssuerDialog = document.querySelector("#emailIssuerDialog");
+  const emailIssuerSelect = document.querySelector("#emailIssuerSelect");
+  const emailQueueDialog = document.querySelector("#emailQueueDialog");
+  const emailQueueProgress = document.querySelector("#emailQueueProgress");
+  const emailQueueDetail = document.querySelector("#emailQueueDetail");
   let selectedIssuer = "BNP";
+  let emailQueue = [];
+  let emailQueueIndex = -1;
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
     BARCLAYS: { name: "BARCLAYS", shortName: "BARCLAYS", theme: "barclays" },
     MS: { name: "MORGAN STANLEY", shortName: "MS", theme: "ms", disclaimer: "OBU 不得承做" },
     JPM: { name: "J.P. MORGAN", shortName: "JPM", theme: "jpm" },
+    NOMURA: { name: "NOMURA", shortName: "NOMURA", theme: "nomura" },
+    UBS: { name: "UBS", shortName: "UBS", theme: "ubs" },
+    DBS: { name: "DBS", shortName: "DBS", theme: "dbs" },
+    SG: { name: "SOCIETE GENERALE", shortName: "SG", theme: "sg" },
+    CITI: { name: "CITIGROUP", shortName: "CITI", theme: "citi" },
+    GS: { name: "GOLDMAN SACHS", shortName: "GS", theme: "gs" },
+    CA: { name: "CREDIT AGRICOLE CIB", shortName: "CA", theme: "ca" },
   };
 
   const fields = [
@@ -30,6 +44,66 @@
     ["kiBarrier", "KI Barrier (%)"], ["observationFrequency", "Observation Frequency (m)"],
     ["otc", "OTC"], ["effectiveDateOffset", "Effective Date Offset (Calendar Days)"], ["tradeDate", "Trade Date"],
   ];
+
+  const sourceColumn = (label, name) => ({ label, value: row => rowValue(row, name) });
+  const blankColumn = label => ({ label, value: () => "" });
+  const productColumn = (label, fcnCode, dacCode) => ({ label, value: row => productForIssuer(row, fcnCode, dacCode) });
+  const mailInstitutionOrder = ["BMJB", "NOMURA", "UBS", "DBS", "SG", "CITI", "GS", "CA"];
+
+  // 依附件 Excel 的工作表 A 欄至指定終欄建立欄位；每一筆網頁交易即對應 Excel 的一列。
+  const emailInstitutions = {
+    BMJB: {
+      label: "BNP MS JPM 巴克萊", subject: DEFAULT_MAIL_SUBJECT,
+      columns: fields.map(([name, label]) => sourceColumn(label, name)),
+    },
+    NOMURA: {
+      label: "Nomura", subject: "野村[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Non-call Periods", "guaranteedPeriods"),
+        { label: "Guaranteed Coupon Periods", value: row => productForIssuer(row, "", rowValue(row, "guaranteedPeriods")) },
+        sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"),
+        sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), sourceColumn("Effective Date Offset", "effectiveDateOffset"), sourceColumn("Trade Date", "tradeDate"),
+      ],
+    },
+    UBS: {
+      label: "UBS", subject: "UBS[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCN", "WRA"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("Currency", "currency"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), blankColumn("Effective Date Offset"),
+      ],
+    },
+    DBS: {
+      label: "DBS", subject: "DBS[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), { label: "Issue Date Lag", value: row => numberOffset(rowValue(row, "effectiveDateOffset"), -2, "BD") },
+      ],
+    },
+    SG: {
+      label: "SG", subject: "SG[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        sourceColumn("Trade Date", "tradeDate"), productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"),
+      ],
+    },
+    CITI: {
+      label: "CITI", subject: "CITI[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCA", "DRA"), sourceColumn("Strike Date", "tradeDate"), sourceColumn("Currency", "currency"), sourceColumn("Tenor (m)", "tenor"), { label: "Issue T+", value: row => numberOffset(rowValue(row, "effectiveDateOffset"), -2) },
+        sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"),
+        { label: "Barrier Type", value: row => citiBarrierType(rowValue(row, "barrierType")) }, sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), { label: "Non Callable Periods", value: row => numberOffset(rowValue(row, "guaranteedPeriods"), -1) }, sourceColumn("KO Barrier (%)", "koBarrier"), { label: "Memory Autocall", value: row => citiMemoryAutocall(rowValue(row, "koType")) }, { label: "Daily KO", value: row => citiDailyKo(rowValue(row, "koType")) }, sourceColumn("Coupon p.a. (%)", "coupon"), { label: "Upfront (%)", value: row => numberOffset(rowValue(row, "upfront"), 0, "", true) }, blankColumn("Notional Amount"), { label: "Format", value: row => rowValue(row, "product") ? "Citi US Issuer" : "" }, blankColumn("Swap Index"), blankColumn("Funding Spread (bps)"),
+      ],
+    },
+    GS: {
+      label: "GS", subject: "GS[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Non-call Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Cost (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("Strike Date", "tradeDate"), sourceColumn("Issue Date (T + ?)", "effectiveDateOffset"),
+      ],
+    },
+    CA: {
+      label: "CA", subject: "CA[詢價]FCBKTPE: FCN(T+7)",
+      columns: [
+        productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("NC Period", "guaranteedPeriods"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), blankColumn("Remarks"),
+      ],
+    },
+  };
 
   const input = (name, attrs = "") => `<input name="${name}" ${attrs}>`;
   const options = (values, selected) => values.map(v => `<option ${v === selected ? "selected" : ""}>${v}</option>`).join("");
@@ -86,6 +160,35 @@
 
   function rowValue(row, name) { return row.querySelector(`[name="${name}"]`).value.trim(); }
   function rowField(row, name) { return row.querySelector(`[name="${name}"]`); }
+
+  function productForIssuer(row, fcnCode, dacCode) {
+    const product = rowValue(row, "product");
+    if (product === "FCN") return fcnCode;
+    if (product === "DAC") return dacCode;
+    return "";
+  }
+
+  function numberOffset(value, offset = 0, suffix = "", fromOneHundred = false) {
+    if (value === "") return "";
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "";
+    const result = fromOneHundred ? 100 - number : number + offset;
+    return `${Number.isInteger(result) ? result : result.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}${suffix}`;
+  }
+
+  function citiBarrierType(value) {
+    return ({ NONE: "NONE", EKI: "European", AKI: "Daily Close" })[value] || "";
+  }
+
+  function citiMemoryAutocall(value) {
+    if (!value) return "";
+    return /Memory$/i.test(value) ? "TRUE" : "FALSE";
+  }
+
+  function citiDailyKo(value) {
+    if (!value) return "";
+    return /^Daily/i.test(value) ? "TRUE" : "FALSE";
+  }
 
   function markInvalid(row, name, message) {
     const field = rowField(row, name);
@@ -308,9 +411,9 @@
     }
   }
 
-  function buildEmailBody(rows) {
-    const header = fields.map(([, label]) => label).join("\t");
-    const values = rows.map(row => fields.map(([name]) => rowValue(row, name)).join("\t"));
+  function buildEmailBody(columns, dataRows) {
+    const header = columns.map(column => column.label).join("\t");
+    const values = dataRows.map(values => values.join("\t"));
     return [header, ...values].join("\r\n");
   }
 
@@ -320,13 +423,12 @@
     }[character]));
   }
 
-  function buildEmailHtml(rows) {
-    const headerCells = fields.map(([, label]) =>
-      `<th style="border:1px solid #ffffff;background:#184e77;color:#ffffff;padding:8px 6px;font:700 11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(label)}</th>`
+  function buildEmailHtml(columns, dataRows) {
+    const headerCells = columns.map(column =>
+      `<th style="border:1px solid #ffffff;background:#184e77;color:#ffffff;padding:8px 6px;font:700 11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(column.label)}</th>`
     ).join("");
-    const dataRows = rows.map((row, rowIndex) => {
-      const cells = fields.map(([name]) => {
-        const value = rowValue(row, name);
+    const tableRows = dataRows.map((values, rowIndex) => {
+      const cells = values.map(value => {
         return `<td style="border:1px solid #b7c9d3;padding:8px 6px;font:11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(value)}</td>`;
       }).join("");
       return `<tr style="background:${rowIndex % 2 ? "#f6fafc" : "#ffffff"};">${cells}</tr>`;
@@ -336,9 +438,22 @@
 <html><body style="margin:0;font-family:Arial,Calibri,sans-serif;color:#000000;">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #b7c9d3;font-family:Arial,Calibri,sans-serif;">
     <thead><tr>${headerCells}</tr></thead>
-    <tbody>${dataRows}</tbody>
+    <tbody>${tableRows}</tbody>
   </table>
 </body></html>`;
+  }
+
+  function buildInstitutionEmail(key, rows) {
+    const institution = emailInstitutions[key];
+    if (!institution) throw new Error("找不到此詢價對象的郵件模板。");
+    const dataRows = rows.map(row => institution.columns.map(column => String(column.value(row) ?? "")));
+    return {
+      key,
+      label: institution.label,
+      subject: institution.subject,
+      html: buildEmailHtml(institution.columns, dataRows),
+      plainText: buildEmailBody(institution.columns, dataRows),
+    };
   }
 
   async function copyEmailTable(html, plainText) {
@@ -357,23 +472,42 @@
     return "none";
   }
 
-  async function confirmAndSend() {
-    setStatus();
+  function validatedMailRows() {
     const rows = [...tableBody.rows];
+    if (rows.length < 1 || rows.length > MAX_ROWS) throw new Error("詢價交易筆數必須介於 1 至 20 筆。");
+    rows.forEach(validateRow);
+    return rows;
+  }
+
+  async function openInstitutionEmail(payload) {
+    const clipboardFormat = await copyEmailTable(payload.html, payload.plainText).catch(() => "none");
+    const mailBody = clipboardFormat === "html" ? "" : payload.plainText;
+    const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(mailBody)}`;
+    window.location.href = uri;
+    setStatus(
+      clipboardFormat === "html"
+        ? `已開啟 ${payload.label} 郵件草稿並複製對應 HTML 表格；請在郵件本文貼上後寄送。`
+        : `已開啟 ${payload.label} 郵件草稿；此裝置無法複製 HTML 表格，已改帶入文字格式內容。`,
+      true
+    );
+  }
+
+  async function openQueuedEmail() {
+    const payload = emailQueue[emailQueueIndex];
+    if (!payload) return;
+    emailQueueProgress.textContent = `第 ${emailQueueIndex + 1} / ${emailQueue.length} 封：${payload.label}`;
+    emailQueueDetail.textContent = `主旨：${payload.subject}。請貼上已複製的表格並寄出，完成後回到此頁開啟下一封。`;
+    const nextButton = document.querySelector("#nextEmailQueue");
+    nextButton.textContent = emailQueueIndex === emailQueue.length - 1 ? "我已寄出，完成流程" : "我已寄出，開啟下一封";
+    if (!emailQueueDialog.open) emailQueueDialog.showModal();
+    await openInstitutionEmail(payload);
+  }
+
+  function showMailIssuerDialog() {
+    setStatus();
     try {
-      if (rows.length < 1 || rows.length > MAX_ROWS) throw new Error("詢價交易筆數必須介於 1 至 20 筆。");
-      rows.forEach(validateRow);
-      const plainText = buildEmailBody(rows);
-      const clipboardFormat = await copyEmailTable(buildEmailHtml(rows), plainText).catch(() => "none");
-      const mailBody = clipboardFormat === "html" ? "" : plainText;
-      const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(MAIL_SUBJECT)}&body=${encodeURIComponent(mailBody)}`;
-      window.location.href = uri;
-      setStatus(
-        clipboardFormat === "html"
-          ? "已開啟郵件草稿並複製 HTML 表格；請在郵件本文貼上後寄送。"
-          : "已開啟郵件草稿；此裝置無法複製 HTML 表格，已改帶入文字格式內容。",
-        true
-      );
+      validatedMailRows();
+      emailIssuerDialog.showModal();
     } catch (error) { setStatus(error.message); }
   }
 
@@ -386,8 +520,41 @@
     if (tableBody.rows.length <= 1) return setStatus("至少需保留 1 筆詢價交易。");
     tableBody.lastElementChild.remove(); renumberRows(); setStatus();
   });
-  document.querySelector("#confirmAllQuotes").addEventListener("click", confirmAndSend);
-  document.querySelector("#sendQuotes").addEventListener("click", confirmAndSend);
+  document.querySelector("#confirmAllQuotes").addEventListener("click", showMailIssuerDialog);
+  document.querySelector("#sendQuotes").addEventListener("click", showMailIssuerDialog);
+  document.querySelector("#cancelEmailIssuer").addEventListener("click", () => emailIssuerDialog.close());
+  document.querySelector("#emailIssuerForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    try {
+      const rows = validatedMailRows();
+      const selection = emailIssuerSelect.value;
+      emailIssuerDialog.close();
+      if (selection === "ALL") {
+        emailQueue = mailInstitutionOrder.map(key => buildInstitutionEmail(key, rows));
+        emailQueueIndex = 0;
+        await openQueuedEmail();
+      } else {
+        await openInstitutionEmail(buildInstitutionEmail(selection, rows));
+      }
+    } catch (error) { setStatus(error.message); }
+  });
+  document.querySelector("#cancelEmailQueue").addEventListener("click", () => {
+    emailQueue = [];
+    emailQueueIndex = -1;
+    emailQueueDialog.close();
+    setStatus("已結束全部詢價郵件流程。", true);
+  });
+  document.querySelector("#nextEmailQueue").addEventListener("click", async () => {
+    if (emailQueueIndex >= emailQueue.length - 1) {
+      emailQueue = [];
+      emailQueueIndex = -1;
+      emailQueueDialog.close();
+      setStatus("八封詢價郵件已依序準備完成。", true);
+      return;
+    }
+    emailQueueIndex += 1;
+    try { await openQueuedEmail(); } catch (error) { setStatus(error.message); }
+  });
   document.querySelector("#generateQuoteImage").addEventListener("click", () => {
     try {
       ensureQuoteRowsValid();

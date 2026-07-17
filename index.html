@@ -103,6 +103,13 @@
           <option value="BARCLAYS">BARCLAYS</option>
           <option value="MS">MS（OBU不得承做）</option>
           <option value="JPM">JPM</option>
+          <option value="NOMURA">Nomura</option>
+          <option value="UBS">UBS</option>
+          <option value="DBS">DBS</option>
+          <option value="SG">SG</option>
+          <option value="CITI">CITI</option>
+          <option value="GS">GS</option>
+          <option value="CA">CA</option>
         </select>
         <p id="issuerWarning" class="issuer-warning" hidden>提醒：MS 產品 OBU 不得承做。</p>
         <div class="dialog-actions">
@@ -110,6 +117,42 @@
           <button id="confirmIssuer" type="submit" class="primary">產出 PNG</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="emailIssuerDialog" class="issuer-dialog">
+      <form id="emailIssuerForm" class="dialog-content">
+        <h2>選擇詢價對象</h2>
+        <p>系統會依選擇建立對應主旨與 Excel 欄位順序的郵件表格，並複製至剪貼簿供您貼入郵件本文。</p>
+        <label for="emailIssuerSelect">詢價對象</label>
+        <select id="emailIssuerSelect" name="emailIssuer">
+          <option value="BMJB">BNP MS JPM 巴克萊</option>
+          <option value="NOMURA">Nomura</option>
+          <option value="UBS">UBS</option>
+          <option value="DBS">DBS</option>
+          <option value="SG">SG</option>
+          <option value="CITI">CITI</option>
+          <option value="GS">GS</option>
+          <option value="CA">CA</option>
+          <option value="ALL">全部（依序建立 8 封郵件）</option>
+        </select>
+        <p id="emailIssuerHint" class="dialog-hint">「全部」會在您確認已寄出目前郵件後，再開啟下一封，避免裝置一次只保留最後一封草稿。</p>
+        <div class="dialog-actions">
+          <button id="cancelEmailIssuer" type="button" class="secondary">取消</button>
+          <button type="submit" class="primary">準備郵件</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="emailQueueDialog" class="issuer-dialog">
+      <div class="dialog-content">
+        <h2>全部詢價郵件</h2>
+        <p id="emailQueueProgress"></p>
+        <p id="emailQueueDetail" class="dialog-hint"></p>
+        <div class="dialog-actions">
+          <button id="cancelEmailQueue" type="button" class="secondary">結束流程</button>
+          <button id="nextEmailQueue" type="button" class="primary">我已寄出，開啟下一封</button>
+        </div>
+      </div>
     </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>

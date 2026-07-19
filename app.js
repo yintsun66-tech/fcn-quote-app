@@ -44,6 +44,12 @@
     ["kiBarrier", "KI Barrier (%)"], ["observationFrequency", "Observation Frequency (m)"],
     ["otc", "OTC"], ["effectiveDateOffset", "Effective Date Offset (Calendar Days)"], ["tradeDate", "Trade Date"],
   ];
+  const fieldGroups = {
+    product: "basic", currency: "basic", tradeDate: "basic", tenor: "basic",
+    bbgCode1: "underlying", bbgCode2: "underlying", bbgCode3: "underlying", bbgCode4: "underlying", bbgCode5: "underlying",
+    strike: "payoff", koType: "payoff", koBarrier: "payoff", coupon: "payoff", upfront: "payoff",
+    guaranteedPeriods: "risk", barrierType: "risk", kiBarrier: "risk", observationFrequency: "risk", otc: "risk", effectiveDateOffset: "risk",
+  };
 
   const sourceColumn = (label, name) => ({ label, value: row => rowValue(row, name) });
   const blankColumn = label => ({ label, value: () => "" });
@@ -126,7 +132,8 @@
       <td class="row-number"></td>
       <td>${select("product", ["FCN", "DAC"], "FCN")}</td>
       <td>${select("currency", ["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD"], "USD")}</td>
-      <td>${input("guaranteedPeriods", 'type="number" min="1" value="1" required')}</td>
+      <td>${input("tradeDate", `value="${formatDate()}" placeholder="DD-MMM-YY" required`)}</td>
+      <td>${input("tenor", 'type="number" min="1" max="24" value="12" required')}</td>
       <td>${input("bbgCode1", 'autocomplete="off" placeholder="例如 AAPL" required')}</td>
       <td>${input("bbgCode2", 'autocomplete="off" placeholder="選填"')}</td>
       <td>${input("bbgCode3", 'autocomplete="off" placeholder="選填"')}</td>
@@ -137,13 +144,13 @@
       <td>${input("koBarrier", 'type="number" step="0.01" placeholder="求值留白"')}</td>
       <td>${input("coupon", 'type="number" step="0.01" placeholder="求值留白"')}</td>
       <td>${input("upfront", 'type="number" step="0.01" value="98" placeholder="求值留白"')}</td>
-      <td>${input("tenor", 'type="number" min="1" max="24" value="12" required')}</td>
+      <td>${input("guaranteedPeriods", 'type="number" min="1" value="1" required')}</td>
       <td>${select("barrierType", ["EKI", "AKI", "NONE"], "NONE")}</td>
       <td>${input("kiBarrier", 'type="number" step="0.01" placeholder="求值留白"')}</td>
       <td>${input("observationFrequency", 'value="1" readonly')}</td>
       <td>${input("otc", 'value="Note" readonly')}</td>
-      <td>${input("effectiveDateOffset", 'value="7" readonly')}</td>
-      <td>${input("tradeDate", `value="${formatDate()}" placeholder="DD-MMM-YY" required`)}</td>`;
+      <td>${input("effectiveDateOffset", 'value="7" readonly')}</td>`;
+    decorateRow(row);
     tableBody.append(row);
     if (firstRow) {
       fields.forEach(([name]) => {
@@ -160,6 +167,23 @@
 
   function rowValue(row, name) { return row.querySelector(`[name="${name}"]`).value.trim(); }
   function rowField(row, name) { return row.querySelector(`[name="${name}"]`); }
+
+  function decorateRow(row) {
+    fields.forEach(([name, label]) => {
+      const field = rowField(row, name);
+      const cell = field.closest("td");
+      const fieldLabel = document.createElement("label");
+      const labelText = document.createElement("span");
+      cell.classList.add("quote-field", `group-${fieldGroups[name] || "basic"}`);
+      cell.dataset.field = name;
+      fieldLabel.className = "field-label";
+      labelText.className = "field-label-text";
+      labelText.textContent = label;
+      field.setAttribute("aria-label", label);
+      fieldLabel.append(labelText, field);
+      cell.replaceChildren(fieldLabel);
+    });
+  }
 
   function productForIssuer(row, fcnCode, dacCode) {
     const product = rowValue(row, "product");

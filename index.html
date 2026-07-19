@@ -12,7 +12,7 @@
       <header class="hero">
         <div>
           <h1>FCN / DAC 詢價條件</h1>
-          <p>填寫交易條件後，確認並直接開啟郵件草稿。</p>
+          <p>以分區條件卡完成每筆交易，填寫、確認與發送都在同一頁完成。</p>
         </div>
         <div class="quote-count" aria-live="polite"><strong id="quoteCount">1</strong> / 20 筆</div>
       </header>
@@ -33,9 +33,23 @@
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
 
-      <section class="table-card" aria-label="詢價交易表格">
-        <div class="table-scroll">
-          <table id="quoteTable">
+      <section class="entry-workspace" aria-label="詢價交易條件">
+        <header class="entry-workspace-header">
+          <div>
+            <p class="eyebrow">TRADE INPUT WORKSPACE</p>
+            <h2>交易條件</h2>
+            <p>每筆交易依序填寫基本條件、連結標的、收益條件與風險交割設定。</p>
+          </div>
+          <div class="field-group-legend" aria-label="欄位分區說明">
+            <span class="legend-basic">基本條件</span>
+            <span class="legend-underlying">連結標的</span>
+            <span class="legend-payoff">收益條件</span>
+            <span class="legend-risk">風險與交割</span>
+          </div>
+        </header>
+        <div class="table-card">
+          <div class="table-scroll">
+            <table id="quoteTable">
             <thead>
               <tr>
                 <th scope="col">#</th>
@@ -62,7 +76,8 @@
               </tr>
             </thead>
             <tbody></tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </section>
 

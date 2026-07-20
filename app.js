@@ -452,8 +452,10 @@
       `<th style="border:1px solid #ffffff;background:#184e77;color:#ffffff;padding:8px 6px;font:700 11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(column.label)}</th>`
     ).join("");
     const tableRows = dataRows.map((values, rowIndex) => {
-      const cells = values.map(value => {
-        return `<td style="border:1px solid #b7c9d3;padding:8px 6px;font:11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${escapeHtml(value)}</td>`;
+      const cells = values.map((value, columnIndex) => {
+        // 郵件用戶端可能裁掉每列最後一個完全空白的儲存格；以不可見空白保留欄位結構。
+        const cellValue = columnIndex === values.length - 1 && value === "" ? "&nbsp;" : escapeHtml(value);
+        return `<td style="border:1px solid #b7c9d3;padding:8px 6px;font:11px Arial,Calibri,sans-serif;text-align:center;vertical-align:middle;white-space:nowrap;">${cellValue}</td>`;
       }).join("");
       return `<tr style="background:${rowIndex % 2 ? "#f6fafc" : "#ffffff"};">${cells}</tr>`;
     }).join("");

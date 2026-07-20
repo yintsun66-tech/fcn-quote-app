@@ -19,6 +19,7 @@
   const emailQueueProgress = document.querySelector("#emailQueueProgress");
   const emailQueueDetail = document.querySelector("#emailQueueDetail");
   let selectedIssuer = "BNP";
+  let issuerDialogMode = "download";
   let emailQueue = [];
   let emailQueueIndex = -1;
 
@@ -400,7 +401,6 @@
         <div class="quote-detail"><span>觸及生效價 KI</span><strong>${kiValue}</strong><em>${escapeHtml(kiType)}</em></div>
         <div class="quote-detail"><span>保證配息期間</span><strong>${displayValue(data.guaranteedPeriods)} 個月</strong>${dacNote}</div>
         <div class="quote-detail"><span>提前出場價 KO</span><strong>${displayPercent(data.koBarrier)}</strong><em>${escapeHtml(displayValue(data.koType))}</em></div>
-        <div class="quote-detail"><span>每月 KO 調降</span><strong>0%</strong></div>
       </div>
       <footer class="quote-card-footer"><span>發行機構：${escapeHtml(profile.name)}${profile.disclaimer ? `（${profile.disclaimer}）` : ""}</span><span>報價日期：${escapeHtml(displayValue(data.tradeDate, ""))}</span></footer>
     </article>`;
@@ -423,6 +423,14 @@
     const rows = [...tableBody.rows];
     if (!rows.length) throw new Error("至少需有一筆詢價交易才可產圖。");
     rows.forEach(validateRowForQuoteImage);
+  }
+
+  function showIssuerDialog(mode) {
+    issuerDialogMode = mode;
+    issuerSelect.value = selectedIssuer;
+    issuerWarning.hidden = issuerSelect.value !== "MS";
+    document.querySelector("#confirmIssuer").textContent = mode === "preview" ? "更新預覽" : "產出 PNG";
+    issuerDialog.showModal();
   }
 
   async function downloadQuoteImage() {
@@ -629,17 +637,22 @@
   document.querySelector("#generateQuoteImage").addEventListener("click", () => {
     try {
       ensureQuoteRowsValid();
-      issuerSelect.value = selectedIssuer;
-      issuerWarning.hidden = issuerSelect.value !== "MS";
-      issuerDialog.showModal();
+      showIssuerDialog("download");
     } catch (error) { setStatus(error.message); }
   });
+  document.querySelector("#changePreviewIssuer").addEventListener("click", () => showIssuerDialog("preview"));
   issuerSelect.addEventListener("change", () => { issuerWarning.hidden = issuerSelect.value !== "MS"; });
   document.querySelector("#cancelIssuer").addEventListener("click", () => issuerDialog.close());
   document.querySelector("#issuerForm").addEventListener("submit", async event => {
     event.preventDefault();
+    const mode = issuerDialogMode;
     selectedIssuer = issuerSelect.value;
     issuerDialog.close();
+    if (mode === "preview") {
+      renderQuoteSheet();
+      setStatus("已更新報價單預覽的發行機構。", true);
+      return;
+    }
     try { await downloadQuoteImage(); } catch (error) { setStatus(error.message); }
   });
   tableBody.addEventListener("blur", event => {

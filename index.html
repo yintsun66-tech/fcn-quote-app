@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=condition-card-v1" />
+    <link rel="stylesheet" href="./styles.css?v=quote-card-v2" />
   </head>
   <body>
     <main class="app-shell">
@@ -88,7 +88,10 @@
             <p class="eyebrow">QUOTE IMAGE PREVIEW</p>
             <h2>報價單預覽</h2>
           </div>
-          <p>此版面會依目前表格資料即時更新，圖片只會包含下方報價卡。</p>
+          <div class="preview-actions">
+            <p>此版面會依目前表格資料即時更新，圖片只會包含下方報價卡。</p>
+            <button id="changePreviewIssuer" type="button" class="secondary preview-issuer-button">變更發行機構</button>
+          </div>
         </div>
         <div class="quote-capture-scroll">
           <div id="quoteSheet" class="quote-sheet" aria-live="polite"></div>
@@ -172,6 +175,6 @@
     </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
-    <script src="./app.js?v=draft-storage-v1" defer></script>
+    <script src="./app.js?v=quote-card-v2" defer></script>
   </body>
 </html>

@@ -2,6 +2,7 @@
   "use strict";
 
   const MAX_ROWS = 20;
+  const DRAFT_STORAGE_KEY = "fcn-quote-app.trade-draft.v1";
   const MAIL_TO = "i14053@firstbank.com.tw";
   const DEFAULT_MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
   const tableBody = document.querySelector("#quoteTable tbody");
@@ -167,6 +168,49 @@
 
   function rowValue(row, name) { return row.querySelector(`[name="${name}"]`).value.trim(); }
   function rowField(row, name) { return row.querySelector(`[name="${name}"]`); }
+
+  function saveDraft() {
+    const rows = [...tableBody.rows].map(row => Object.fromEntries(
+      fields.map(([name]) => [name, rowField(row, name).value])
+    ));
+    try {
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ version: 1, rows }));
+    } catch {
+      setStatus("瀏覽器無法使用本機暫存；輸入資料不會在下次開啟時保留。");
+    }
+  }
+
+  function restoreDraft() {
+    try {
+      const savedDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!savedDraft) return false;
+      const { version, rows } = JSON.parse(savedDraft);
+      if (version !== 1 || !Array.isArray(rows) || !rows.length) return false;
+      rows.slice(0, MAX_ROWS).forEach(values => {
+        if (!values || typeof values !== "object") return;
+        createRow();
+        fields.forEach(([name]) => {
+          if (typeof values[name] === "string") rowField(tableBody.lastElementChild, name).value = values[name];
+        });
+      });
+      return tableBody.rows.length > 0;
+    } catch {
+      setStatus("本機暫存資料無法還原；目前以新表單開啟。");
+      return false;
+    }
+  }
+
+  function clearSavedDraft() {
+    try {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {
+      setStatus("瀏覽器無法清除本機暫存資料。");
+      return;
+    }
+    tableBody.replaceChildren();
+    createRow();
+    setStatus("已清除本機暫存與目前輸入資料。", true);
+  }
 
   function decorateRow(row) {
     fields.forEach(([name, label]) => {
@@ -539,13 +583,14 @@
 
   document.querySelector("#addRow").addEventListener("click", () => {
     if (tableBody.rows.length >= MAX_ROWS) return setStatus("最多只能新增 20 筆詢價交易。");
-    createRow(true); setStatus("已複製第 1 筆交易作為新交易預設值。", true);
+    createRow(true); saveDraft(); setStatus("已複製第 1 筆交易作為新交易預設值。", true);
     tableBody.lastElementChild.scrollIntoView({ behavior: "smooth", block: "center" });
   });
   document.querySelector("#removeRow").addEventListener("click", () => {
     if (tableBody.rows.length <= 1) return setStatus("至少需保留 1 筆詢價交易。");
-    tableBody.lastElementChild.remove(); renumberRows(); setStatus();
+    tableBody.lastElementChild.remove(); renumberRows(); saveDraft(); setStatus();
   });
+  document.querySelector("#clearSavedDraft").addEventListener("click", clearSavedDraft);
   document.querySelector("#confirmAllQuotes").addEventListener("click", showMailIssuerDialog);
   document.querySelector("#sendQuotes").addEventListener("click", showMailIssuerDialog);
   document.querySelector("#cancelEmailIssuer").addEventListener("click", () => emailIssuerDialog.close());
@@ -599,8 +644,10 @@
   });
   tableBody.addEventListener("blur", event => {
     if (/^bbgCode[1-5]$/.test(event.target.name)) normaliseBbgCode(event.target);
+    saveDraft();
   }, true);
   ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, () => {
+    saveDraft();
     if (!quotePreviewPanel.hidden) renderQuoteSheet();
   }));
 
@@ -608,6 +655,6 @@
   document.querySelector("#showHelp").addEventListener("click", () => dialog.showModal());
   document.querySelector("#closeHelp").addEventListener("click", () => dialog.close());
 
-  createRow();
+  if (!restoreDraft()) createRow();
   loadBbgLookup();
 })();

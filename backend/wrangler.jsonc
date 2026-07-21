@@ -9,7 +9,9 @@
     "SESSION_ABSOLUTE_SECONDS": "28800",
     "PASSWORD_PBKDF2_ITERATIONS": "10000",
     "AUTH_RATE_LIMIT_WINDOW_SECONDS": "900",
-    "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5"
+    "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5",
+    "OUTBOUND_FROM": "rfq@yintsun66.com",
+    "OUTBOUND_TO": "i14053@firstbank.com.tw"
   },
   "secrets": {
     "required": ["EMPLOYEE_DATA_KEY", "EMPLOYEE_LOOKUP_KEY"]
@@ -26,6 +28,31 @@
       "database_name": "fcn-quote",
       "database_id": "b830c1b1-c1cc-4f8f-bb60-c99f4e489946",
       "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND_EMAIL_QUEUE",
+        "queue": "fcn-outbound-email"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "fcn-outbound-email",
+        "max_batch_size": 8,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-outbound-email-dlq",
+        "max_concurrency": 5
+      }
+    ]
+  },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "destination_address": "i14053@firstbank.com.tw",
+      "allowed_sender_addresses": ["rfq@yintsun66.com"]
     }
   ]
 }

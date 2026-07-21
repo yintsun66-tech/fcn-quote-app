@@ -1,3 +1,8 @@
+import {
+  MAIL_INSTITUTION_ORDER as SHARED_MAIL_INSTITUTION_ORDER,
+  buildInstitutionEmail as buildSharedInstitutionEmail,
+} from "./backend/shared/email-formats.js";
+
 (() => {
   "use strict";
 
@@ -526,16 +531,10 @@
   }
 
   function buildInstitutionEmail(key, rows) {
-    const institution = emailInstitutions[key];
-    if (!institution) throw new Error("找不到此詢價對象的郵件模板。");
-    const dataRows = rows.map(row => institution.columns.map(column => String(column.value(row) ?? "")));
-    return {
-      key,
-      label: institution.label,
-      subject: institution.subject,
-      html: buildEmailHtml(institution.columns, dataRows),
-      plainText: buildEmailBody(institution.columns, dataRows),
-    };
+    const records = rows.map(row => Object.fromEntries(
+      fields.map(([name]) => [name, rowValue(row, name)])
+    ));
+    return buildSharedInstitutionEmail(key, records);
   }
 
   async function copyEmailTable(html, plainText) {
@@ -613,7 +612,7 @@
       const selection = emailIssuerSelect.value;
       emailIssuerDialog.close();
       if (selection === "ALL") {
-        emailQueue = mailInstitutionOrder.map(key => buildInstitutionEmail(key, rows));
+        emailQueue = SHARED_MAIL_INSTITUTION_ORDER.map(key => buildInstitutionEmail(key, rows));
         emailQueueIndex = 0;
         await openQueuedEmail();
       } else {

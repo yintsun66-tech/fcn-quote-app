@@ -12,17 +12,23 @@ interface IdempotencyRow {
   response_json: string;
 }
 
-interface RfqRow {
+export interface RfqRow {
   id: string;
   status: "DRAFT" | "VALIDATED" | "CANCELLED";
+  dispatch_status: "NOT_SENT" | "QUEUED" | "SENDING" | "WAITING" | "FAILED";
   trade_count: number;
   created_at: string;
   validated_at: string | null;
   cancelled_at: string | null;
+  outbound_queued_at: string | null;
+  sent_at: string | null;
+  deadline_at: string | null;
+  expected_issuer_count: number;
+  outbound_batch_count: number;
   version: number;
 }
 
-interface TradeRow {
+export interface TradeRow {
   id: string;
   sequence: number;
   trade_code: string;
@@ -75,9 +81,11 @@ function publicTrade(row: TradeRow): Record<string, unknown> {
   };
 }
 
-async function fetchOwnedRfq(env: AppEnv, userId: string, rfqId: string): Promise<{ rfq: RfqRow; trades: TradeRow[] }> {
+export async function fetchOwnedRfq(env: AppEnv, userId: string, rfqId: string): Promise<{ rfq: RfqRow; trades: TradeRow[] }> {
   const rfq = await env.DB.prepare(
-    `SELECT id, status, trade_count, created_at, validated_at, cancelled_at, version
+    `SELECT id, status, dispatch_status, trade_count, created_at, validated_at, cancelled_at,
+            outbound_queued_at, sent_at, deadline_at, expected_issuer_count,
+            outbound_batch_count, version
        FROM rfqs WHERE id = ? AND user_id = ?`
   ).bind(rfqId, userId).first<RfqRow>();
   if (!rfq) throw new AppError(404, "RFQ_NOT_FOUND", "找不到此詢價。 ");
@@ -98,10 +106,16 @@ function rfqResponse(rfq: RfqRow, trades: TradeRow[]): Record<string, unknown> {
     rfq: {
       id: rfq.id,
       status: rfq.status,
+      dispatchStatus: rfq.dispatch_status,
       tradeCount: rfq.trade_count,
       createdAt: rfq.created_at,
       validatedAt: rfq.validated_at,
       cancelledAt: rfq.cancelled_at,
+      outboundQueuedAt: rfq.outbound_queued_at,
+      sentAt: rfq.sent_at,
+      deadlineAt: rfq.deadline_at,
+      expectedIssuerCount: rfq.expected_issuer_count,
+      outboundBatchCount: rfq.outbound_batch_count,
       version: rfq.version,
       trades: trades.map(publicTrade)
     }
@@ -131,10 +145,16 @@ export async function createRfq(request: Request, env: AppEnv, session: SessionC
     rfq: {
       id: rfqId,
       status: "DRAFT",
+      dispatchStatus: "NOT_SENT",
       tradeCount: trades.length,
       createdAt,
       validatedAt: null,
       cancelledAt: null,
+      outboundQueuedAt: null,
+      sentAt: null,
+      deadlineAt: null,
+      expectedIssuerCount: 0,
+      outboundBatchCount: 0,
       version: 1,
       trades: trades.map(trade => ({ id: newId("trd"), ...trade, createdAt, frozenAt: null }))
     }

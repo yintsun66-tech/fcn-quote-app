@@ -10,6 +10,7 @@ import {
 } from "./auth";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
+import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, validateRfq } from "./rfqs";
 import type { AppEnv } from "./types";
 
@@ -57,6 +58,8 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);
   const validateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/validate$/.exec(path);
   if (method === "POST" && validateMatch?.[1]) return validateRfq(request, env, session, validateMatch[1]);
+  const sendMatch = /^\/api\/v1\/rfqs\/([^/]+)\/send$/.exec(path);
+  if (method === "POST" && sendMatch?.[1]) return sendRfq(request, env, session, sendMatch[1]);
   const rfqMatch = /^\/api\/v1\/rfqs\/([^/]+)$/.exec(path);
   if (method === "GET" && rfqMatch?.[1]) return getRfq(env, session, rfqMatch[1]);
 
@@ -71,5 +74,8 @@ export default {
     } catch (error) {
       return errorResponse(error, currentRequestId);
     }
+  },
+  async queue(batch: MessageBatch<unknown>, env): Promise<void> {
+    await consumeOutboundEmail(batch, env);
   }
 } satisfies ExportedHandler<AppEnv>;

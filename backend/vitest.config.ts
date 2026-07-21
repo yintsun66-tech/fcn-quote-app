@@ -10,7 +10,9 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations("./migrations"),
           EMPLOYEE_DATA_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           EMPLOYEE_LOOKUP_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-          PASSWORD_PBKDF2_ITERATIONS: "10000"
+          PASSWORD_PBKDF2_ITERATIONS: "10000",
+          OUTBOUND_FROM: "rfq@yintsun66.com",
+          OUTBOUND_TO: "i14053@firstbank.com.tw"
         }
       }
     }))

@@ -6,7 +6,15 @@ export interface AppEnv extends Env {
 export type UserStatus = "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED" | "DISABLED";
 export type UserRole = "USER" | "ADMIN";
 export type RfqStatus = "DRAFT" | "VALIDATED" | "CANCELLED";
+export type RfqDispatchStatus = "NOT_SENT" | "QUEUED" | "SENDING" | "WAITING" | "FAILED";
 export type TargetField = "COUPON" | "PRICE" | "STRIKE" | "KO_BARRIER" | "KI_BARRIER";
+export type MailBatchCode = "BMJB" | "NOMURA" | "UBS" | "DBS" | "SG" | "CITI" | "GS" | "CA";
+
+export interface OutboundEmailJob {
+  jobId: string;
+  batchId: string;
+  rfqId: string;
+}
 
 export interface AuthenticatedUser {
   id: string;

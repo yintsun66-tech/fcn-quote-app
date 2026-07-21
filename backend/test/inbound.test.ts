@@ -66,7 +66,10 @@ beforeAll(async () => {
         }
         queued.push(job);
       }
-    } as unknown as Queue<InboundEmailJob>
+    } as unknown as Queue<InboundEmailJob>,
+    QUOTE_NORMALIZE_QUEUE: {
+      async send() {}
+    } as unknown as Queue
   } as unknown as AppEnv;
 });
 

@@ -11,6 +11,7 @@ backend/node_modules/
 backend/.dev.vars
 backend/.wrangler/
 backend/dist/
+backend/public/
 backend/.vitest/
 backend/worker-configuration.d.ts
 .pnpm-store/

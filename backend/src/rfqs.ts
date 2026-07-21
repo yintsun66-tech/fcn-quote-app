@@ -253,7 +253,7 @@ export async function validateRfq(request: Request, env: AppEnv, session: Sessio
     const validatedAt = nowIso();
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE rfqs SET status = 'VALIDATED', validated_at = ?, version = version + 1 WHERE id = ? AND user_id = ? AND status = 'DRAFT'"
+        "UPDATE rfqs SET status = 'VALIDATED', workflow_status = 'VALIDATED', validated_at = ?, version = version + 1 WHERE id = ? AND user_id = ? AND status = 'DRAFT'"
       ).bind(validatedAt, rfqId, session.user.id),
       env.DB.prepare(
         "UPDATE rfq_trades SET frozen_at = ? WHERE rfq_id = ? AND frozen_at IS NULL"

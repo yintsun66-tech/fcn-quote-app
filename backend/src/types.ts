@@ -21,6 +21,30 @@ export interface InboundEmailJob {
   inboundMessageId: string;
 }
 
+export interface QuoteNormalizeJob {
+  jobId: string;
+  inboundMessageId: string;
+  rfqId: string;
+  issuer: "BNP" | "MS" | "JPM" | "BARCLAYS" | "NOMURA" | "UBS" | "DBS" | "SG" | "CITI" | "GS" | "CA";
+}
+
+export type FinalizationTrigger = "ALL_TERMINAL" | "DEADLINE" | "RECALCULATION";
+
+export interface QuoteRankJob {
+  jobId: string;
+  rfqId: string;
+  trigger: FinalizationTrigger;
+  requestedVersion: number;
+}
+
+export interface ImageRenderJob {
+  jobId: string;
+  artifactId: string;
+  rfqId: string;
+  rankingRunId: string;
+  issuer: string;
+}
+
 export interface AuthenticatedUser {
   id: string;
   username: string;

@@ -22,8 +22,38 @@
     {
       "pattern": "api.yintsun66.com",
       "custom_domain": true
+    },
+    {
+      "pattern": "app.yintsun66.com",
+      "custom_domain": true
     }
   ],
+  "assets": {
+    "directory": "public",
+    "run_worker_first": ["/api/*"],
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RFQ_COORDINATOR",
+        "class_name": "RfqCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "rfq-coordinator-v1",
+      "new_sqlite_classes": ["RfqCoordinator"]
+    }
+  ],
+  "triggers": {
+    "crons": ["*/2 * * * *"]
+  },
   "addresses": ["reply@yintsun66.com"],
   "d1_databases": [
     {
@@ -48,6 +78,18 @@
       {
         "binding": "INBOUND_EMAIL_QUEUE",
         "queue": "fcn-email-parse"
+      },
+      {
+        "binding": "QUOTE_NORMALIZE_QUEUE",
+        "queue": "fcn-quote-normalize"
+      },
+      {
+        "binding": "QUOTE_RANK_QUEUE",
+        "queue": "fcn-quote-rank"
+      },
+      {
+        "binding": "IMAGE_RENDER_QUEUE",
+        "queue": "fcn-image-render"
       }
     ],
     "consumers": [
@@ -66,6 +108,30 @@
         "max_retries": 3,
         "dead_letter_queue": "fcn-email-parse-dlq",
         "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-quote-normalize",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-quote-normalize-dlq",
+        "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-quote-rank",
+        "max_batch_size": 3,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-quote-rank-dlq",
+        "max_concurrency": 3
+      },
+      {
+        "queue": "fcn-image-render",
+        "max_batch_size": 3,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-image-render-dlq",
+        "max_concurrency": 3
       }
     ]
   },

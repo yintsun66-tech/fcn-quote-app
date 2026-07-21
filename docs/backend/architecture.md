@@ -1,12 +1,12 @@
 # FCN Quote Backend Architecture
 
-Status: Phase 1 design draft  
+Status: Phase 1–7 implementation baseline (2026-07-21)
 Target domain: `yintsun66.com`  
 Repository branch at drafting time: `feature/backend-foundation`
 
 ## Scope
 
-This document defines the proposed Cloudflare backend boundary for the existing static FCN/DAC quote application. It does not create Cloudflare resources, database migrations, dependencies, or production code.
+This document defines the implemented Cloudflare backend boundary for the existing static FCN/DAC quote application. Migrations 0001–0007, the API/Email Worker, five Queues, one RFQ Durable Object class, private R2 storage, Browser Rendering and the application-domain frontend are implemented on `feature/backend-foundation`.
 
 The existing root-level static site remains unchanged during the backend build. Its current form validation, eight issuer email layouts, BBG lookup behavior, responsive layout, browser draft storage, and client-side quote image behavior remain compatibility constraints until a later phase explicitly replaces them.
 
@@ -61,9 +61,9 @@ flowchart LR
 
 ## Component responsibilities
 
-### Cloudflare Pages
+### Cloudflare static assets
 
-- Hosts the existing static application and future RFQ/result views.
+- Worker static assets host the existing application and RFQ/result views on `app.yintsun66.com`; GitHub Pages remains the compatibility deployment.
 - Does not decide ownership, rank quotes, or expose private R2 objects directly.
 - Uses relative static asset paths until an approved migration changes the current GitHub Pages-compatible layout.
 
@@ -108,7 +108,7 @@ Eight request batches produce an immutable expectation of up to eleven issuer re
 
 ### Queues
 
-Planned logical queues:
+Implemented logical queues:
 
 - `outbound-email`
 - `email-parse`
@@ -201,15 +201,13 @@ Ranking occurs independently for every trade. Only valid, comparable quotes are 
 - Keep current responsive mobile/desktop behavior until the result UI phase is separately approved.
 - Do not publish raw mail, private artifacts, or user data through Pages.
 
-## Out of scope for Phase 1
+## Known production gates
 
-- Cloudflare resource creation
-- DNS, Email Routing, Access, Pages, Worker, D1, R2, Queue, or Browser Rendering changes
-- Executable migrations
-- Dependencies or lockfiles
-- Authentication or parser code
-- Frontend changes
-- Commit, push, or deployment
+- A real forwarded bank reply must still prove which original headers survive the bank forwarding rule.
+- MS OBU remains warning-only because no account-level OBU attribute has been defined.
+- CITI uses the approved `100 - Upfront` conversion and preserves raw Upfront separately.
+- Browser Rendering free-plan capacity must be observed under real completion bursts; image jobs are queued and retryable.
+- Raw `.msg` and Excel files are references only and are not committed; repository fixtures remain synthetic/anonymized.
 
 ## Remaining prerequisites for Phase 2+
 
@@ -218,4 +216,3 @@ Ranking occurs independently for every trade. Only valid, comparable quotes are 
 - Confirm the exact forwarded-message header/MIME preservation with a test message.
 - Verify `rfq@yintsun66.com` and `i14053@firstbank.com.tw` in the selected Cloudflare email product.
 - Confirm the Cloudflare plan and Browser Rendering concurrency before the load test.
-

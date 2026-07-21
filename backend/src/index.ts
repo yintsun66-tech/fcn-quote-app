@@ -14,7 +14,20 @@ import { ingestInboundEmail } from "./inbound";
 import { consumeInboundEmail } from "./inbound-parser";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, validateRfq } from "./rfqs";
+import { consumeQuoteNormalize } from "./quote-normalize";
+import { consumeQuoteRank } from "./ranking";
+import { consumeImageRender } from "./artifacts";
+import { scheduledWorkflowRecovery } from "./coordinator";
+import {
+  downloadArtifact,
+  getRfqResults,
+  getRfqStatus,
+  listRfqArtifacts,
+  recalculateRfq
+} from "./results";
 import type { AppEnv } from "./types";
+
+export { RfqCoordinator } from "./coordinator";
 
 function errorResponse(error: unknown, currentRequestId: string): Response {
   if (isAppError(error)) {
@@ -62,6 +75,16 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && validateMatch?.[1]) return validateRfq(request, env, session, validateMatch[1]);
   const sendMatch = /^\/api\/v1\/rfqs\/([^/]+)\/send$/.exec(path);
   if (method === "POST" && sendMatch?.[1]) return sendRfq(request, env, session, sendMatch[1]);
+  const statusMatch = /^\/api\/v1\/rfqs\/([^/]+)\/status$/.exec(path);
+  if (method === "GET" && statusMatch?.[1]) return getRfqStatus(env, session, statusMatch[1]);
+  const resultsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/results$/.exec(path);
+  if (method === "GET" && resultsMatch?.[1]) return getRfqResults(env, session, resultsMatch[1]);
+  const artifactsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/artifacts$/.exec(path);
+  if (method === "GET" && artifactsMatch?.[1]) return listRfqArtifacts(env, session, artifactsMatch[1]);
+  const recalculateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/recalculate$/.exec(path);
+  if (method === "POST" && recalculateMatch?.[1]) return recalculateRfq(request, env, session, recalculateMatch[1]);
+  const artifactDownloadMatch = /^\/api\/v1\/artifacts\/([^/]+)\/download$/.exec(path);
+  if (method === "GET" && artifactDownloadMatch?.[1]) return downloadArtifact(env, session, artifactDownloadMatch[1]);
   const rfqMatch = /^\/api\/v1\/rfqs\/([^/]+)$/.exec(path);
   if (method === "GET" && rfqMatch?.[1]) return getRfq(env, session, rfqMatch[1]);
 
@@ -78,13 +101,16 @@ export default {
     }
   },
   async queue(batch: MessageBatch<unknown>, env): Promise<void> {
-    if (batch.queue === "fcn-email-parse") {
-      await consumeInboundEmail(batch, env);
-      return;
-    }
-    await consumeOutboundEmail(batch, env);
+    if (batch.queue === "fcn-email-parse") return consumeInboundEmail(batch, env);
+    if (batch.queue === "fcn-quote-normalize") return consumeQuoteNormalize(batch, env);
+    if (batch.queue === "fcn-quote-rank") return consumeQuoteRank(batch, env);
+    if (batch.queue === "fcn-image-render") return consumeImageRender(batch, env);
+    return consumeOutboundEmail(batch, env);
   },
   async email(message, env, _context): Promise<void> {
     await ingestInboundEmail(message, env);
+  },
+  async scheduled(_controller, env, _context): Promise<void> {
+    await scheduledWorkflowRecovery(env);
   }
 } satisfies ExportedHandler<AppEnv>;

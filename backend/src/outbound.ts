@@ -8,6 +8,7 @@ import { requireCsrf } from "./auth";
 import { keyedHash, sha256Text, stableStringify } from "./crypto";
 import { newId, nowIso } from "./db";
 import { AppError } from "./errors";
+import { startRfqCoordinator } from "./coordinator";
 import { jsonResponse, requestId, requireIdempotencyKey, requireSameOrigin } from "./http";
 import { fetchOwnedRfq, type TradeRow } from "./rfqs";
 import type { AppEnv, MailBatchCode, OutboundEmailJob, SessionContext } from "./types";
@@ -149,7 +150,8 @@ export async function sendRfq(
     env.DB.prepare(
       `UPDATE rfqs
           SET dispatch_status = 'QUEUED', correlation_token_hash = ?, outbound_queued_at = ?,
-              expected_issuer_count = ?, outbound_batch_count = ?, version = version + 1
+              expected_issuer_count = ?, outbound_batch_count = ?, version = version + 1,
+              workflow_status = 'QUEUED'
         WHERE id = ? AND user_id = ? AND status = 'VALIDATED' AND dispatch_status = 'NOT_SENT'`
     ).bind(tokenHash, queuedAt, EXPECTED_ISSUERS.length, BATCH_CODES.length, rfqId, session.user.id)
   ];
@@ -342,9 +344,17 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
     const deadlineAt = new Date(Date.parse(sentAt) + 10 * 60 * 1000).toISOString();
     await env.DB.prepare(
       `UPDATE rfqs SET dispatch_status = 'WAITING', sent_at = COALESCE(sent_at, ?),
-              deadline_at = COALESCE(deadline_at, ?)
+              deadline_at = COALESCE(deadline_at, ?), workflow_status = 'WAITING'
         WHERE id = ? AND dispatch_status IN ('QUEUED', 'SENDING')`
     ).bind(sentAt, deadlineAt, batch.rfq_id).run();
+    try {
+      await startRfqCoordinator(env, batch.rfq_id);
+    } catch (error) {
+      console.error("rfq_coordinator_start_failed", {
+        rfqId: batch.rfq_id,
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
+    }
   }
 }
 
@@ -362,7 +372,7 @@ async function markOutboundFailure(env: AppEnv, job: OutboundEmailJob, terminal:
   ];
   if (terminal) {
     statements.push(env.DB.prepare(
-      "UPDATE rfqs SET dispatch_status = 'FAILED' WHERE id = ? AND dispatch_status != 'WAITING'"
+      "UPDATE rfqs SET dispatch_status = 'FAILED', workflow_status = 'FAILED' WHERE id = ? AND dispatch_status != 'WAITING'"
     ).bind(job.rfqId));
   }
   await env.DB.batch(statements);

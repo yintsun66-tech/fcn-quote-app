@@ -1,7 +1,7 @@
 import PostalMime, { type Address, type Email } from "postal-mime";
 import { keyedHash, sha256Text } from "./crypto";
 import { nowIso } from "./db";
-import type { AppEnv, InboundEmailJob, MailBatchCode } from "./types";
+import type { AppEnv, InboundEmailJob, MailBatchCode, QuoteNormalizeJob } from "./types";
 
 export const INBOUND_PARSER_VERSION = "inbound-mime-v1";
 
@@ -471,7 +471,10 @@ function terminalOutcome(
 
 export async function processInboundEmailJob(env: AppEnv, requested: InboundEmailJob): Promise<void> {
   const claimed = await claimInbound(env, requested);
-  if (!claimed) return;
+  if (!claimed) {
+    await enqueueNormalization(env, requested.inboundMessageId);
+    return;
+  }
   if (!claimed.message.r2_raw_mime_key) throw new Error("RAW_MIME_KEY_MISSING");
   const rawObject = await env.RAW_MAIL_BUCKET.get(claimed.message.r2_raw_mime_key);
   if (!rawObject) throw new Error("RAW_MIME_NOT_FOUND");
@@ -524,7 +527,7 @@ export async function processInboundEmailJob(env: AppEnv, requested: InboundEmai
     tableCount: extracted.tables.length,
     warningCodes: warnings
   };
-  await env.DB.batch([
+  const statements: D1PreparedStatement[] = [
     env.DB.prepare(
       `UPDATE inbound_messages
           SET normalized_subject = ?, requester_marker_hash = ?, subject_batch_code = ?,
@@ -561,7 +564,43 @@ export async function processInboundEmailJob(env: AppEnv, requested: InboundEmai
         (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
        VALUES (?, NULL, 'INBOUND_EMAIL_PARSED', 'INBOUND_MESSAGE', ?, ?, ?, ?)`
     ).bind(`aud_${crypto.randomUUID()}`, claimed.message.id, `queue:${claimed.job.id}`, JSON.stringify(auditMetadata), parsedAt)
-  ]);
+  ];
+  if ((outcome.status === "PARSED" || outcome.status === "LATE_REPLY") && correlation && sender.issuer) {
+    const normalizeJobId = `job_${crypto.randomUUID()}`;
+    statements.push(env.DB.prepare(
+      `INSERT OR IGNORE INTO quote_normalize_jobs
+        (id, inbound_message_id, rfq_id, issuer, idempotency_key, status,
+         available_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
+    ).bind(
+      normalizeJobId,
+      claimed.message.id,
+      correlation.rfqId,
+      sender.issuer,
+      `QUOTE_NORMALIZE:${claimed.message.id}`,
+      parsedAt,
+      parsedAt,
+      parsedAt
+    ));
+  }
+  await env.DB.batch(statements);
+  await enqueueNormalization(env, claimed.message.id);
+}
+
+async function enqueueNormalization(env: AppEnv, inboundMessageId: string): Promise<void> {
+  const job = await env.DB.prepare(
+    `SELECT id AS jobId, inbound_message_id AS inboundMessageId, rfq_id AS rfqId, issuer
+       FROM quote_normalize_jobs
+      WHERE inbound_message_id = ? AND status IN ('QUEUED', 'FAILED')`
+  ).bind(inboundMessageId).first<QuoteNormalizeJob>();
+  if (!job) return;
+  const now = nowIso();
+  await env.DB.prepare(
+    `UPDATE quote_normalize_jobs SET status = 'QUEUED', last_error_code = NULL,
+            lease_expires_at = NULL, available_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'FAILED'`
+  ).bind(now, now, job.jobId).run();
+  await env.QUOTE_NORMALIZE_QUEUE.send(job);
 }
 
 async function markInboundFailure(env: AppEnv, job: InboundEmailJob, terminal: boolean, errorCode: string): Promise<void> {
@@ -573,7 +612,7 @@ async function markInboundFailure(env: AppEnv, job: InboundEmailJob, terminal: b
     ).bind(errorCode, failedAt, job.jobId),
     env.DB.prepare(
       `UPDATE inbound_messages SET status = ?, last_error_code = ?, parser_version = ?
-        WHERE id = ? AND status != 'PARSED'`
+        WHERE id = ? AND status NOT IN ('PARSED', 'LATE_REPLY')`
     ).bind(terminal ? "PARSE_ERROR" : "QUEUED", errorCode, INBOUND_PARSER_VERSION, job.inboundMessageId)
   ]);
 }

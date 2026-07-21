@@ -1,14 +1,14 @@
 # Project handoff
 
-Updated: 2026-07-21 (Asia/Taipei)  
-Branch: `feature/backend-foundation`  
-Latest relevant commit: `ff12ef5 fix(sg): add required outbound columns`
+Updated: 2026-07-22 (Asia/Taipei)  
+Branch: `feature/subject-branch-correlation`  
+Latest relevant commit: `8b781da feat(email): human-readable subject correlation code and branch label`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `47f94c36-1496-4143-973a-32f096c862d0`
+- Latest verified Cloudflare Worker version: `e1d9ab8b-de52-4b52-a1d2-19c752446ec2`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -75,7 +75,10 @@ For the current backend branch through commit `ff12ef5`:
   `outbound`, `inbound-parser`.
 - **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
   `pnpm test` passed (14 files, 61 tests); `pnpm run build` (deploy dry run) passed.
-- **Deploy:** authorized; result recorded below once the Worker deploy and endpoint verification run.
+- **Deploy:** deployed to Cloudflare on 2026-07-22 — Worker version
+  `e1d9ab8b-de52-4b52-a1d2-19c752446ec2`. Verified `GET https://api.yintsun66.com/api/v1/health`
+  → `{"status":"ok"}` and `https://app.yintsun66.com/backend-client.js` → 200. Committed as
+  `8b781da` and pushed to `origin/feature/subject-branch-correlation` (not merged to `main`).
 - Not yet proven: that the shorter subject actually clears the bank filter. Confirm with a real
   forwarded issuer reply before treating automatic recognition as production-proven.
 

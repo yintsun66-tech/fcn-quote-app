@@ -152,10 +152,20 @@ Key fields:
 - `content_hash`
 - `raw_subject`
 - `normalized_subject`
+- `requester_marker_hash` (never the raw marker)
+- `subject_batch_code`
 - envelope/from/return-path/DKIM evidence fields
+- `sender_evidence_json` (issuer/domain/source only)
 - `detected_issuer`
 - `rfq_id` when matched
+- `correlated_batch_id`
+- `correlation_source`
+- `correlation_token_hash`
+- `r2_parsed_tables_key`
+- `html_table_count`
+- `attachment_count`
 - `received_at`
+- `parsed_at`
 - `status`
 - `parser_version`
 - `parse_attempt_count`
@@ -378,4 +388,3 @@ Before creating the first migration, Phase 2 must provide:
 - initial administrator bootstrap design
 - review of password and employee-number protection
 - explicit user approval
-

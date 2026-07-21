@@ -101,7 +101,7 @@ Because end users require application-managed usernames and passwords, Cloudflar
 
 ### Forwarding verification test
 
-Before parser implementation, send one controlled issuer-style test through the actual bank forwarding rule and capture what reaches the Email Worker. Confirm preservation or discover rewriting of:
+Before allowing parsed replies into production ranking, send one controlled issuer-style test through the actual bank forwarding rule and capture what reaches the Email Worker. Confirm preservation or discover rewriting of:
 
 - original `From`
 - Return-Path

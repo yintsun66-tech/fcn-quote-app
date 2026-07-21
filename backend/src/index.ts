@@ -11,6 +11,7 @@ import {
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
+import { consumeInboundEmail } from "./inbound-parser";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, validateRfq } from "./rfqs";
 import type { AppEnv } from "./types";
@@ -77,6 +78,10 @@ export default {
     }
   },
   async queue(batch: MessageBatch<unknown>, env): Promise<void> {
+    if (batch.queue === "fcn-email-parse") {
+      await consumeInboundEmail(batch, env);
+      return;
+    }
     await consumeOutboundEmail(batch, env);
   },
   async email(message, env, _context): Promise<void> {

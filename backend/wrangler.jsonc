@@ -58,6 +58,14 @@
         "max_retries": 3,
         "dead_letter_queue": "fcn-outbound-email-dlq",
         "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-email-parse",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-email-parse-dlq",
+        "max_concurrency": 5
       }
     ]
   },

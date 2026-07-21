@@ -1,0 +1,38 @@
+# Architecture Decision Records (ADR)
+
+ADRs preserve decisions that should not need to be reconstructed from chat messages, Git diffs, or Cloudflare dashboard state.
+
+## When to add an ADR
+
+Add a numbered ADR for a decision that changes any of these boundaries:
+
+- authentication, authorization, or sensitive-data handling;
+- D1 schema/data retention or R2 visibility;
+- issuer parsing, normalization, ranking, or financial comparison semantics;
+- public API, email correlation, or email delivery design;
+- Cloudflare binding, deployment, or recovery design.
+
+Use the next sequential number and this structure:
+
+```markdown
+# ADR NNNN: short title
+
+Status: Proposed | Accepted | Superseded  
+Date: YYYY-MM-DD
+
+## Context
+
+## Decision
+
+## Consequences
+
+## Evidence / implementation links
+```
+
+Do not put secrets, raw mail, user records, or personal data in an ADR.
+
+## Existing decisions
+
+- [ADR 0001: Repository governance and multi-agent handoff](0001-repository-governance.md)
+
+The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

@@ -2,13 +2,13 @@
 
 Updated: 2026-07-21 (Asia/Taipei)  
 Branch: `feature/backend-foundation`  
-Latest relevant commit: `dfb4bf9 feat(admin): add registration approval console`
+Latest relevant commit: `ff12ef5 fix(sg): add required outbound columns`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `b3b0330f-4b6d-4c97-a6a2-87cbb7e39682`
+- Latest verified Cloudflare Worker version: `47f94c36-1496-4143-973a-32f096c862d0`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -40,16 +40,28 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 
 ## Recent verification evidence
 
-For commit `dfb4bf9`:
+For the current backend branch through commit `ff12ef5`:
 
 - `node --check backend-client.js` passed.
-- `pnpm test` passed: 14 test files, 56 tests.
+- `pnpm test` passed: 14 test files, 57 tests.
 - `pnpm run typecheck` passed.
 - `pnpm run build` passed (Worker deploy dry run).
-- Production deployment succeeded and uploaded `backend-client.js` and `styles.css`.
+- Production deployment succeeded and uploaded the SG email-format assets (`app.js` and `backend/shared/email-formats.js`).
 
 ## Safe next steps
 
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
 2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `reply@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
 3. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
+
+## Latest SG outgoing-email table update
+
+The SG table update is committed on both branches:
+
+- appended `OTC` with fixed value `Note`;
+- appended `Funding Spread (bps)` with an intentionally blank, rendered table cell; and
+- appended `Effective Date Offset(Calendar Days)` with fixed value `7`.
+
+- `feature/backend-foundation`: `ff12ef5`; includes `backend/shared/email-formats.js`, compatibility `app.js`, and the email-format regression test.
+- `main`: `bef54f6`; includes the static-site `app.js` format definition.
+- The focused issuer-format test passed (5 tests), both branch/main `app.js` files passed JavaScript syntax checking, and Cloudflare deployment version `47f94c36-1496-4143-973a-32f096c862d0` is live.

@@ -7,15 +7,24 @@
     "APP_DOMAIN": "yintsun66.com",
     "SESSION_IDLE_SECONDS": "1800",
     "SESSION_ABSOLUTE_SECONDS": "28800",
-    "PASSWORD_PBKDF2_ITERATIONS": "600000",
+    "PASSWORD_PBKDF2_ITERATIONS": "10000",
     "AUTH_RATE_LIMIT_WINDOW_SECONDS": "900",
     "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5"
   },
+  "secrets": {
+    "required": ["EMPLOYEE_DATA_KEY", "EMPLOYEE_LOOKUP_KEY"]
+  },
+  "routes": [
+    {
+      "pattern": "api.yintsun66.com",
+      "custom_domain": true
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "fcn-quote",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b830c1b1-c1cc-4f8f-bb60-c99f4e489946",
       "migrations_dir": "migrations"
     }
   ]

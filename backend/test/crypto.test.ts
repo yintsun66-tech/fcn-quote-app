@@ -6,11 +6,12 @@ const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
 describe("crypto primitives", () => {
   it("hashes and verifies passwords without storing plaintext", async () => {
-    const result = await hashPassword("Correct Horse Battery 123!", 1000);
+    const result = await hashPassword("Correct Horse Battery 123!", 10_000, LOOKUP_KEY);
     expect(result.hash).not.toContain("Correct Horse");
-    expect(result.algorithm).toBe("PBKDF2-HMAC-SHA256");
-    expect(await verifyPassword("Correct Horse Battery 123!", result.hash, result.salt, result.iterations)).toBe(true);
-    expect(await verifyPassword("Wrong Password 123!", result.hash, result.salt, result.iterations)).toBe(false);
+    expect(result.algorithm).toBe("PBKDF2-HMAC-SHA256+HMAC-SHA256-PEPPER-v1");
+    expect(await verifyPassword("Correct Horse Battery 123!", result.hash, result.salt, result.iterations, LOOKUP_KEY)).toBe(true);
+    expect(await verifyPassword("Wrong Password 123!", result.hash, result.salt, result.iterations, LOOKUP_KEY)).toBe(false);
+    expect(await verifyPassword("Correct Horse Battery 123!", result.hash, result.salt, result.iterations, DATA_KEY)).toBe(false);
   });
 
   it("encrypts employee numbers and decrypts only with the configured key", async () => {

@@ -35,6 +35,7 @@ The initial administrator identity and recovery process remain a deployment bloc
 
 - Never log, return, email, or store plaintext passwords.
 - Use a reviewed password hashing construction supported safely in Workers, with a unique cryptographic salt and stored algorithm parameters.
+- Free-tier deployment decision (2026-07-21): use 10,000 PBKDF2-HMAC-SHA256 iterations followed by a domain-separated HMAC-SHA256 pepper held in the existing employee-lookup Cloudflare Secret. This is a deliberate reduction from the originally approved 600,000 iterations to fit the Workers Free 10 ms CPU ceiling. Upgrade the work factor and rehash credentials after login if the account moves to Workers Paid.
 - Select and benchmark exact parameters during Phase 2; do not hard-code obsolete values in the design phase.
 - Support credential-version upgrades and forced session revocation after reset.
 - Password reset must use a short-lived, single-use server-side token and an approved identity-verification channel.
@@ -202,4 +203,3 @@ The following must be completed or verified before production deployment:
 ## Phase 1 deployment status
 
 No deployment is authorized or performed. These documents are design inputs for the next approval boundary only.
-

@@ -80,14 +80,20 @@ async function derivePassword(password: string, salt: Uint8Array<ArrayBuffer>, i
   ));
 }
 
-export async function hashPassword(password: string, iterations: number): Promise<{ hash: string; salt: string; algorithm: string; iterations: number }> {
-  const salt = randomBytes(16);
-  const hash = await derivePassword(password, salt, iterations);
-  return { hash: bytesToBase64Url(hash), salt: bytesToBase64Url(salt), algorithm: "PBKDF2-HMAC-SHA256", iterations };
+async function pepperPasswordHash(pepperSecret: string, derived: Uint8Array<ArrayBuffer>): Promise<string> {
+  return keyedHash(pepperSecret, `PASSWORD_HASH_V1:${bytesToBase64Url(derived)}`);
 }
 
-export async function verifyPassword(password: string, expectedHash: string, salt: string, iterations: number): Promise<boolean> {
-  const actual = await derivePassword(password, base64UrlToBytes(salt), iterations);
+export async function hashPassword(password: string, iterations: number, pepperSecret: string): Promise<{ hash: string; salt: string; algorithm: string; iterations: number }> {
+  const salt = randomBytes(16);
+  const derived = await derivePassword(password, salt, iterations);
+  const hash = await pepperPasswordHash(pepperSecret, derived);
+  return { hash, salt: bytesToBase64Url(salt), algorithm: "PBKDF2-HMAC-SHA256+HMAC-SHA256-PEPPER-v1", iterations };
+}
+
+export async function verifyPassword(password: string, expectedHash: string, salt: string, iterations: number, pepperSecret: string): Promise<boolean> {
+  const derived = await derivePassword(password, base64UrlToBytes(salt), iterations);
+  const actual = base64UrlToBytes(await pepperPasswordHash(pepperSecret, derived));
   const expected = base64UrlToBytes(expectedHash);
   if (actual.byteLength !== expected.byteLength) return false;
   const subtle = crypto.subtle as SubtleCrypto & {

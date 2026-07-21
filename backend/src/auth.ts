@@ -59,10 +59,10 @@ export async function register(request: Request, env: AppEnv): Promise<Response>
   }
   await recordAttempt(env, key, "REGISTER", false);
 
-  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 600_000);
+  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
   const employeeLookupHash = await keyedHash(env.EMPLOYEE_LOOKUP_KEY, input.employeeNumber);
   const employeeData = await encryptEmployeeNumber(env.EMPLOYEE_DATA_KEY, input.employeeNumber);
-  const password = await hashPassword(input.password, iterations);
+  const password = await hashPassword(input.password, iterations, env.EMPLOYEE_LOOKUP_KEY);
   const userId = newId("usr");
   const now = nowIso();
 
@@ -110,10 +110,10 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
             password_iterations, status, role, credential_version
        FROM users WHERE username_normalized = ?`
   ).bind(input.username).first<UserAuthRow>();
-  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 600_000);
+  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
   const passwordValid = user
-    ? await verifyPassword(input.password, user.password_hash, user.password_salt, user.password_iterations)
-    : (await hashPassword(input.password || "invalid-password", iterations), false);
+    ? await verifyPassword(input.password, user.password_hash, user.password_salt, user.password_iterations, env.EMPLOYEE_LOOKUP_KEY)
+    : (await hashPassword(input.password || "invalid-password", iterations, env.EMPLOYEE_LOOKUP_KEY), false);
   const allowed = Boolean(user && passwordValid && user.status === "ACTIVE");
   await recordAttempt(env, key, "LOGIN", allowed);
   if (!allowed || !user) throw loginError();

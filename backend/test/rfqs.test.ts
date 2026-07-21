@@ -1,0 +1,157 @@
+import { env } from "cloudflare:workers";
+import { applyD1Migrations, createExecutionContext, type D1Migration, waitOnExecutionContext } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import worker from "../src/index";
+import type { AppEnv } from "../src/types";
+
+const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
+const BASE_URL = "https://api.yintsun66.com";
+const PASSWORD = "Correct Horse Battery 123!";
+let userA: { cookie: string; csrf: string };
+let userB: { cookie: string; csrf: string };
+
+async function api(path: string, init: RequestInit = {}, ip = "203.0.113.10"): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("origin", BASE_URL);
+  headers.set("cf-connecting-ip", ip);
+  if (init.body) headers.set("content-type", "application/json");
+  const context = createExecutionContext();
+  const request = new Request(`${BASE_URL}${path}`, { ...init, headers }) as unknown as Request<unknown, IncomingRequestCfProperties>;
+  const response = await worker.fetch(request, testEnv, context);
+  await waitOnExecutionContext(context);
+  return response;
+}
+
+function authentication(response: Response): { cookie: string; csrf: string } {
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  const session = /__Host-fcn_session=([^;,]+)/.exec(setCookie)?.[1];
+  const csrf = /__Host-fcn_csrf=([^;,]+)/.exec(setCookie)?.[1];
+  if (!session || !csrf) throw new Error("Authentication cookies were not returned");
+  return { cookie: `__Host-fcn_session=${session}; __Host-fcn_csrf=${csrf}`, csrf };
+}
+
+async function createActiveUser(username: string, employeeNumber: string, ip: string): Promise<{ cookie: string; csrf: string }> {
+  await api("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      employeeNumber,
+      branchName: "RFQ 測試分行",
+      displayName: username,
+      username,
+      password: PASSWORD
+    })
+  }, ip);
+  await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE' WHERE username_normalized = ?").bind(username).run();
+  const login = await api("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password: PASSWORD })
+  }, ip);
+  if (login.status !== 200) throw new Error(`Unable to log in test user: ${login.status}`);
+  return authentication(login);
+}
+
+function trade(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    product: "FCN",
+    currency: "USD",
+    tradeDate: "21-Jul-26",
+    effectiveDateOffsetCalendarDays: 7,
+    tenorMonths: 12,
+    guaranteedPeriodsMonths: 1,
+    underlyings: ["AAPL UW", "MSFT UW"],
+    strikePct: 85,
+    koType: "Daily Memory",
+    koBarrierPct: 110,
+    couponPaPct: null,
+    upfrontOrNotePricePct: 98,
+    barrierType: "NONE",
+    kiBarrierPct: null,
+    observationFrequencyMonths: 1,
+    otc: "Note",
+    ...overrides
+  };
+}
+
+async function createRfq(auth: { cookie: string; csrf: string }, trades: unknown[], key = `idem-${crypto.randomUUID()}`): Promise<Response> {
+  return api("/api/v1/rfqs", {
+    method: "POST",
+    headers: {
+      cookie: auth.cookie,
+      "x-csrf-token": auth.csrf,
+      "idempotency-key": key
+    },
+    body: JSON.stringify({ trades })
+  });
+}
+
+beforeAll(async () => {
+  await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  userA = await createActiveUser("rfqusera", "22345", "203.0.113.11");
+  userB = await createActiveUser("rfquserb", "22346", "203.0.113.12");
+});
+
+describe("RFQ API", () => {
+  it("creates one to twenty trades and assigns the target field", async () => {
+    const response = await createRfq(userA, Array.from({ length: 20 }, (_, index) => trade({ underlyings: [`TEST${index} UW`] })));
+    expect(response.status).toBe(201);
+    const body = await response.json<{ rfq: { tradeCount: number; trades: Array<{ tradeCode: string; targetField: string }> } }>();
+    expect(body.rfq.tradeCount).toBe(20);
+    expect(body.rfq.trades[0]).toMatchObject({ tradeCode: "T01", targetField: "COUPON" });
+    expect(body.rfq.trades[19]).toMatchObject({ tradeCode: "T20", targetField: "COUPON" });
+  });
+
+  it("rejects more than twenty trades and invalid blank-field rules", async () => {
+    const tooMany = await createRfq(userA, Array.from({ length: 21 }, () => trade()));
+    expect(tooMany.status).toBe(422);
+    const multipleBlanks = await createRfq(userA, [trade({ couponPaPct: null, strikePct: null })]);
+    expect(multipleBlanks.status).toBe(422);
+    const noneWithKi = await createRfq(userA, [trade({ couponPaPct: 15, kiBarrierPct: 65 })]);
+    expect(noneWithKi.status).toBe(422);
+  });
+
+  it("replays identical idempotent creates and rejects key reuse with different content", async () => {
+    const key = `idem-${crypto.randomUUID()}`;
+    const first = await createRfq(userA, [trade()], key);
+    const second = await createRfq(userA, [trade()], key);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const firstBody = await first.json<{ rfq: { id: string } }>();
+    const secondBody = await second.json<{ rfq: { id: string } }>();
+    expect(secondBody.rfq.id).toBe(firstBody.rfq.id);
+    const conflict = await createRfq(userA, [trade({ tenorMonths: 6 })], key);
+    expect(conflict.status).toBe(409);
+  });
+
+  it("enforces ownership without disclosing another user's RFQ", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const body = await created.json<{ rfq: { id: string } }>();
+    const own = await api(`/api/v1/rfqs/${body.rfq.id}`, { headers: { cookie: userA.cookie } });
+    expect(own.status).toBe(200);
+    const other = await api(`/api/v1/rfqs/${body.rfq.id}`, { headers: { cookie: userB.cookie } });
+    expect(other.status).toBe(404);
+  });
+
+  it("validates and freezes a draft RFQ", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const body = await created.json<{ rfq: { id: string } }>();
+    const validated = await api(`/api/v1/rfqs/${body.rfq.id}/validate`, {
+      method: "POST",
+      headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(validated.status).toBe(200);
+    const result = await validated.json<{ rfq: { status: string; version: number; trades: Array<{ frozenAt: string }> } }>();
+    expect(result.rfq.status).toBe("VALIDATED");
+    expect(result.rfq.version).toBe(2);
+    expect(result.rfq.trades[0]?.frozenAt).toBeTruthy();
+  });
+
+  it("requires CSRF protection for mutations", async () => {
+    const response = await api("/api/v1/rfqs", {
+      method: "POST",
+      headers: { cookie: userA.cookie, "idempotency-key": `idem-${crypto.randomUUID()}` },
+      body: JSON.stringify({ trades: [trade()] })
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "CSRF_VALIDATION_FAILED" } });
+  });
+});

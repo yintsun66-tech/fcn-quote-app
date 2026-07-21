@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars and replace both values with independent,
+# base64url-encoded 32-byte keys. Never commit .dev.vars.
+EMPLOYEE_DATA_KEY=
+EMPLOYEE_LOOKUP_KEY=

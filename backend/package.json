@@ -1,0 +1,20 @@
+{
+  "name": "fcn-quote-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "generate-types": "wrangler types worker-configuration.d.ts --env-interface Env",
+    "typecheck": "pnpm run generate-types && tsc --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "db:migrate:local": "wrangler d1 migrations apply fcn-quote --local"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.6",
+    "typescript": "^7.0.2",
+    "vitest": "4.1.0",
+    "wrangler": "^4.112.0"
+  }
+}

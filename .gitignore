@@ -5,3 +5,12 @@
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Cloudflare Worker local state and dependencies.
+backend/node_modules/
+backend/.dev.vars
+backend/.wrangler/
+backend/dist/
+backend/.vitest/
+backend/worker-configuration.d.ts
+.pnpm-store/

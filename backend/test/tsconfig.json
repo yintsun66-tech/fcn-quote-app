@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": false,
+    "lib": ["ESNext"],
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "types": ["@cloudflare/vitest-pool-workers/types"]
+  },
+  "include": ["./**/*.ts", "../worker-configuration.d.ts"]
+}

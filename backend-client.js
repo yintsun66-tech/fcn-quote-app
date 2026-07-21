@@ -11,6 +11,7 @@
   shell.innerHTML = `
     <div class="backend-userbar" hidden>
       <span id="backendUser"></span>
+      <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
       <button id="backendLogout" type="button" class="secondary">登出</button>
     </div>
     <dialog id="backendAuth" class="backend-dialog">
@@ -42,6 +43,19 @@
         <div id="backendRankings" class="backend-rankings"></div>
         <div id="backendArtifacts" class="backend-artifacts"></div>
       </section>
+    </dialog>
+    <dialog id="backendOutboundArchive" class="backend-dialog backend-archive-dialog">
+      <section class="backend-panel">
+        <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>管理者寄件紀錄</h2></div><button id="closeBackendOutboundArchive" type="button" class="secondary">關閉</button></div>
+        <p class="backend-archive-note">僅管理者可查看。內容保存在私人 R2，預覽會在隔離框架中開啟。</p>
+        <p id="backendOutboundArchiveError" class="backend-error" role="alert"></p>
+        <div id="backendOutboundArchiveList" class="backend-archive-list"></div>
+        <section class="backend-archive-preview" aria-live="polite">
+          <h3 id="backendOutboundArchiveSubject">請從上方選擇一封寄件紀錄</h3>
+          <p id="backendOutboundArchiveMeta"></p>
+          <iframe id="backendOutboundArchiveFrame" title="寄件 HTML 預覽" sandbox="" referrerpolicy="no-referrer"></iframe>
+        </section>
+      </section>
     </dialog>`;
   document.body.append(shell);
 
@@ -50,6 +64,13 @@
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
   const userbar = document.querySelector(".backend-userbar");
+  const adminOutboundButton = document.querySelector("#backendAdminOutbound");
+  const adminOutboundDialog = document.querySelector("#backendOutboundArchive");
+  const adminOutboundList = document.querySelector("#backendOutboundArchiveList");
+  const adminOutboundError = document.querySelector("#backendOutboundArchiveError");
+  const adminOutboundSubject = document.querySelector("#backendOutboundArchiveSubject");
+  const adminOutboundMeta = document.querySelector("#backendOutboundArchiveMeta");
+  const adminOutboundFrame = document.querySelector("#backendOutboundArchiveFrame");
 
   function cookie(name) {
     return document.cookie.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) || "";
@@ -84,8 +105,66 @@
   function setUser(user) {
     state.user = user;
     userbar.hidden = !user;
+    adminOutboundButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
     if (user && authDialog.open) authDialog.close();
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, character => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[character]);
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-TW", { hour12: false });
+  }
+
+  function renderAdminOutboundList(records) {
+    if (!records.length) {
+      adminOutboundList.innerHTML = "<p class=\"backend-archive-empty\">尚無已建立的寄件紀錄。</p>";
+      return;
+    }
+    adminOutboundList.innerHTML = `<table><thead><tr><th>時間</th><th>批次</th><th>詢價人</th><th>主旨</th><th>狀態</th><th></th></tr></thead><tbody>${records.map(record => `<tr>
+      <td>${escapeHtml(formatDateTime(record.sentAt || record.queuedAt))}</td>
+      <td>${escapeHtml(record.batchCode)}</td>
+      <td>${escapeHtml(record.requester.displayName)}<small>${escapeHtml(record.requester.username)}</small></td>
+      <td>${escapeHtml(record.baseSubject)}</td>
+      <td>${escapeHtml(record.status)}</td>
+      <td><button type="button" class="secondary backend-archive-view" data-outbound-id="${escapeHtml(record.id)}">檢視</button></td>
+    </tr>`).join("")}</tbody></table>`;
+  }
+
+  async function openAdminOutboundArchive() {
+    if (state.user?.role !== "ADMIN") return;
+    adminOutboundError.textContent = "";
+    adminOutboundList.innerHTML = "<p class=\"backend-archive-empty\">正在載入寄件紀錄…</p>";
+    adminOutboundSubject.textContent = "請從上方選擇一封寄件紀錄";
+    adminOutboundMeta.textContent = "";
+    adminOutboundFrame.srcdoc = "";
+    if (!adminOutboundDialog.open) adminOutboundDialog.showModal();
+    try {
+      renderAdminOutboundList((await request("/admin/outbound-emails?limit=100")).records);
+    } catch (error) {
+      adminOutboundError.textContent = error.message;
+      adminOutboundList.innerHTML = "";
+    }
+  }
+
+  async function openAdminOutboundRecord(batchId) {
+    try {
+      adminOutboundError.textContent = "正在載入郵件內容…";
+      const { record } = await request(`/admin/outbound-emails/${encodeURIComponent(batchId)}`);
+      adminOutboundSubject.textContent = record.subject;
+      adminOutboundMeta.textContent = `${record.sender} → ${record.recipient}｜${record.generatedAt}`;
+      adminOutboundFrame.srcdoc = record.html;
+      adminOutboundError.textContent = "";
+    } catch (error) {
+      adminOutboundError.textContent = error.message;
+      adminOutboundFrame.srcdoc = "";
+    }
   }
 
   async function loadSession() {
@@ -211,5 +290,11 @@
   document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
   document.querySelector("#backendLogout").addEventListener("click", async () => { await request("/auth/logout", { method: "POST", body: "{}" }); setUser(null); showAuth(); });
   document.querySelector("#closeBackendProgress").addEventListener("click", () => progressDialog.close());
+  adminOutboundButton.addEventListener("click", openAdminOutboundArchive);
+  document.querySelector("#closeBackendOutboundArchive").addEventListener("click", () => adminOutboundDialog.close());
+  adminOutboundList.addEventListener("click", event => {
+    const target = event.target.closest("[data-outbound-id]");
+    if (target) openAdminOutboundRecord(target.dataset.outboundId);
+  });
   loadSession();
 })();

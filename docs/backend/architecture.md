@@ -132,7 +132,7 @@ D1 is the structured source of truth for users, RFQs, trades, mail metadata, nor
 
 ### R2
 
-Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, and generated PNG files. Downloads pass through an authenticated Worker or a short-lived signed URL. The bucket is never public.
+Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, generated PNG files, and the generated subject/HTML/plain-text archive for each outbound request email. Outbound archives use the `raw-email/outbound/` prefix and the same 30-day private mail retention policy. Downloads pass through an authenticated Worker or a short-lived signed URL. The bucket is never public.
 
 ### Browser Rendering
 

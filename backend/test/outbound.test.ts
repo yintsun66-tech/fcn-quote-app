@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { sha256Text } from "../src/crypto";
+import { outboundArchiveKey } from "../src/admin-outbound";
 import { processOutboundEmailJob, sendRfq } from "../src/outbound";
 import type { AppEnv, OutboundEmailJob, SessionContext } from "../src/types";
 
@@ -56,6 +57,7 @@ beforeAll(async () => {
         return { outcome: "ok" };
       }
     } as unknown as Queue<OutboundEmailJob>,
+    RAW_MAIL_BUCKET: testEnv.RAW_MAIL_BUCKET,
     EMAIL: {
       async send(message: EmailMessageBuilder) {
         const batchCode = String(message.headers?.["X-FCN-BATCH"] ?? "");
@@ -144,6 +146,24 @@ describe("outbound RFQ email workflow", () => {
     ).bind(RFQ_ID).all<{ status: string; provider_message_id: string; content_hash: string }>();
     expect(batches.results).toHaveLength(8);
     expect(batches.results.every(row => row.status === "SENT" && row.provider_message_id && row.content_hash)).toBe(true);
+    const archiveBatch = await testEnv.DB.prepare(
+      "SELECT id, content_hash FROM outbound_email_batches WHERE rfq_id = ? AND batch_code = 'UBS'"
+    ).bind(RFQ_ID).first<{ id: string; content_hash: string }>();
+    expect(archiveBatch?.id).toBeDefined();
+    const archiveObject = await testEnv.RAW_MAIL_BUCKET.get(outboundArchiveKey(archiveBatch?.id ?? ""));
+    expect(archiveObject).not.toBeNull();
+    const archive = JSON.parse(await archiveObject?.text() ?? "{}") as Record<string, unknown>;
+    expect(archive).toMatchObject({
+      schemaVersion: 1,
+      batchId: archiveBatch?.id,
+      rfqId: RFQ_ID,
+      batchCode: "UBS",
+      sender: "rfq@yintsun66.com",
+      recipient: "i14053@firstbank.com.tw",
+      contentHash: archiveBatch?.content_hash
+    });
+    expect(archive.subject).toMatch(/^UBS\[詢價\]FCBKTPE: FCN\(T\+7\) \[RFQ:/);
+    expect(archive.html).toContain("<table");
   });
 
   it("does not send a batch twice after it is marked sent", async () => {

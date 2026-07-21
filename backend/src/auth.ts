@@ -181,7 +181,7 @@ export async function logout(request: Request, env: AppEnv, session: SessionCont
   return response;
 }
 
-function requireAdmin(session: SessionContext): void {
+export function requireAdmin(session: SessionContext): void {
   if (session.user.role !== "ADMIN") throw new AppError(403, "ADMIN_REQUIRED", "需要管理者權限。 ");
 }
 

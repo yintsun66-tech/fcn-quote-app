@@ -8,6 +8,7 @@ import {
   requireSession,
   sessionInfo
 } from "./auth";
+import { getAdminOutboundEmail, listAdminOutboundEmails } from "./admin-outbound";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
@@ -64,6 +65,9 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && path === "/api/v1/auth/logout") return logout(request, env, session);
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
   if (method === "GET" && path === "/api/v1/admin/registrations") return listRegistrations(env, session);
+  if (method === "GET" && path === "/api/v1/admin/outbound-emails") return listAdminOutboundEmails(request, env, session);
+  const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);
+  if (method === "GET" && outboundEmailMatch?.[1]) return getAdminOutboundEmail(request, env, session, outboundEmailMatch[1]);
 
   const approveMatch = /^\/api\/v1\/admin\/registrations\/([^/]+)\/approve$/.exec(path);
   if (method === "POST" && approveMatch?.[1]) return approveRegistration(request, env, session, approveMatch[1]);

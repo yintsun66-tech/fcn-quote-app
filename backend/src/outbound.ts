@@ -4,6 +4,7 @@ import {
   buildInstitutionEmail,
   type MailTradeRecord
 } from "../shared/email-formats.js";
+import { archiveOutboundEmail } from "./admin-outbound";
 import { requireCsrf } from "./auth";
 import { keyedHash, sha256Text, stableStringify } from "./crypto";
 import { newId, nowIso } from "./db";
@@ -305,6 +306,17 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
   await env.DB.prepare(
     "UPDATE outbound_email_batches SET content_hash = ? WHERE id = ? AND status = 'SENDING'"
   ).bind(contentHash, batch.id).run();
+  await archiveOutboundEmail(env, {
+    batchId: batch.id,
+    rfqId: batch.rfq_id,
+    batchCode: batch.batch_code,
+    sender: batch.sender,
+    recipient: batch.recipient,
+    subject: email.subject,
+    html: email.html,
+    plainText: email.plainText,
+    contentHash
+  });
   const result = await env.EMAIL.send({
     from: batch.sender,
     to: batch.recipient,

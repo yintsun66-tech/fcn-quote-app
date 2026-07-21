@@ -57,6 +57,22 @@ export async function keyedHash(secret: string, value: string): Promise<string> 
   return bytesToBase64Url(new Uint8Array(signature));
 }
 
+// Crockford base32 alphabet (uppercase, excludes I, L, O, U to avoid ambiguity).
+const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+// Deterministic short correlation code for email subjects: one uppercase Crockford
+// base32 character per HMAC byte (5 bits each). Same (secret, value) always yields the
+// same code, so outbound storage, the outbound worker rebuild, and inbound matching stay
+// consistent. length must not exceed the 32-byte HMAC output.
+export async function keyedShortCode(secret: string, value: string, length = 10): Promise<string> {
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", await importHmacKey(secret), encoder.encode(value)));
+  let code = "";
+  for (let index = 0; index < length; index += 1) {
+    code += CROCKFORD_BASE32[signature[index]! & 31];
+  }
+  return code;
+}
+
 export async function encryptEmployeeNumber(secret: string, employeeNumber: string): Promise<{ ciphertext: string; iv: string }> {
   const iv = randomBytes(12);
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await importAesKey(secret), encoder.encode(employeeNumber));

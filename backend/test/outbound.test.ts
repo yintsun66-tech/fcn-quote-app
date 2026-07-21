@@ -130,7 +130,7 @@ describe("outbound RFQ email workflow", () => {
     for (const email of sent) {
       expect(email.from).toBe("rfq@yintsun66.com");
       expect(email.to).toBe("i14053@firstbank.com.tw");
-      expect(email.subject).toMatch(/ \[RFQ:[A-Za-z0-9_-]{16,64}\]\[BATCH:(?:BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]$/);
+      expect(email.subject).toMatch(/ 測試分行 \[RFQ:[0-9A-HJKMNP-TV-Z]{10}\]\[BATCH:(?:BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]$/);
       expect(email.subject).not.toMatch(/##|^(?:re|fw|fwd)\s*:/i);
       expect(email.html).toContain("<table");
       expect(email.text).toContain("Product");
@@ -162,7 +162,7 @@ describe("outbound RFQ email workflow", () => {
       recipient: "i14053@firstbank.com.tw",
       contentHash: archiveBatch?.content_hash
     });
-    expect(archive.subject).toMatch(/^UBS\[詢價\]FCBKTPE: FCN\(T\+7\) \[RFQ:/);
+    expect(archive.subject).toMatch(/^UBS\[詢價\]FCBKTPE: FCN\(T\+7\) 測試分行 \[RFQ:/);
     expect(archive.html).toContain("<table");
   });
 

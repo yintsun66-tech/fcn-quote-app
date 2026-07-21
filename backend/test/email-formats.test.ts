@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMAIL_INSTITUTIONS,
   MAIL_INSTITUTION_ORDER,
+  branchSubjectLabel,
   buildCorrelatedSubject,
   buildInstitutionEmail,
   type MailTradeRecord
@@ -78,13 +79,37 @@ describe("shared issuer email formats", () => {
     expect(values[19]).toBe("2");
   });
 
-  it("adds only the approved opaque correlation suffix", () => {
-    const token = "abcDEF0123456789_token";
-    expect(buildCorrelatedSubject("UBS[詢價]FCBKTPE: FCN(T+7)", token, "UBS"))
-      .toBe(`UBS[詢價]FCBKTPE: FCN(T+7) [RFQ:${token}][BATCH:UBS]`);
-    expect(() => buildCorrelatedSubject("Re: UBS[詢價]FCBKTPE", token, "UBS")).toThrow();
-    expect(() => buildCorrelatedSubject("UBS ##owner##", token, "UBS")).toThrow();
+  it("adds the short correlation code suffix (ADR 0002)", () => {
+    const code = "K7P2R9QTBM";
+    expect(buildCorrelatedSubject("UBS[詢價]FCBKTPE: FCN(T+7)", code, "UBS"))
+      .toBe(`UBS[詢價]FCBKTPE: FCN(T+7) [RFQ:${code}][BATCH:UBS]`);
+    expect(() => buildCorrelatedSubject("Re: UBS[詢價]FCBKTPE", code, "UBS")).toThrow();
+    expect(() => buildCorrelatedSubject("UBS ##owner##", code, "UBS")).toThrow();
     expect(() => buildCorrelatedSubject("UBS[詢價]", "short", "UBS")).toThrow();
-    expect(() => buildCorrelatedSubject("UBS[詢價]", token, "UNKNOWN")).toThrow();
+    expect(() => buildCorrelatedSubject("UBS[詢價]", "abcDEF0123456789_token", "UBS")).toThrow();
+    expect(() => buildCorrelatedSubject("UBS[詢價]", "ILOU012345", "UBS")).toThrow();
+    expect(() => buildCorrelatedSubject("UBS[詢價]", code, "UNKNOWN")).toThrow();
+  });
+
+  it("sanitizes the branch label and appends 分行 only when absent", () => {
+    expect(branchSubjectLabel("營業部")).toBe("營業部分行");
+    expect(branchSubjectLabel("002")).toBe("002分行");
+    expect(branchSubjectLabel("信義分行")).toBe("信義分行");
+    expect(branchSubjectLabel("台北 分行")).toBe("台北 分行");
+    expect(branchSubjectLabel("台北CITI[SG]##分行")).toBe("台北分行");
+    expect(branchSubjectLabel("OBU")).toBe("");
+    expect(branchSubjectLabel("   ")).toBe("");
+    expect(branchSubjectLabel(null)).toBe("");
+    expect(branchSubjectLabel("台".repeat(30)).length).toBeLessThanOrEqual(20 + 2);
+  });
+
+  it("places the branch label before the correlation tags via subjectBase", () => {
+    const code = "K7P2R9QTBM";
+    const subjectBase = `SG[詢價]FCBKTPE: FCN(T+7) ${branchSubjectLabel("營業部")}`;
+    const email = buildInstitutionEmail("SG", [trade], { rfqToken: code, batchCode: "SG", subjectBase });
+    expect(email.subject).toBe(`SG[詢價]FCBKTPE: FCN(T+7) 營業部分行 [RFQ:${code}][BATCH:SG]`);
+    expect(email.subject.startsWith(`${subjectBase} `)).toBe(true);
+    // Without correlation the plain institution subject is preserved.
+    expect(buildInstitutionEmail("SG", [trade]).subject).toBe("SG[詢價]FCBKTPE: FCN(T+7)");
   });
 });

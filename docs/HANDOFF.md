@@ -35,8 +35,9 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 
 ## Preserve this user-owned work
 
-- `backend/scripts/smoke-outbound-email.ps1` is currently **untracked** and explicitly excluded from the last commits/deployments at the user's request.
-- It is an operational test that creates a real RFQ and can send real messages. Do not commit, run, modify, or delete it without explicit approval.
+- `backend/scripts/smoke-outbound-email.ps1` was previously untracked and explicitly excluded from commits/deployments. On 2026-07-21 it was no longer present in the workspace or the searched `Documents` tree, and it was never Git-tracked.
+- Do not recreate it from memory or run a replacement without the user's original source and explicit approval. It was an operational test that could create a real RFQ and send real messages.
+- The existing `backend/scripts/prepare-assets.mjs` only deletes and recreates generated `backend/public/`; it does not delete `backend/scripts/`.
 
 ## Recent verification evidence
 
@@ -53,6 +54,30 @@ For the current backend branch through commit `ff12ef5`:
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
 2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `reply@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
 3. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
+
+## Subject-line correlation change (implemented on `feature/subject-branch-correlation`)
+
+- **What & why** — see [ADR 0002](adr/0002-subject-correlation-and-branch-label.md) (Accepted).
+  Correctly formatted RFQs were delivered but received no issuer reply; the working hypothesis
+  is bank-side filtering of the long opaque subject token.
+- New subject shape: `SG[詢價]FCBKTPE: FCN(T+7) {sanitized branch}分行 [RFQ:{10-char code}][BATCH:{code}]`.
+  Example: `SG[詢價]FCBKTPE: FCN(T+7) 營業部分行 [RFQ:K7P2R9QTBM][BATCH:SG]`. The issuer base subject is
+  unchanged; the correlation reference stays in the subject (not the body) as a short deterministic
+  Crockford base32 code; the branch label is sanitized (CJK/digits only) and appends 「分行」 only
+  when absent. The email body/table is unchanged.
+- Confirmed choices: (a) branch sanitization keeps CJK+digits and strips ASCII letters (the user's
+  branches contain no latin); (b) 「分行」 is appended only if the name does not already end with it.
+- No D1 migration, binding, email-address, or public-API change. The branch label rides inside the
+  existing per-send `base_subject` snapshot. Inbound `correlationTags` length relaxed to `{10,128}`
+  so in-flight long tokens still correlate during rollout.
+- Files: `backend/shared/email-formats.js` (+ `.d.ts`), `backend/src/crypto.ts` (new `keyedShortCode`),
+  `backend/src/outbound.ts`, `backend/src/inbound-parser.ts`, and tests in `email-formats`, `crypto`,
+  `outbound`, `inbound-parser`.
+- **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
+  `pnpm test` passed (14 files, 61 tests); `pnpm run build` (deploy dry run) passed.
+- **Deploy:** authorized; result recorded below once the Worker deploy and endpoint verification run.
+- Not yet proven: that the shorter subject actually clears the bank filter. Confirm with a real
+  forwarded issuer reply before treating automatic recognition as production-proven.
 
 ## Latest SG outgoing-email table update
 

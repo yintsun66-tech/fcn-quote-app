@@ -145,9 +145,21 @@ export function buildEmailHtml(columns, dataRows) {
 </body></html>`;
 }
 
+// Sanitized branch label placed in the outbound subject after the issuer base subject.
+// Keeps only CJK ideographs and digits (NFKC-normalized) so user-entered text can never
+// inject an issuer code, the [RFQ:]/[BATCH:] tags, or the ## requester marker into the
+// subject. Appends 「分行」 only when the sanitized value does not already end with it.
+export function branchSubjectLabel(rawBranchName) {
+  const normalized = String(rawBranchName ?? "").normalize("NFKC");
+  const kept = Array.from(normalized).filter(character => /[一-鿿0-9\s]/u.test(character)).join("");
+  const collapsed = kept.replace(/\s+/g, " ").trim().slice(0, 20);
+  if (!collapsed) return "";
+  return collapsed.endsWith("分行") ? collapsed : `${collapsed}分行`;
+}
+
 export function buildCorrelatedSubject(baseSubject, rfqToken, batchCode) {
   if (/##|^(?:re|fw|fwd)\s*:/i.test(baseSubject)) throw new Error("Unsafe outbound base subject.");
-  if (!/^[A-Za-z0-9_-]{16,64}$/.test(rfqToken)) throw new Error("Invalid RFQ correlation token.");
+  if (!/^[0-9A-HJKMNP-TV-Z]{10}$/.test(rfqToken)) throw new Error("Invalid RFQ correlation token.");
   if (!MAIL_INSTITUTION_ORDER.includes(batchCode)) throw new Error("Invalid outbound batch code.");
   return `${baseSubject} [RFQ:${rfqToken}][BATCH:${batchCode}]`;
 }
@@ -156,11 +168,12 @@ export function buildInstitutionEmail(key, records, correlation) {
   const institution = EMAIL_INSTITUTIONS[key];
   if (!institution) throw new Error("Unknown email institution.");
   const dataRows = records.map(record => institution.columns.map(column => String(column.value(record) ?? "")));
+  const subjectBase = correlation?.subjectBase ?? institution.subject;
   return {
     key,
     label: institution.label,
     subject: correlation
-      ? buildCorrelatedSubject(institution.subject, correlation.rfqToken, correlation.batchCode ?? key)
+      ? buildCorrelatedSubject(subjectBase, correlation.rfqToken, correlation.batchCode ?? key)
       : institution.subject,
     html: buildEmailHtml(institution.columns, dataRows),
     plainText: buildEmailBody(institution.columns, dataRows),

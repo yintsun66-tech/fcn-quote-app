@@ -34,5 +34,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 ## Existing decisions
 
 - [ADR 0001: Repository governance and multi-agent handoff](0001-repository-governance.md)
+- [ADR 0002: Subject-line correlation code and branch label](0002-subject-correlation-and-branch-label.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

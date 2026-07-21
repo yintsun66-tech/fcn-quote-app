@@ -23,6 +23,13 @@ describe("inbound subject and sender evidence", () => {
     expect(correlationTags(normalized)).toEqual({ token: "abcdefghijklmnop", batchCode: "BMJB" });
   });
 
+  it("extracts the short correlation code past a branch label and detects the batch (ADR 0002)", () => {
+    const subject = "Re: SG[詢價]FCBKTPE: FCN(T+7) 營業部分行 [RFQ:K7P2R9QTBM][BATCH:SG]";
+    const normalized = normalizeEmailSubject(subject);
+    expect(subjectBatchCode(normalized)).toBe("SG");
+    expect(correlationTags(normalized)).toEqual({ token: "K7P2R9QTBM", batchCode: "SG" });
+  });
+
   it("uses sender evidence to disambiguate BMJB", () => {
     const detected = detectSender(
       parsedEmail({ from: { name: "Pricing", address: "mstwsp@morganstanley.com" } }),

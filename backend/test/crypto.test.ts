@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decryptEmployeeNumber, encryptEmployeeNumber, hashPassword, keyedHash, sha256Bytes, verifyPassword } from "../src/crypto";
+import { decryptEmployeeNumber, encryptEmployeeNumber, hashPassword, keyedHash, keyedShortCode, sha256Bytes, verifyPassword } from "../src/crypto";
 
 const DATA_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -26,6 +26,16 @@ describe("crypto primitives", () => {
     const different = await keyedHash(LOOKUP_KEY, "54321");
     expect(first).toBe(second);
     expect(first).not.toBe(different);
+  });
+
+  it("derives a deterministic short correlation code (ADR 0002)", async () => {
+    const first = await keyedShortCode(LOOKUP_KEY, "RFQ_CORRELATION_V1:rfq_abc");
+    const second = await keyedShortCode(LOOKUP_KEY, "RFQ_CORRELATION_V1:rfq_abc");
+    const different = await keyedShortCode(LOOKUP_KEY, "RFQ_CORRELATION_V1:rfq_xyz");
+    expect(first).toBe(second);
+    expect(first).not.toBe(different);
+    expect(first).toMatch(/^[0-9A-HJKMNP-TV-Z]{10}$/);
+    expect(await keyedShortCode(LOOKUP_KEY, "RFQ_CORRELATION_V1:rfq_abc", 6)).toHaveLength(6);
   });
 
   it("hashes raw binary content without converting it to text", async () => {

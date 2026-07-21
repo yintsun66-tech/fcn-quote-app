@@ -1,12 +1,13 @@
 import {
   EMAIL_INSTITUTIONS,
   MAIL_INSTITUTION_ORDER,
+  branchSubjectLabel,
   buildInstitutionEmail,
   type MailTradeRecord
 } from "../shared/email-formats.js";
 import { archiveOutboundEmail } from "./admin-outbound";
 import { requireCsrf } from "./auth";
-import { keyedHash, sha256Text, stableStringify } from "./crypto";
+import { keyedShortCode, sha256Text, stableStringify } from "./crypto";
 import { newId, nowIso } from "./db";
 import { AppError } from "./errors";
 import { startRfqCoordinator } from "./coordinator";
@@ -61,7 +62,9 @@ function assertFixedAddresses(env: AppEnv): void {
 }
 
 async function correlationToken(env: AppEnv, rfqId: string): Promise<string> {
-  return keyedHash(env.EMPLOYEE_LOOKUP_KEY, `RFQ_CORRELATION_V1:${rfqId}`);
+  // Short, human-readable subject correlation code (see ADR 0002). Deterministic per RFQ so
+  // outbound storage, the worker rebuild, and inbound matching all agree on sha256(code).
+  return keyedShortCode(env.EMPLOYEE_LOOKUP_KEY, `RFQ_CORRELATION_V1:${rfqId}`, 10);
 }
 
 function numberText(value: number | null): string {
@@ -146,6 +149,9 @@ export async function sendRfq(
   const queuedAt = nowIso();
   const token = await correlationToken(env, rfqId);
   const tokenHash = await sha256Text(token);
+  // Snapshot the requester's branch label into the per-send base subject (see ADR 0002).
+  const branchLabel = branchSubjectLabel(session.user.branchName);
+  const branchSuffix = branchLabel ? ` ${branchLabel}` : "";
   const jobs: OutboundEmailJob[] = [];
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
@@ -174,7 +180,7 @@ export async function sendRfq(
       `INSERT INTO outbound_email_batches
         (id, rfq_id, batch_code, sender, recipient, base_subject, correlation_token_hash, status, queued_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?)`
-    ).bind(batchId, rfqId, batchCode, env.OUTBOUND_FROM, env.OUTBOUND_TO, profile.subject, tokenHash, queuedAt));
+    ).bind(batchId, rfqId, batchCode, env.OUTBOUND_FROM, env.OUTBOUND_TO, `${profile.subject}${branchSuffix}`, tokenHash, queuedAt));
     statements.push(env.DB.prepare(
       `INSERT INTO jobs
         (id, job_type, rfq_id, related_entity_id, idempotency_key, status, available_at, created_at, updated_at)
@@ -300,7 +306,7 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
   if (await sha256Text(token) !== batch.correlation_token_hash) throw new Error("CORRELATION_TOKEN_MISMATCH");
   const records = (await storedTrades(env, batch.rfq_id)).map(tradeRecord);
   if (records.length === 0) throw new Error("OUTBOUND_TRADES_NOT_FOUND");
-  const email = buildInstitutionEmail(batch.batch_code, records, { rfqToken: token, batchCode: batch.batch_code });
+  const email = buildInstitutionEmail(batch.batch_code, records, { rfqToken: token, batchCode: batch.batch_code, subjectBase: batch.base_subject });
   if (!email.subject.startsWith(`${batch.base_subject} `)) throw new Error("OUTBOUND_SUBJECT_MISMATCH");
   const contentHash = await sha256Text(stableStringify({ subject: email.subject, html: email.html, plainText: email.plainText }));
   await env.DB.prepare(

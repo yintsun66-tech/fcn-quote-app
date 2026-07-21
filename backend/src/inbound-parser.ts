@@ -155,7 +155,9 @@ export function requesterMarker(subject: string): string | null {
 }
 
 export function correlationTags(subject: string): { token: string; batchCode: MailBatchCode } | null {
-  const match = /\[RFQ:([A-Za-z0-9_-]{16,128})\]\s*\[BATCH:(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]/iu.exec(subject);
+  // Length 10 accepts the short Crockford code (ADR 0002); the wider range keeps any
+  // in-flight long tokens correlatable across a rollout. Matching is by sha256 lookup.
+  const match = /\[RFQ:([A-Za-z0-9_-]{10,128})\]\s*\[BATCH:(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]/iu.exec(subject);
   if (!match?.[1] || !match[2]) return null;
   return { token: match[1], batchCode: match[2].toUpperCase() as MailBatchCode };
 }

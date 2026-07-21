@@ -38,12 +38,22 @@ describe("shared issuer email formats", () => {
       NOMURA: 22,
       UBS: 20,
       DBS: 19,
-      SG: 18,
+      SG: 21,
       CITI: 24,
       GS: 19,
       CA: 19
     });
     expect(EMAIL_INSTITUTIONS.CA?.columns[8]?.label).toBe("Guaranteed Periods (m)");
+  });
+
+  it("adds SG's fixed OTC, blank funding spread, and effective-date offset cells", () => {
+    const email = buildInstitutionEmail("SG", [trade]);
+    const values = email.plainText.split("\r\n")[1]?.split("\t") ?? [];
+    expect(EMAIL_INSTITUTIONS.SG?.columns.slice(-3).map(column => column.label)).toEqual([
+      "OTC", "Funding Spread (bps)", "Effective Date Offset(Calendar Days)"
+    ]);
+    expect(values.slice(-3)).toEqual(["Note", "", "7"]);
+    expect(email.html.match(/<td\b/g) ?? []).toHaveLength(21);
   });
 
   it("preserves a final empty cell in HTML and plain text", () => {

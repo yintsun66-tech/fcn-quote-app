@@ -10,6 +10,7 @@ import {
 } from "./auth";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
+import { ingestInboundEmail } from "./inbound";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, validateRfq } from "./rfqs";
 import type { AppEnv } from "./types";
@@ -77,5 +78,8 @@ export default {
   },
   async queue(batch: MessageBatch<unknown>, env): Promise<void> {
     await consumeOutboundEmail(batch, env);
+  },
+  async email(message, env, _context): Promise<void> {
+    await ingestInboundEmail(message, env);
   }
 } satisfies ExportedHandler<AppEnv>;

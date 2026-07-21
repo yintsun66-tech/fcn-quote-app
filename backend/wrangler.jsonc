@@ -11,7 +11,9 @@
     "AUTH_RATE_LIMIT_WINDOW_SECONDS": "900",
     "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5",
     "OUTBOUND_FROM": "rfq@yintsun66.com",
-    "OUTBOUND_TO": "i14053@firstbank.com.tw"
+    "OUTBOUND_TO": "i14053@firstbank.com.tw",
+    "INBOUND_ADDRESS": "reply@yintsun66.com",
+    "MAX_INBOUND_EMAIL_BYTES": "26214400"
   },
   "secrets": {
     "required": ["EMPLOYEE_DATA_KEY", "EMPLOYEE_LOOKUP_KEY"]
@@ -22,6 +24,7 @@
       "custom_domain": true
     }
   ],
+  "addresses": ["reply@yintsun66.com"],
   "d1_databases": [
     {
       "binding": "DB",
@@ -30,11 +33,21 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "RAW_MAIL_BUCKET",
+      "bucket_name": "fcn-quote-private"
+    }
+  ],
   "queues": {
     "producers": [
       {
         "binding": "OUTBOUND_EMAIL_QUEUE",
         "queue": "fcn-outbound-email"
+      },
+      {
+        "binding": "INBOUND_EMAIL_QUEUE",
+        "queue": "fcn-email-parse"
       }
     ],
     "consumers": [

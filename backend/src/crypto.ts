@@ -44,7 +44,12 @@ export function randomToken(byteLength = 32): string {
 }
 
 export async function sha256Text(value: string): Promise<string> {
-  return bytesToBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value))));
+  return sha256Bytes(encoder.encode(value));
+}
+
+export async function sha256Bytes(value: ArrayBuffer | Uint8Array<ArrayBufferLike>): Promise<string> {
+  const bytes = Uint8Array.from(value instanceof Uint8Array ? value : new Uint8Array(value));
+  return bytesToBase64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 }
 
 export async function keyedHash(secret: string, value: string): Promise<string> {

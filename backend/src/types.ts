@@ -16,6 +16,11 @@ export interface OutboundEmailJob {
   rfqId: string;
 }
 
+export interface InboundEmailJob {
+  jobId: string;
+  inboundMessageId: string;
+}
+
 export interface AuthenticatedUser {
   id: string;
   username: string;

@@ -11,6 +11,7 @@
   shell.innerHTML = `
     <div class="backend-userbar" hidden>
       <span id="backendUser"></span>
+      <button id="backendAdminRegistrations" type="button" class="secondary" hidden>使用者申請審核</button>
       <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
       <button id="backendLogout" type="button" class="secondary">登出</button>
     </div>
@@ -56,6 +57,15 @@
           <iframe id="backendOutboundArchiveFrame" title="寄件 HTML 預覽" sandbox="" referrerpolicy="no-referrer"></iframe>
         </section>
       </section>
+    </dialog>
+    <dialog id="backendRegistrationReview" class="backend-dialog backend-registration-dialog">
+      <section class="backend-panel">
+        <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>使用者申請審核</h2></div><button id="closeBackendRegistrationReview" type="button" class="secondary">關閉</button></div>
+        <p class="backend-archive-note">僅管理者可檢視待審核的申請資料。核准或拒絕都會留下稽核紀錄。</p>
+        <p id="backendRegistrationReviewError" class="backend-error" role="alert"></p>
+        <p id="backendRegistrationReviewStatus" class="backend-admin-status" role="status"></p>
+        <div id="backendRegistrationReviewList" class="backend-registration-list"></div>
+      </section>
     </dialog>`;
   document.body.append(shell);
 
@@ -64,6 +74,11 @@
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
   const userbar = document.querySelector(".backend-userbar");
+  const adminRegistrationsButton = document.querySelector("#backendAdminRegistrations");
+  const adminRegistrationReviewDialog = document.querySelector("#backendRegistrationReview");
+  const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
+  const adminRegistrationReviewError = document.querySelector("#backendRegistrationReviewError");
+  const adminRegistrationReviewStatus = document.querySelector("#backendRegistrationReviewStatus");
   const adminOutboundButton = document.querySelector("#backendAdminOutbound");
   const adminOutboundDialog = document.querySelector("#backendOutboundArchive");
   const adminOutboundList = document.querySelector("#backendOutboundArchiveList");
@@ -105,6 +120,7 @@
   function setUser(user) {
     state.user = user;
     userbar.hidden = !user;
+    adminRegistrationsButton.hidden = !user || user.role !== "ADMIN";
     adminOutboundButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
     if (user && authDialog.open) authDialog.close();
@@ -135,6 +151,71 @@
       <td>${escapeHtml(record.status)}</td>
       <td><button type="button" class="secondary backend-archive-view" data-outbound-id="${escapeHtml(record.id)}">檢視</button></td>
     </tr>`).join("")}</tbody></table>`;
+  }
+
+  function renderAdminRegistrationList(registrations) {
+    if (!registrations.length) {
+      adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有待審核的使用者申請。</p>";
+      return;
+    }
+    adminRegistrationReviewList.innerHTML = `<table><thead><tr><th>申請時間</th><th>行編</th><th>分行</th><th>使用者</th><th>登入帳號</th><th>操作</th></tr></thead><tbody>${registrations.map(registration => `<tr>
+      <td>${escapeHtml(formatDateTime(registration.createdAt))}</td>
+      <td>${escapeHtml(registration.employeeNumber)}</td>
+      <td>${escapeHtml(registration.branchName)}</td>
+      <td>${escapeHtml(registration.displayName)}</td>
+      <td>${escapeHtml(registration.username)}</td>
+      <td class="backend-registration-actions"><button type="button" class="primary" data-registration-action="approve" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.displayName)}">核准</button><button type="button" class="secondary" data-registration-action="reject" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.displayName)}">拒絕</button></td>
+    </tr>`).join("")}</tbody></table>`;
+  }
+
+  async function loadAdminRegistrations(statusMessage = "") {
+    adminRegistrationReviewError.textContent = "";
+    adminRegistrationReviewStatus.textContent = statusMessage;
+    adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">正在載入待審核申請…</p>";
+    try {
+      renderAdminRegistrationList((await request("/admin/registrations")).registrations);
+    } catch (error) {
+      adminRegistrationReviewError.textContent = error.message;
+      adminRegistrationReviewList.innerHTML = "";
+    }
+  }
+
+  async function openAdminRegistrationReview() {
+    if (state.user?.role !== "ADMIN") return;
+    if (!adminRegistrationReviewDialog.open) adminRegistrationReviewDialog.showModal();
+    await loadAdminRegistrations();
+  }
+
+  async function reviewRegistration(userId, action, displayName) {
+    if (state.user?.role !== "ADMIN") return;
+    let reason = "";
+    if (action === "approve") {
+      if (!window.confirm(`確定核准「${displayName}」的使用者申請？`)) return;
+    } else {
+      const suppliedReason = window.prompt(`請輸入拒絕「${displayName}」的原因（1 至 500 字）：`);
+      if (suppliedReason === null) return;
+      reason = suppliedReason.trim();
+      if (!reason) {
+        adminRegistrationReviewError.textContent = "拒絕申請時必須填寫原因。";
+        return;
+      }
+    }
+
+    const buttons = [...adminRegistrationReviewList.querySelectorAll("button")];
+    buttons.forEach(item => { item.disabled = true; });
+    adminRegistrationReviewError.textContent = "";
+    adminRegistrationReviewStatus.textContent = action === "approve" ? "正在核准申請…" : "正在拒絕申請…";
+    try {
+      await request(`/admin/registrations/${encodeURIComponent(userId)}/${action}`, {
+        method: "POST",
+        body: action === "reject" ? JSON.stringify({ reason }) : "{}"
+      });
+      await loadAdminRegistrations(action === "approve" ? `已核准「${displayName}」。` : `已拒絕「${displayName}」。`);
+    } catch (error) {
+      adminRegistrationReviewError.textContent = error.message;
+      adminRegistrationReviewStatus.textContent = "";
+      buttons.forEach(item => { item.disabled = false; });
+    }
   }
 
   async function openAdminOutboundArchive() {
@@ -290,6 +371,12 @@
   document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
   document.querySelector("#backendLogout").addEventListener("click", async () => { await request("/auth/logout", { method: "POST", body: "{}" }); setUser(null); showAuth(); });
   document.querySelector("#closeBackendProgress").addEventListener("click", () => progressDialog.close());
+  adminRegistrationsButton.addEventListener("click", openAdminRegistrationReview);
+  document.querySelector("#closeBackendRegistrationReview").addEventListener("click", () => adminRegistrationReviewDialog.close());
+  adminRegistrationReviewList.addEventListener("click", event => {
+    const target = event.target.closest("[data-registration-action][data-registration-id]");
+    if (target) reviewRegistration(target.dataset.registrationId, target.dataset.registrationAction, target.dataset.registrationName);
+  });
   adminOutboundButton.addEventListener("click", openAdminOutboundArchive);
   document.querySelector("#closeBackendOutboundArchive").addEventListener("click", () => adminOutboundDialog.close());
   adminOutboundList.addEventListener("click", event => {

@@ -131,6 +131,33 @@ describe("registration and authentication", () => {
     expect(expiredSession.status).toBe(401);
   });
 
+  it("allows an administrator to reject a pending registration with an audit reason", async () => {
+    await api("/api/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(registration("rejected1", "12349"))
+    }, "198.51.100.21");
+    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = 'rejected1'").first<{ id: string }>();
+    expect(pending?.id).toBeDefined();
+
+    const adminLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+    }, "198.51.100.22");
+    const adminAuth = authentication(adminLogin);
+    const rejectResponse = await api(`/api/v1/admin/registrations/${pending?.id}/reject`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      body: JSON.stringify({ reason: "分行資料待補" })
+    });
+    expect(rejectResponse.status).toBe(200);
+    expect(await rejectResponse.json()).toMatchObject({ status: "REJECTED", userId: pending?.id });
+
+    const user = await testEnv.DB.prepare(
+      "SELECT status, rejection_reason FROM users WHERE id = ?"
+    ).bind(pending?.id).first<{ status: string; rejection_reason: string }>();
+    expect(user).toEqual({ status: "REJECTED", rejection_reason: "分行資料待補" });
+  });
+
   it("rate-limits repeated failed logins without counting successful logins", async () => {
     const ip = "198.51.100.19";
     for (let attempt = 0; attempt < 5; attempt += 1) {

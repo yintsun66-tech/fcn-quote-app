@@ -172,7 +172,9 @@
 
   function saveDraft() {
     const rows = [...tableBody.rows].map(row => Object.fromEntries(
-      fields.map(([name]) => [name, rowField(row, name).value])
+      fields
+        .filter(([name]) => name !== "tradeDate")
+        .map(([name]) => [name, rowField(row, name).value])
     ));
     try {
       window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ version: 1, rows }));
@@ -191,7 +193,9 @@
         if (!values || typeof values !== "object") return;
         createRow();
         fields.forEach(([name]) => {
-          if (typeof values[name] === "string") rowField(tableBody.lastElementChild, name).value = values[name];
+          if (name !== "tradeDate" && typeof values[name] === "string") {
+            rowField(tableBody.lastElementChild, name).value = values[name];
+          }
         });
       });
       return tableBody.rows.length > 0;

@@ -10,6 +10,7 @@ interface ArtifactJobRow {
   artifact_id: string;
   rfq_id: string;
   ranking_run_id: string;
+  trade_code: string;
   issuer: string;
   status: string;
 }
@@ -48,7 +49,7 @@ async function hashBytes(bytes: ArrayBuffer): Promise<string> {
 
 async function claimJob(env: AppEnv, requested: ImageRenderJob): Promise<ArtifactJobRow | null> {
   const row = await env.DB.prepare(
-    `SELECT id, artifact_id, rfq_id, ranking_run_id, issuer, status FROM image_render_jobs
+    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status FROM image_render_jobs
       WHERE id = ? AND artifact_id = ? AND rfq_id = ? AND ranking_run_id = ?`
   ).bind(requested.jobId, requested.artifactId, requested.rfqId, requested.rankingRunId).first<ArtifactJobRow>();
   if (!row) throw new Error("IMAGE_RENDER_JOB_NOT_FOUND");
@@ -71,34 +72,16 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   const job = await claimJob(env, requested);
   if (!job) return;
   const rows = await env.DB.prepare(
-    `WITH snapshot_quotes AS (
-       SELECT trade_id, quote_id, display_order
-         FROM ranking_results WHERE ranking_run_id = ?
-       UNION ALL
-       SELECT trade_id, quote_id, 1000000 AS display_order
-         FROM ranking_exclusions
-        WHERE ranking_run_id = ? AND reason_code = 'OUTSIDE_TOP_THREE'
-     ), issuer_results AS (
-       SELECT t.sequence, t.trade_code, q.product, q.currency, q.issuer, q.issuer_display_name,
-              t.trade_date,
-              q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
-              q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
-              q.ki_barrier_pct, q.comparable_price_pct,
-              ROW_NUMBER() OVER (
-                PARTITION BY snapshot.trade_id, q.issuer
-                ORDER BY snapshot.display_order, q.received_at, q.id
-              ) AS issuer_order
-         FROM snapshot_quotes snapshot
-         JOIN rfq_trades t ON t.id = snapshot.trade_id
-         JOIN issuer_quotes q ON q.id = snapshot.quote_id
-        WHERE q.issuer = ?
-     )
-     SELECT sequence, trade_code, product, currency, issuer, issuer_display_name, trade_date,
-            tenor_months, guaranteed_periods_months, underlyings_json,
-            coupon_pa_pct, strike_pct, ko_barrier_pct, ko_type, barrier_type,
-            ki_barrier_pct, comparable_price_pct
-       FROM issuer_results WHERE issuer_order = 1 ORDER BY sequence`
-  ).bind(job.ranking_run_id, job.ranking_run_id, job.issuer).all<QuoteCardRow>();
+    `SELECT t.sequence, t.trade_code, q.product, q.currency, q.issuer, q.issuer_display_name,
+            t.trade_date, q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
+            q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
+            q.ki_barrier_pct, q.comparable_price_pct
+       FROM ranking_results r
+       JOIN rfq_trades t ON t.id = r.trade_id
+       JOIN issuer_quotes q ON q.id = r.quote_id
+      WHERE r.ranking_run_id = ? AND t.trade_code = ? AND r.is_image_winner = 1
+      ORDER BY t.sequence`
+  ).bind(job.ranking_run_id, job.trade_code).all<QuoteCardRow>();
   if (!rows.results.length) throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
   const trades: QuoteCardTrade[] = rows.results.map(row => ({
     sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,
@@ -122,10 +105,10 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   });
   if (!response.ok) throw new Error("BROWSER_RENDER_FAILED");
   const bytes = await response.arrayBuffer();
-  const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.issuer}.png`;
+  const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.trade_code}.png`;
   await env.RAW_MAIL_BUCKET.put(objectKey, bytes, {
     httpMetadata: { contentType: "image/png", cacheControl: "private, max-age=0, no-store" },
-    customMetadata: { rfqId: job.rfq_id, rankingRunId: job.ranking_run_id, issuer: job.issuer }
+    customMetadata: { rfqId: job.rfq_id, rankingRunId: job.ranking_run_id, tradeCode: job.trade_code, issuer: job.issuer }
   });
   const completedAt = nowIso();
   await env.DB.batch([
@@ -141,7 +124,7 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
       `INSERT INTO audit_events
         (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
        VALUES (?, NULL, 'QUOTE_IMAGE_READY', 'ARTIFACT', ?, ?, ?, ?)`
-    ).bind(newId("aud"), job.artifact_id, `queue:${job.id}`, JSON.stringify({ issuer: job.issuer, byteSize: bytes.byteLength }), completedAt)
+    ).bind(newId("aud"), job.artifact_id, `queue:${job.id}`, JSON.stringify({ tradeCode: job.trade_code, issuer: job.issuer, byteSize: bytes.byteLength }), completedAt)
   ]);
 }
 
@@ -161,7 +144,7 @@ async function markFailure(env: AppEnv, job: ImageRenderJob, terminal: boolean, 
 function isJob(value: unknown): value is ImageRenderJob {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return [candidate.jobId, candidate.artifactId, candidate.rfqId, candidate.rankingRunId, candidate.issuer]
+  return [candidate.jobId, candidate.artifactId, candidate.rfqId, candidate.rankingRunId, candidate.tradeCode, candidate.issuer]
     .every(part => typeof part === "string" && part.length > 0);
 }
 

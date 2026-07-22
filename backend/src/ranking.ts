@@ -15,6 +15,7 @@ interface RankJobRow {
 
 interface TradeTargetRow {
   id: string;
+  trade_code: string;
   target_field: TargetField;
 }
 
@@ -102,41 +103,40 @@ async function persistArtifacts(
   rfqId: string,
   runId: string,
   version: number,
-  quotedIssuers: Set<string>,
+  winners: { tradeCode: string; issuer: string }[],
   createdAt: string
 ): Promise<ImageRenderJob[]> {
-  const jobs: ImageRenderJob[] = [];
   const statements: D1PreparedStatement[] = [];
-  for (const issuer of [...quotedIssuers].sort()) {
+  for (const winner of winners) {
     const artifactId = newId("art");
     const jobId = newId("imgjob");
-    const idempotencyKey = `image:${rfqId}:v${version}:${issuer}`;
+    const idempotencyKey = `image:${rfqId}:v${version}:${winner.tradeCode}`;
     const expiresAt = new Date(Date.parse(createdAt) + 90 * 24 * 60 * 60 * 1000).toISOString();
     statements.push(
       env.DB.prepare(
         `INSERT OR IGNORE INTO generated_artifacts
-          (id, rfq_id, ranking_run_id, issuer, status, render_profile_version,
+          (id, rfq_id, ranking_run_id, trade_code, issuer, status, render_profile_version,
            idempotency_key, created_at, expires_at)
-         VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
-      ).bind(artifactId, rfqId, runId, issuer, RENDER_PROFILE_VERSION, idempotencyKey, createdAt, expiresAt),
+         VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
+      ).bind(artifactId, rfqId, runId, winner.tradeCode, winner.issuer, RENDER_PROFILE_VERSION, idempotencyKey, createdAt, expiresAt),
       env.DB.prepare(
         `INSERT OR IGNORE INTO image_render_jobs
-          (id, artifact_id, rfq_id, ranking_run_id, issuer, idempotency_key,
+          (id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, idempotency_key,
            status, available_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
-      ).bind(jobId, artifactId, rfqId, runId, issuer, idempotencyKey, createdAt, createdAt, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
+      ).bind(jobId, artifactId, rfqId, runId, winner.tradeCode, winner.issuer, idempotencyKey, createdAt, createdAt, createdAt)
     );
   }
   if (statements.length) await env.DB.batch(statements);
   const stored = await env.DB.prepare(
-    `SELECT j.id, j.artifact_id, j.rfq_id, j.ranking_run_id, j.issuer
+    `SELECT j.id, j.artifact_id, j.rfq_id, j.ranking_run_id, j.trade_code, j.issuer
        FROM image_render_jobs j JOIN generated_artifacts a ON a.id = j.artifact_id
-      WHERE j.ranking_run_id = ? AND j.status = 'QUEUED' ORDER BY j.issuer`
-  ).bind(runId).all<{ id: string; artifact_id: string; rfq_id: string; ranking_run_id: string; issuer: string }>();
-  for (const row of stored.results) {
-    jobs.push({ jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id, rankingRunId: row.ranking_run_id, issuer: row.issuer });
-  }
-  return jobs;
+      WHERE j.ranking_run_id = ? AND j.status = 'QUEUED' ORDER BY j.trade_code`
+  ).bind(runId).all<{ id: string; artifact_id: string; rfq_id: string; ranking_run_id: string; trade_code: string; issuer: string }>();
+  return stored.results.map(row => ({
+    jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
+    rankingRunId: row.ranking_run_id, tradeCode: row.trade_code, issuer: row.issuer
+  }));
 }
 
 export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob): Promise<void> {
@@ -169,7 +169,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   }
 
   const trades = await env.DB.prepare(
-    `SELECT id, target_field FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
+    `SELECT id, trade_code, target_field FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
   ).bind(job.rfq_id).all<TradeTargetRow>();
   const quotes = await env.DB.prepare(
     `SELECT id, trade_id, issuer, status, received_at, strike_pct, ko_barrier_pct,
@@ -178,18 +178,16 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
   const statements: D1PreparedStatement[] = [];
-  const quotedIssuers = new Set<string>();
+  const winners: { tradeCode: string; issuer: string }[] = [];
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
-    tradeQuotes.forEach(quote => {
-      const value = quoteTargetValue(quote, trade.target_field);
-      if (quote.status === "VALID" && value !== null && Number.isFinite(value)) quotedIssuers.add(quote.issuer);
-    });
     const ranked = rankValidQuotes(tradeQuotes, trade.target_field);
     validResultCount += ranked.length;
     const firstRank = ranked.filter(result => result.economicRank === 1);
     const imageWinnerId = firstRank[0]?.quote.id ?? null;
+    // One image per trade (ADR 0005): the deterministic rank-1 winner represents the trade.
+    if (firstRank[0]) winners.push({ tradeCode: trade.trade_code, issuer: firstRank[0].quote.issuer });
     for (const result of ranked) {
       statements.push(env.DB.prepare(
         `INSERT OR IGNORE INTO ranking_results
@@ -234,7 +232,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   );
   await env.DB.batch(statements);
 
-  const imageJobs = await persistArtifacts(env, job.rfq_id, run.id, job.requested_version, quotedIssuers, completedAt);
+  const imageJobs = await persistArtifacts(env, job.rfq_id, run.id, job.requested_version, winners, completedAt);
   for (const imageJob of imageJobs) await env.IMAGE_RENDER_QUEUE.send(imageJob);
 }
 

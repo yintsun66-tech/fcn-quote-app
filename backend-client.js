@@ -4,7 +4,7 @@
 
   const api = "/api/v1";
   const statusElement = document.querySelector("#status");
-  const state = { user: null, rfqId: null, timer: null, artifactSelection: "BEST", hasRankings: false };
+  const state = { user: null, rfqId: null, timer: null, hasRankings: false };
 
   const shell = document.createElement("section");
   shell.className = "backend-shell";
@@ -302,7 +302,6 @@
         method: "POST", headers: { "idempotency-key": idempotency("send") }, body: "{}"
       });
       state.rfqId = rfqId;
-      state.artifactSelection = "BEST";
       state.hasRankings = false;
       statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
       statusElement.classList.add("success");
@@ -328,45 +327,40 @@
     finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
   }
 
-  function renderResults(payload) {
-    state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
-    document.querySelector("#backendRankings").innerHTML = payload.trades.map(trade => `
-      <section class="ranking-card"><h3>${trade.tradeCode} · ${trade.underlyings.join(" / ")} <small>${trade.targetField}</small></h3>
-      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${item.issuerDisplayName}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
-    </section>`).join("");
+  function artifactLinkHtml(artifact) {
+    if (!artifact) return "";
+    if (artifact.status === "READY") {
+      const href = artifact.previewUrl || artifact.downloadUrl;
+      return ` <a class="artifact-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">報價圖</a>`;
+    }
+    return ` <span class="artifact-pending">（報價圖${escapeHtml(artifact.status)}）</span>`;
   }
 
-  async function renderArtifacts() {
-    const payload = await request(`/rfqs/${state.rfqId}/artifacts`);
-    const artifacts = payload.artifacts;
+  function renderResults(payload, artifactByTrade = {}) {
+    state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
+    document.querySelector("#backendRankings").innerHTML = payload.trades.map(trade => {
+      // One image per trade: link the trade's rank-1 (winning) issuer name to that trade's image.
+      const link = artifactLinkHtml(artifactByTrade[trade.tradeCode]);
+      return `
+      <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}</small></h3>
+      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${item.rank === 1 ? link : ""}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
+    </section>`;
+    }).join("");
+  }
+
+  function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">報價圖工作正在建立，請稍候。</p>"
+        ? "<p class=\"artifact-pending\">報價圖建立中，請稍候。</p>"
         : "";
-      return artifacts;
+      return;
     }
-    if (state.artifactSelection !== "BEST" && !artifacts.some(item => item.issuer === state.artifactSelection)) {
-      state.artifactSelection = "BEST";
-    }
-    const bestArtifacts = artifacts.filter(item => item.isDefault);
-    const visibleArtifacts = state.artifactSelection === "BEST"
-      ? (bestArtifacts.length ? bestArtifacts : artifacts.slice(0, 1))
-      : artifacts.filter(item => item.issuer === state.artifactSelection);
-    const options = [
-      `<option value="BEST"${state.artifactSelection === "BEST" ? " selected" : ""}>最佳報價（依交易第一名）</option>`,
-      ...artifacts.map(item => `<option value="${escapeHtml(item.issuer)}"${state.artifactSelection === item.issuer ? " selected" : ""}>${escapeHtml(item.issuer)}${item.status === "READY" ? "" : `（${escapeHtml(item.status)}）`}</option>`)
-    ].join("");
-    artifactContainer.innerHTML = `<section class="backend-artifact-viewer">
-      <div class="backend-artifact-toolbar">
-        <label for="backendArtifactIssuer">報價圖發行機構</label>
-        <select id="backendArtifactIssuer">${options}</select>
-        <p>預設顯示每筆交易的第一名；也可切換本次已完成比價且有有效報價的其他發行機構。</p>
-      </div>
-      <div class="backend-artifact-preview-grid">${visibleArtifacts.map(item => item.status === "READY"
-        ? `<article class="backend-artifact-preview-card"><h3>${escapeHtml(item.issuer)} 報價圖</h3><div class="backend-artifact-preview-frame"><img src="${escapeHtml(item.previewUrl)}" alt="${escapeHtml(item.issuer)} 手機直式報價圖" loading="lazy"></div><a class="primary artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 ${escapeHtml(item.issuer)} PNG</a></article>`
-        : `<article class="backend-artifact-preview-card"><h3>${escapeHtml(item.issuer)} 報價圖</h3><p class="artifact-pending">圖片處理中：${escapeHtml(item.status)}</p></article>`).join("")}</div>
+    artifactContainer.innerHTML = `<section class="backend-artifact-list">
+      <h3>各交易報價圖（一筆交易一張）</h3>
+      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜${escapeHtml(item.issuer)}：${item.status === "READY"
+        ? `<a class="artifact-link" href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noopener">預覽</a> · <a class="artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 PNG</a>`
+        : `<span class="artifact-pending">${escapeHtml(item.status)}</span>`}</li>`).join("")}</ul>
     </section>`;
-    return artifacts;
   }
 
   async function refreshResults() {
@@ -379,8 +373,10 @@
       // to surface the result sooner; keep the calmer 4s cadence during the long wait.
       const deadlinePassed = status.rfq.deadlineAt ? Date.parse(status.rfq.deadlineAt) <= Date.now() : false;
       if (["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)) {
-        renderResults(await request(`/rfqs/${state.rfqId}/results`));
-        const artifacts = await renderArtifacts();
+        const results = await request(`/rfqs/${state.rfqId}/results`);
+        const artifacts = (await request(`/rfqs/${state.rfqId}/artifacts`)).artifacts;
+        renderResults(results, Object.fromEntries(artifacts.map(item => [item.tradeCode, item])));
+        renderArtifactSummary(artifacts);
         if (state.hasRankings && (artifacts.length === 0 || artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING"))) {
           state.timer = setTimeout(refreshResults, 2000);
         }
@@ -442,12 +438,6 @@
   adminOutboundList.addEventListener("click", event => {
     const target = event.target.closest("[data-outbound-id]");
     if (target) openAdminOutboundRecord(target.dataset.outboundId);
-  });
-  artifactContainer.addEventListener("change", event => {
-    if (event.target.matches("#backendArtifactIssuer")) {
-      state.artifactSelection = event.target.value;
-      renderArtifacts().catch(error => { artifactContainer.innerHTML = `<p class="backend-error">${escapeHtml(error.message)}</p>`; });
-    }
   });
   loadSession();
 })();

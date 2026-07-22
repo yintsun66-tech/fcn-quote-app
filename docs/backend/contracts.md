@@ -66,6 +66,11 @@ Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and 
 
 The server returns `404` for resources not owned by the current user, avoiding cross-user existence disclosure.
 
+Artifacts are **one image per trade** (ADR 0005): each `artifacts[]` entry carries `tradeCode`
+and the winning `issuer`, plus `status`, `downloadUrl`, and `previewUrl` (`?preview=1` renders
+inline). `GET /status` also returns `tradeCode` on its artifact entries. The results UI links each
+trade's image from that trade's rank-1 issuer name.
+
 ### Controlled mutation endpoints
 
 - `POST /api/v1/rfqs/:rfqId/cancel`

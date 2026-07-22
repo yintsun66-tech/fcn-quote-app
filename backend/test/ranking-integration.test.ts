@@ -90,45 +90,40 @@ describe("versioned ranking persistence", () => {
     ).bind(rfqId).all<{ economic_rank: number; is_image_winner: number; normalized_value: number }>();
     expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
-    expect(imageJobs.map(job => job.issuer)).toEqual(["BNP", "CA", "JPM", "SG", "UBS"]);
+    // One image per trade: the single trade T01 yields one job, for its rank-1 winner BNP.
+    expect(imageJobs.map(job => [job.tradeCode, job.issuer])).toEqual([["T01", "BNP"]]);
     const artifacts = await testEnv.DB.prepare(
-      "SELECT issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY issuer"
-    ).bind(rfqId).all<{ issuer: string; render_profile_version: string }>();
+      "SELECT trade_code, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
+    ).bind(rfqId).all<{ trade_code: string; issuer: string; render_profile_version: string }>();
     expect(artifacts.results).toEqual([
-      { issuer: "BNP", render_profile_version: "quote-card-reference-v3" },
-      { issuer: "CA", render_profile_version: "quote-card-reference-v3" },
-      { issuer: "JPM", render_profile_version: "quote-card-reference-v3" },
-      { issuer: "SG", render_profile_version: "quote-card-reference-v3" },
-      { issuer: "UBS", render_profile_version: "quote-card-reference-v3" }
+      { trade_code: "T01", issuer: "BNP", render_profile_version: "quote-card-reference-v3" }
     ]);
     const session = { user: { id: userId } } as SessionContext;
     const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
-      artifacts: Array<{ id: string; issuer: string; isDefault: boolean; previewUrl: string | null }>;
+      artifacts: Array<{ id: string; tradeCode: string; issuer: string; previewUrl: string | null }>;
     }>();
-    expect(artifactList.artifacts.map(item => [item.issuer, item.isDefault])).toEqual([
-      ["BNP", true], ["CA", false], ["JPM", false], ["SG", false], ["UBS", false]
-    ]);
+    expect(artifactList.artifacts.map(item => [item.tradeCode, item.issuer])).toEqual([["T01", "BNP"]]);
 
-    let renderedSgHtml = "";
+    let renderedHtml = "";
     const renderEnv = {
       DB: testEnv.DB,
       RAW_MAIL_BUCKET: testEnv.RAW_MAIL_BUCKET,
       EMPLOYEE_LOOKUP_KEY: LOOKUP_KEY,
       BROWSER: {
         async quickAction(_action: string, options: { html: string }) {
-          renderedSgHtml = options.html;
+          renderedHtml = options.html;
           return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
         }
       }
     } as unknown as AppEnv;
-    await processImageRenderJob(renderEnv, imageJobs.find(item => item.issuer === "SG")!);
-    expect(renderedSgHtml).toContain("<h1>FCN 報價</h1>");
-    expect(renderedSgHtml).toContain("8%");
-    expect(renderedSgHtml).toContain("報價日期：21-Jul-26");
-    expect(renderedSgHtml).toContain(`RFQ 編號：[RFQ:${await rfqCorrelationCode(LOOKUP_KEY, rfqId)}]`);
+    await processImageRenderJob(renderEnv, imageJobs[0]!);
+    expect(renderedHtml).toContain("<h1>FCN 報價</h1>");
+    expect(renderedHtml).toContain("14%");
+    expect(renderedHtml).toContain("報價日期：21-Jul-26");
+    expect(renderedHtml).toContain(`RFQ 編號：[RFQ:${await rfqCorrelationCode(LOOKUP_KEY, rfqId)}]`);
 
     const bnpArtifact = artifactList.artifacts.find(item => item.issuer === "BNP")!;
-    const objectKey = `quote-images/v3/${rfqId}/test/BNP.png`;
+    const objectKey = `quote-images/v3/${rfqId}/test/T01.png`;
     await testEnv.RAW_MAIL_BUCKET.put(objectKey, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: "image/png" } });
     await testEnv.DB.prepare(
       "UPDATE generated_artifacts SET status = 'READY', r2_object_key = ?, completed_at = ? WHERE id = ?"

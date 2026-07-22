@@ -128,6 +128,27 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
   Verified `GET /api/v1/health` → `{"status":"ok"}` and the live `backend-client.js` (26275 bytes)
   contains the `backendFinalizeNow` button and `/finalize` call.
 
+## Per-trade quote images (implemented; migration + deploy pending)
+
+- **One image per trade** (the trade's rank-1 winner), replacing per-issuer grouping. Each trade's
+  winning issuer name in the results view links to that trade's image; a per-trade download list
+  replaces the issuer-switcher gallery. See [ADR 0005](adr/0005-per-trade-quote-images.md).
+- **DB migration `0008_trade_artifacts.sql`** rebuilds `generated_artifacts` and `image_render_jobs`
+  keyed by `trade_code` (`UNIQUE(ranking_run_id, trade_code)`). It **drops** the prior
+  issuer-grouped tables — old artifact rows do not map to the per-trade model and are regenerable
+  via recalculation; their R2 objects expire under the 90-day lifecycle.
+- Files: `migrations/0008_trade_artifacts.sql`, `src/ranking.ts`, `src/artifacts.ts`,
+  `src/results.ts`, `src/types.ts`, `backend-client.js`, `test/ranking-integration.test.ts`,
+  ADR 0005, `docs/backend/architecture.md`, `docs/backend/contracts.md`.
+- API: artifacts now carry `tradeCode` (status + list); `isDefault` removed. Up to 20 render jobs
+  per RFQ — Browser Rendering free-plan capacity remains a watch item under real bursts.
+- **Verification (local):** `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test`
+  (14 files, 64 tests); `pnpm run build` (dry run) — all passed.
+- ⚠️ **Deploy order:** apply migration 0008 to remote D1 **then** deploy the Worker immediately
+  (the new code requires `trade_code`; the old code cannot insert into the new schema). There is a
+  brief window during which finalization would fail — deploy when no RFQ is mid-finalization.
+- **Status:** committed? see log. migration applied to remote D1? **no**. deployed? **no**.
+
 ## Latest SG outgoing-email table update
 
 The SG table update is committed on both branches:

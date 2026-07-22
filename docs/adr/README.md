@@ -37,5 +37,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0002: Subject-line correlation code and branch label](0002-subject-correlation-and-branch-label.md)
 - [ADR 0003: Quote-turnaround tuning (configurable deadline, coalesced session writes)](0003-quote-turnaround-tuning.md)
 - [ADR 0004: User-initiated early finalization of an RFQ](0004-user-early-finalize.md)
+- [ADR 0005: One quote image per trade](0005-per-trade-quote-images.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

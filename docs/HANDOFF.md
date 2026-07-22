@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `206b01f fix(nomura): default effective date offset to seven`
+Latest relevant commit: `b19da0e feat(email): unify inbound and outbound address`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `e1d9ab8b-de52-4b52-a1d2-19c752446ec2`
+- Latest verified Cloudflare Worker version: `71b1a0ba-70e0-4e6a-b341-54ddc938ecf6`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -20,7 +20,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 - `app.yintsun66.com` serves the same root application assets through the Cloudflare Worker and activates `backend-client.js`.
 - The backend supports registration, application-managed username/password login, ADMIN role checks, RFQ creation/validation/sending, eight outbound mail batches, eleven expected issuers, inbound MIME intake, parsing/normalization, ten-minute finalization, ranking, and private quote-image artifacts.
 - Outbound mail is sent from `rfq@yintsun66.com` to the fixed recipient `i14053@firstbank.com.tw` through the Cloudflare email binding.
-- Issuer replies currently must be forwarded from the bank mailbox to `reply@yintsun66.com`; Cloudflare cannot log into or poll the bank mailbox directly.
+- Issuer replies must be forwarded from the bank mailbox to `rfq@yintsun66.com`; Cloudflare cannot log into or poll the bank mailbox directly.
 - ADMIN controls currently include:
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
@@ -52,7 +52,7 @@ For the current backend branch through commit `ff12ef5`:
 ## Safe next steps
 
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
-2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to the configured inbound address and inspect its preserved headers through the application’s private intake/audit path.
+2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `rfq@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
 3. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
 
 ## Subject-line correlation change (implemented on `feature/subject-branch-correlation`)
@@ -102,8 +102,10 @@ The SG table update is committed on both branches:
 - Verification passed: both `app.js` syntax checks, 14 test files / 62 tests, typecheck, and Cloudflare dry-run build.
 - Cloudflare deployment version `b299861e-c569-4d64-9afe-22808c3802d8` is live. The health endpoint returned `{"status":"ok"}`, and cache-bypassed checks confirmed both deployed generator assets contain the fixed value. GitHub Pages also serves the updated `app.js`.
 
-## Pending unified mailbox route
+## Unified mailbox route (live)
 
-- The current working tree changes the configured inbound Email Worker address from `reply@yintsun66.com` to the existing outbound sender `rfq@yintsun66.com`.
-- This change is not live until the updated Worker configuration is explicitly deployed. Until then, the live inbound route remains `reply@yintsun66.com`.
-- Before deployment, update the bank forwarding rule to send issuer replies to `rfq@yintsun66.com` and exclude messages originally sent by `rfq@yintsun66.com`, so outbound RFQs are not re-ingested as unrelated inbound mail.
+- Outbound sender and inbound Email Worker address are both `rfq@yintsun66.com`; the fixed outbound recipient remains `i14053@firstbank.com.tw`.
+- Implemented in `b19da0e`, with the inbound fixtures and operational documentation updated to the same address.
+- Verification passed: 14 test files / 62 tests, typecheck, Cloudflare dry-run build, deployment listing, and `GET https://api.yintsun66.com/api/v1/health` → `{"status":"ok"}`.
+- Cloudflare Worker version `71b1a0ba-70e0-4e6a-b341-54ddc938ecf6` is deployed at 100%. The deploy accepted `INBOUND_ADDRESS=rfq@yintsun66.com` and the configured Email Worker address trigger.
+- End-to-end inbound delivery is not proven until the bank forwards a controlled issuer reply to `rfq@yintsun66.com`. Exclude messages originally sent by `rfq@yintsun66.com` from the bank forwarding rule so outbound RFQs are not re-ingested as unrelated inbound mail.

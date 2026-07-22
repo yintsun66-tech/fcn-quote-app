@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `c4a2851 feat(rfq): user-initiated early finalization button`
+Latest relevant commit: `00d1a1f feat(artifacts): one quote image per trade with per-trade result links`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `59815984-0172-4256-b295-408d7d352ce1`
+- Latest verified Cloudflare Worker version: `93a4f2d2-0603-4d41-916f-0233dca2e23c`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -147,19 +147,15 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
 - ⚠️ **Deploy order:** apply migration 0008 to remote D1 **then** deploy the Worker immediately
   (the new code requires `trade_code`; the old code cannot insert into the new schema). There is a
   brief window during which finalization would fail — deploy when no RFQ is mid-finalization.
-- **Status:** committed `00d1a1f`, pushed to `origin/feature/subject-branch-correlation`.
-  Migration 0008 apply to remote D1 **failed** on 2026-07-22 with Cloudflare API `7403`
-  ("account is not valid or is not authorized to access this service"). With the current
-  wrangler token, `wrangler deploy` and `d1 migrations list --remote` succeed, but
-  `d1 migrations apply --remote` is refused — a D1 edit-permission gap. Migration remains
-  **pending** (remote schema unchanged) and the Worker was **not** deployed (deploying the new
-  code without 0008 would break finalization). Production stays on the prior consistent state:
-  Worker `59815984-0172-4256-b295-408d7d352ce1`, old schema, health `ok`.
-- **To finish (needs a D1:Edit-capable credential):** re-authenticate wrangler with a token that
-  has D1 edit on this account (or run the `0008_trade_artifacts.sql` statements in the D1 Console),
-  then, back-to-back when no RFQ is mid-finalization:
-  `pnpm exec wrangler d1 migrations apply fcn-quote --remote` → `pnpm exec wrangler deploy` →
-  verify `GET /api/v1/health` and record the Worker version here.
+- **Status:** committed `00d1a1f`, pushed to `origin/feature/subject-branch-correlation` (not merged
+  to `main`). Migration 0008 applied to remote D1 on 2026-07-23 (`Executed 9 commands`); the first
+  `apply` attempt returned a transient Cloudflare `7403` and succeeded on retry. Worker deployed —
+  version `93a4f2d2-0603-4d41-916f-0233dca2e23c`.
+- **Verified:** `GET /api/v1/health` → `{"status":"ok"}`; remote `generated_artifacts` now has the
+  `trade_code` column; the deployed `backend-client.js` carries the per-trade rendering
+  (`renderArtifactSummary`, `artifactByTrade`).
+- Not yet exercised end-to-end: a real RFQ producing per-trade images and the inline links.
+  Confirm with an authorized test RFQ (this sends real bank email).
 
 ## Latest SG outgoing-email table update
 

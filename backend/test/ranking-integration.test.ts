@@ -45,7 +45,7 @@ describe("versioned ranking persistence", () => {
         `INSERT INTO inbound_messages
           (id, r2_raw_mime_key, content_hash, envelope_from, envelope_to, raw_subject,
            raw_size_bytes, received_at, rfq_id, detected_issuer, status)
-         VALUES (?, ?, ?, 'sender@example.com', 'reply@yintsun66.com', 'Quote', 100, ?, ?, 'BNP', 'PARSED')`
+         VALUES (?, ?, ?, 'sender@example.com', 'rfq@yintsun66.com', 'Quote', 100, ?, ?, 'BNP', 'PARSED')`
       ).bind(inboundId, `raw/${suffix}`, `content-${suffix}`, now, rfqId),
       testEnv.DB.prepare(
         `INSERT INTO quote_rank_jobs

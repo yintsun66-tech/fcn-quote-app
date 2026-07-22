@@ -20,7 +20,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 - `app.yintsun66.com` serves the same root application assets through the Cloudflare Worker and activates `backend-client.js`.
 - The backend supports registration, application-managed username/password login, ADMIN role checks, RFQ creation/validation/sending, eight outbound mail batches, eleven expected issuers, inbound MIME intake, parsing/normalization, ten-minute finalization, ranking, and private quote-image artifacts.
 - Outbound mail is sent from `rfq@yintsun66.com` to the fixed recipient `i14053@firstbank.com.tw` through the Cloudflare email binding.
-- Issuer replies must be forwarded from the bank mailbox to `reply@yintsun66.com`; Cloudflare cannot log into or poll the bank mailbox directly.
+- Issuer replies currently must be forwarded from the bank mailbox to `reply@yintsun66.com`; Cloudflare cannot log into or poll the bank mailbox directly.
 - ADMIN controls currently include:
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
@@ -28,7 +28,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 ## Important current limitations / known gaps
 
 1. A Cloudflare `SENT` batch indicates provider acceptance, not proven inbox delivery. Earlier RFQs from username `14053` reached `WAITING` and eventually `NO_VALID_QUOTE`; valid issuer replies were not observed before the deadline.
-2. The real bank forwarding chain must still be verified with a controlled issuer-style reply. Capture the actual headers/MIME that reach `reply@yintsun66.com` before treating automatic issuer recognition as fully production-proven.
+2. The real bank forwarding chain must still be verified with a controlled issuer-style reply. Capture the actual headers/MIME that reach the configured inbound address before treating automatic issuer recognition as fully production-proven.
 3. MS remains display-warning only (`MS（OBU不得承做）`). There is no approved account-level OBU attribute or enforcement rule.
 4. The true Cloudflare Browser Rendering capacity and email-product limits need observation under real traffic. Queue retries protect workflow progress but do not prove capacity.
 5. Several older design documents contain historical language such as “Phase 1 draft” or “no deployment.” Use current code, `wrangler.jsonc`, Git history, this handoff, and live verification for current state; update stale documents only in a scoped documentation task.
@@ -52,7 +52,7 @@ For the current backend branch through commit `ff12ef5`:
 ## Safe next steps
 
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
-2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `reply@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
+2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to the configured inbound address and inspect its preserved headers through the application’s private intake/audit path.
 3. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
 
 ## Subject-line correlation change (implemented on `feature/subject-branch-correlation`)
@@ -101,3 +101,9 @@ The SG table update is committed on both branches:
 - `main`: `07d0cc1`; includes the GitHub Pages `app.js` update.
 - Verification passed: both `app.js` syntax checks, 14 test files / 62 tests, typecheck, and Cloudflare dry-run build.
 - Cloudflare deployment version `b299861e-c569-4d64-9afe-22808c3802d8` is live. The health endpoint returned `{"status":"ok"}`, and cache-bypassed checks confirmed both deployed generator assets contain the fixed value. GitHub Pages also serves the updated `app.js`.
+
+## Pending unified mailbox route
+
+- The current working tree changes the configured inbound Email Worker address from `reply@yintsun66.com` to the existing outbound sender `rfq@yintsun66.com`.
+- This change is not live until the updated Worker configuration is explicitly deployed. Until then, the live inbound route remains `reply@yintsun66.com`.
+- Before deployment, update the bank forwarding rule to send issuer replies to `rfq@yintsun66.com` and exclude messages originally sent by `rfq@yintsun66.com`, so outbound RFQs are not re-ingested as unrelated inbound mail.

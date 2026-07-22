@@ -12,7 +12,7 @@
     "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5",
     "OUTBOUND_FROM": "rfq@yintsun66.com",
     "OUTBOUND_TO": "i14053@firstbank.com.tw",
-    "INBOUND_ADDRESS": "reply@yintsun66.com",
+    "INBOUND_ADDRESS": "rfq@yintsun66.com",
     "MAX_INBOUND_EMAIL_BYTES": "26214400"
   },
   "secrets": {
@@ -54,7 +54,7 @@
   "triggers": {
     "crons": ["*/2 * * * *"]
   },
-  "addresses": ["reply@yintsun66.com"],
+  "addresses": ["rfq@yintsun66.com"],
   "d1_databases": [
     {
       "binding": "DB",

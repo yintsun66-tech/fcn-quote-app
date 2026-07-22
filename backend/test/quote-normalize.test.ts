@@ -50,7 +50,7 @@ describe("canonical quote normalization", () => {
         `INSERT INTO inbound_messages
           (id, r2_raw_mime_key, content_hash, envelope_from, envelope_to, raw_subject,
            raw_size_bytes, received_at, rfq_id, detected_issuer, status, r2_parsed_tables_key)
-         VALUES (?, ?, ?, 'quotation.tw@bnpparibas.com', 'reply@yintsun66.com', 'Quote',
+         VALUES (?, ?, ?, 'quotation.tw@bnpparibas.com', 'rfq@yintsun66.com', 'Quote',
                  100, ?, ?, 'BNP', 'PARSED', ?)`
       ).bind(inboundId, `raw/${suffix}`, `content-${suffix}`, now, rfqId, `parsed/${suffix}`),
       testEnv.DB.prepare(

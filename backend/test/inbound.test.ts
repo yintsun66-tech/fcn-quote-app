@@ -24,7 +24,7 @@ function email(raw: string, options: { to?: string; id?: string } = {}): Forward
   });
   return {
     from: "pricing@example.com",
-    to: options.to ?? "reply@yintsun66.com",
+    to: options.to ?? "rfq@yintsun66.com",
     raw: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
     rawSize: bytes.byteLength,
     headers,
@@ -40,7 +40,7 @@ beforeAll(async () => {
     DB: testEnv.DB,
     EMPLOYEE_DATA_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     EMPLOYEE_LOOKUP_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    INBOUND_ADDRESS: "reply@yintsun66.com",
+    INBOUND_ADDRESS: "rfq@yintsun66.com",
     MAX_INBOUND_EMAIL_BYTES: "26214400",
     RAW_MAIL_BUCKET: {
       async put(key: string, value: ArrayBuffer | ArrayBufferView | string) {

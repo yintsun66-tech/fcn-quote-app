@@ -4,14 +4,14 @@ Status: Phase 4a ingestion and Phase 4b MIME classification implemented for depl
 
 ## Scope
 
-Phase 4a receives RFC822/MIME addressed to `reply@yintsun66.com`, stores the raw message in private R2, writes bounded metadata to D1, and enqueues one idempotent parse job. Phase 4b parses MIME with `postal-mime`, extracts bounded table cell text, evaluates sender/subject evidence, correlates replies to an RFQ, and records a terminal classification. It does not execute attachments, fetch links, normalize issuer quote rows, match trades, or rank quotes.
+Phase 4a receives RFC822/MIME addressed to `rfq@yintsun66.com`, stores the raw message in private R2, writes bounded metadata to D1, and enqueues one idempotent parse job. Phase 4b parses MIME with `postal-mime`, extracts bounded table cell text, evaluates sender/subject evidence, correlates replies to an RFQ, and records a terminal classification. It does not execute attachments, fetch links, normalize issuer quote rows, match trades, or rank quotes.
 
 ## Cloudflare resources
 
 - Private R2 bucket: `fcn-quote-private`
 - Queue producer: `fcn-email-parse`
 - Queue consumer and dead-letter queue: `fcn-email-parse` and `fcn-email-parse-dlq`
-- Email Routing address: `reply@yintsun66.com`
+- Email Routing address: `rfq@yintsun66.com`
 - Worker bindings: `RAW_MAIL_BUCKET` and `INBOUND_EMAIL_QUEUE`
 
 The R2 bucket must not have a public development URL or custom domain. Raw mail under `raw-email/` follows the approved 30-day retention policy.

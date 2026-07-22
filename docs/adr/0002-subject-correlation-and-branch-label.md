@@ -17,7 +17,7 @@ stored as `outbound_email_batches.correlation_token_hash`. On inbound, `correlat
 extracts the token from the **subject only**, re-hashes it, and matches the batch
 (`inbound-parser.ts` → `correlateRfq`, `source = "TOKEN"`). A weaker `In-Reply-To` /
 `References` fallback exists but is unreliable across the bank's human forward chain
-(us → i14053 → issuer desks → i14053 → `reply@yintsun66.com`), so the subject token is in
+(us → i14053 → issuer desks → i14053 → `rfq@yintsun66.com`), so the subject token is in
 practice the primary and most forward-survivable correlation carrier.
 
 Operational symptom: correctly formatted and titled RFQs are delivered but receive no issuer

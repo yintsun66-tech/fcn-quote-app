@@ -16,7 +16,7 @@ The existing root-level static site remains unchanged during the backend build. 
 | --- | --- |
 | Application domain | `yintsun66.com` |
 | Outbound sender | `rfq@yintsun66.com` |
-| Inbound route | `reply@yintsun66.com` |
+| Inbound route | `rfq@yintsun66.com` |
 | Bank mailbox forwarding | `i14053@firstbank.com.tw` can forward replies to the inbound route |
 | User authentication | Application-managed username and password |
 | Registration | Approval required; collect five-digit employee number, branch name, user name, username, and password |
@@ -43,7 +43,7 @@ flowchart LR
     E --> F[i14053@firstbank.com.tw]
     F --> I[Issuer workflows]
     I --> F
-    F --> R[reply@yintsun66.com]
+    F --> R[rfq@yintsun66.com]
     R --> EW[Email Worker]
     EW --> B[(Private R2 raw MIME)]
     EW --> Q2[Parse and normalize queue]
@@ -100,7 +100,7 @@ Eight request batches produce an immutable expectation of up to eleven issuer re
 
 ### Email Worker
 
-- Receives RFC822/MIME forwarded to `reply@yintsun66.com`.
+- Receives RFC822/MIME forwarded to `rfq@yintsun66.com`.
 - Performs only quick envelope/header checks in the email event.
 - Stores the original message in private R2 and metadata in D1.
 - Enqueues parsing and returns without executing attachments, fetching links, or loading remote images.
@@ -162,7 +162,7 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 
 ### 3. Reply ingestion
 
-1. The bank mailbox forwards issuer replies to `reply@yintsun66.com`.
+1. The bank mailbox forwards issuer replies to `rfq@yintsun66.com`.
 2. Email Worker stores raw MIME and rejects exact duplicates by message ID/content hash.
 3. Parser identifies issuer from verified sender evidence, not from subject label alone.
 4. Parser correlates the opaque RFQ token, message thread evidence, and D1 ownership.

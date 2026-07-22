@@ -33,7 +33,7 @@ Only `VALID` finite normalized values participate. Equal values retain the same 
 - Worker/custom domains: `api.yintsun66.com`, `app.yintsun66.com`
 - D1: `fcn-quote`
 - Private R2: `fcn-quote-private`
-- Email route: `reply@yintsun66.com`
+- Email route: `rfq@yintsun66.com`
 - Queues: `fcn-outbound-email`, `fcn-email-parse`, `fcn-quote-normalize`, `fcn-quote-rank`, `fcn-image-render`, each with a DLQ
 - Durable Object: `RfqCoordinator`
 - Cron recovery: every two minutes

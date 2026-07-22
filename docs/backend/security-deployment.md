@@ -9,7 +9,7 @@ Status: Phase 1 design draft. No Cloudflare resource or environment has been cha
 3. Application administrator to registration and manual-review functions
 4. Worker to D1, R2, Queues, Durable Objects, email, and Browser Rendering bindings
 5. `rfq@yintsun66.com` to `i14053@firstbank.com.tw`
-6. Bank mailbox forwarding to `reply@yintsun66.com`
+6. Bank mailbox forwarding to `rfq@yintsun66.com`
 7. Forwarded mail to original issuer evidence
 8. Browser Rendering to the internal render route
 
@@ -89,7 +89,7 @@ Because end users require application-managed usernames and passwords, Cloudflar
 
 ### Inbound
 
-- Route `reply@yintsun66.com` to an Email Worker.
+- Route `rfq@yintsun66.com` to an Email Worker.
 - Preserve raw MIME in private R2 before parsing.
 - Verify envelope sender, original `From`, `Return-Path`, DKIM evidence, and forwarding wrapper.
 - Normalize mail-system-added reply/forward prefixes only for matching and retain the raw subject.
@@ -144,7 +144,7 @@ Expected configuration names are documentation placeholders, not yet approved bi
 - `APP_DOMAIN=yintsun66.com`
 - `OUTBOUND_FROM=rfq@yintsun66.com`
 - `OUTBOUND_TO=i14053@firstbank.com.tw`
-- `INBOUND_ADDRESS=reply@yintsun66.com`
+- `INBOUND_ADDRESS=rfq@yintsun66.com`
 - D1 binding
 - private R2 binding
 - Queue producer/consumer bindings
@@ -170,7 +170,7 @@ Phase 2 must define session and audit retention. Scheduled deletion must be scop
 The following must be completed or verified before production deployment:
 
 1. `yintsun66.com` is active in the intended Cloudflare account.
-2. DNS and Email Routing can receive `reply@yintsun66.com`.
+2. DNS and Email Routing can receive `rfq@yintsun66.com`.
 3. The bank forwarding rule is tested end to end.
 4. `rfq@yintsun66.com` and `i14053@firstbank.com.tw` satisfy Cloudflare email verification/product requirements.
 5. Initial application administrators and approval authority are named.

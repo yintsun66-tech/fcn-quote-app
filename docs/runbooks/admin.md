@@ -30,7 +30,7 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
 
 1. Check the RFQ status and issuer status in the application.
 2. Confirm the bank mailbox received the outbound request.
-3. Confirm issuer replies were forwarded to `reply@yintsun66.com`.
+3. Confirm issuer replies were forwarded to `rfq@yintsun66.com`.
 4. Treat missing, malformed, rejected, mismatched, or late replies as excluded from ranking; do not directly edit quotes or rankings in D1.
 5. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not copy raw mail into public chat or Git.
 

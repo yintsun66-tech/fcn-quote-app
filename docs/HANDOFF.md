@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `e4c0b7d feat(artifacts): add mobile issuer-switchable quote images`
+Latest relevant commit: `88ae57d feat(perf): tune quote turnaround and session write cost`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `6496baa9-8c7c-4c0b-b93e-215af221fc69`
+- Latest verified Cloudflare Worker version: `9ce5e3b8-4e1e-4877-9dd6-05fce6aef806`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -100,9 +100,12 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
   submit instead of after the three create/validate/send round trips.
 - **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
   `pnpm test` passed (14 files, 63 tests); `pnpm run build` (dry run) passed.
-- **Status:** committed? no. deployed? no. Awaiting the user's commit/deploy instruction. The
-  default deadline (600s) means deploying is behavior-neutral except for the faster rank batch and
-  frontend polling; `RFQ_DEADLINE_SECONDS` can be lowered later to shorten the window.
+- **Status:** committed `88ae57d`, pushed to `origin/feature/subject-branch-correlation` (not merged
+  to `main`). Deployed to Cloudflare on 2026-07-22 — Worker version
+  `9ce5e3b8-4e1e-4877-9dd6-05fce6aef806`. Verified `GET https://api.yintsun66.com/api/v1/health` →
+  `{"status":"ok"}` and the deployed `backend-client.js` carries the new polling code. The default
+  `RFQ_DEADLINE_SECONDS=600` keeps the window at 10 minutes; lower it to shorten the "some issuers
+  silent" wait.
 
 ## Latest SG outgoing-email table update
 

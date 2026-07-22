@@ -287,9 +287,8 @@ Every finalized result records:
 
 ## Artifact contract
 
-Generated quote images are based only on a finalized ranking snapshot. Rank-one trades are grouped by issuer. An artifact response exposes metadata and an authenticated download endpoint, never the private R2 object key or a permanent public URL.
+Generated quote images are based only on a finalized ranking snapshot. Rank-one issuer groups are the default view, while the owner may switch among every issuer with a valid quote in that snapshot, including valid `OUTSIDE_TOP_THREE` exclusions. Rejected, invalid, unmatched, late and timed-out quotes remain unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's theme. An artifact response exposes `isDefault`, authenticated preview/download endpoints and metadata, never the private R2 object key or a permanent public URL.
 
 ## Error response draft
 
 Errors use a stable machine code, user-safe message, request ID, and optional field errors. They never include raw mail, stack traces, secrets, password material, correlation tokens, or another user's identifiers.
-

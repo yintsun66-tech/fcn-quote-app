@@ -108,4 +108,13 @@ The SG table update is committed on both branches:
 - Implemented in `b19da0e`, with the inbound fixtures and operational documentation updated to the same address.
 - Verification passed: 14 test files / 62 tests, typecheck, Cloudflare dry-run build, deployment listing, and `GET https://api.yintsun66.com/api/v1/health` → `{"status":"ok"}`.
 - Cloudflare Worker version `71b1a0ba-70e0-4e6a-b341-54ddc938ecf6` is deployed at 100%. The deploy accepted `INBOUND_ADDRESS=rfq@yintsun66.com` and the configured Email Worker address trigger.
+- Email Routing rule `e5c5b106730a444b9bcf2a71aef4c5c3` was explicitly updated and verified after deployment: enabled, priority 1, literal matcher `to = rfq@yintsun66.com`, action `worker:fcn-quote-api`. A Worker deploy alone did not update the pre-existing `reply@yintsun66.com` routing rule.
 - End-to-end inbound delivery is not proven until the bank forwards a controlled issuer reply to `rfq@yintsun66.com`. Exclude messages originally sent by `rfq@yintsun66.com` from the bank forwarding rule so outbound RFQs are not re-ingested as unrelated inbound mail.
+
+## Mobile quote-image and issuer switching (local, not deployed)
+
+- Backend quote images now use a fixed 720 CSS-pixel portrait layout at 1.5 device scale, larger underlying text, and the same eleven issuer palettes as the main compatibility quote image.
+- A finalized ranking now queues one artifact for every issuer with a valid quote, including valid `OUTSIDE_TOP_THREE` quotes recorded in that same snapshot. Rank-one issuer groups remain the default; the authenticated result dialog can switch to another valid issuer, preview its private-R2 PNG inline, and download it.
+- The artifact API now returns `isDefault` and an authenticated `previewUrl`; the existing download URL remains attachment-oriented. No D1 migration, binding, secret, mail format, ranking direction, or authentication change was made.
+- Local verification: `node --check backend-client.js` passed; direct source/test TypeScript checks passed; focused quote-card/ranking integration tests passed (2 files, 3 tests); the full suite passed (14 files, 63 tests); and the Cloudflare dry-run build passed after rerunning outside the filesystem sandbox. The sandboxed Wrangler attempt failed only because it could not traverse the parent profile directory.
+- This work is not committed, pushed, or deployed. Preserve the existing untracked `.claude/` directory and the earlier unified-mailbox handoff edit.

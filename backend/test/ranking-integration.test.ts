@@ -2,14 +2,17 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { processQuoteRankJob } from "../src/ranking";
-import type { AppEnv, ImageRenderJob, QuoteRankJob } from "../src/types";
+import { processImageRenderJob } from "../src/artifacts";
+import { downloadArtifact, listRfqArtifacts } from "../src/results";
+import type { AppEnv, ImageRenderJob, QuoteRankJob, SessionContext } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
+const BASE_URL = "https://api.yintsun66.com";
 
 describe("versioned ranking persistence", () => {
   beforeAll(async () => applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS));
 
-  it("persists dense top-three ranks and queues only the deterministic rank-one image", async () => {
+  it("persists dense top-three ranks and queues switchable issuer images", async () => {
     const suffix = crypto.randomUUID();
     const userId = `usr_${suffix}`;
     const rfqId = `rfq_${crypto.randomUUID()}`;
@@ -54,8 +57,8 @@ describe("versioned ranking persistence", () => {
          VALUES (?, ?, 'ALL_TERMINAL', 1, ?, 'QUEUED', ?, ?, ?)`
       ).bind(jobId, rfqId, `rank:${rfqId}:v1`, now, now, now)
     ]);
-    const coupons = [14, 14, 12, 10];
-    const issuers = ["BNP", "JPM", "UBS", "CA"];
+    const coupons = [14, 14, 12, 10, 8];
+    const issuers = ["BNP", "JPM", "UBS", "CA", "SG"];
     for (let index = 0; index < coupons.length; index += 1) {
       const receivedAt = new Date(Date.parse(now) + index * 1000).toISOString();
       await testEnv.DB.prepare(
@@ -85,7 +88,64 @@ describe("versioned ranking persistence", () => {
     ).bind(rfqId).all<{ economic_rank: number; is_image_winner: number; normalized_value: number }>();
     expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
-    expect(imageJobs).toHaveLength(1);
+    expect(imageJobs.map(job => job.issuer)).toEqual(["BNP", "CA", "JPM", "SG", "UBS"]);
+    const artifacts = await testEnv.DB.prepare(
+      "SELECT issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY issuer"
+    ).bind(rfqId).all<{ issuer: string; render_profile_version: string }>();
+    expect(artifacts.results).toEqual([
+      { issuer: "BNP", render_profile_version: "quote-card-mobile-v2" },
+      { issuer: "CA", render_profile_version: "quote-card-mobile-v2" },
+      { issuer: "JPM", render_profile_version: "quote-card-mobile-v2" },
+      { issuer: "SG", render_profile_version: "quote-card-mobile-v2" },
+      { issuer: "UBS", render_profile_version: "quote-card-mobile-v2" }
+    ]);
+    const session = { user: { id: userId } } as SessionContext;
+    const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
+      artifacts: Array<{ id: string; issuer: string; isDefault: boolean; previewUrl: string | null }>;
+    }>();
+    expect(artifactList.artifacts.map(item => [item.issuer, item.isDefault])).toEqual([
+      ["BNP", true], ["CA", false], ["JPM", false], ["SG", false], ["UBS", false]
+    ]);
+
+    let renderedSgHtml = "";
+    const renderEnv = {
+      DB: testEnv.DB,
+      RAW_MAIL_BUCKET: testEnv.RAW_MAIL_BUCKET,
+      BROWSER: {
+        async quickAction(_action: string, options: { html: string }) {
+          renderedSgHtml = options.html;
+          return new Response(new Uint8Array([7, 8, 9]), { status: 200 });
+        }
+      }
+    } as unknown as AppEnv;
+    await processImageRenderJob(renderEnv, imageJobs.find(item => item.issuer === "SG")!);
+    expect(renderedSgHtml).toContain("<h1>SG</h1>");
+    expect(renderedSgHtml).toContain("8%");
+
+    const bnpArtifact = artifactList.artifacts.find(item => item.issuer === "BNP")!;
+    const objectKey = `quote-images/v2/${rfqId}/test/BNP.png`;
+    await testEnv.RAW_MAIL_BUCKET.put(objectKey, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: "image/png" } });
+    await testEnv.DB.prepare(
+      "UPDATE generated_artifacts SET status = 'READY', r2_object_key = ?, completed_at = ? WHERE id = ?"
+    ).bind(objectKey, now, bnpArtifact.id).run();
+    const refreshedArtifacts = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
+      artifacts: Array<{ issuer: string; previewUrl: string | null }>;
+    }>();
+    expect(refreshedArtifacts.artifacts.find(item => item.issuer === "BNP")?.previewUrl).toContain("?preview=1");
+    const preview = await downloadArtifact(
+      new Request(`${BASE_URL}/api/v1/artifacts/${bnpArtifact.id}/download?preview=1`),
+      testEnv,
+      session,
+      bnpArtifact.id
+    );
+    expect(preview.headers.get("content-disposition")).toContain("inline");
+    const download = await downloadArtifact(
+      new Request(`${BASE_URL}/api/v1/artifacts/${bnpArtifact.id}/download`),
+      testEnv,
+      session,
+      bnpArtifact.id
+    );
+    expect(download.headers.get("content-disposition")).toContain("attachment");
     const rfq = await testEnv.DB.prepare("SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ?")
       .bind(rfqId).first<{ workflow_status: string; current_ranking_version: number }>();
     expect(rfq).toEqual({ workflow_status: "COMPLETED", current_ranking_version: 1 });

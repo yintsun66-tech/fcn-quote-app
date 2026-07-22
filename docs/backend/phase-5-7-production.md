@@ -11,8 +11,8 @@ Branch: `feature/backend-foundation`
 4. The final successful outbound batch starts one named RFQ Durable Object and sets the ten-minute alarm.
 5. Inbound MIME is stored privately, parsed, normalized through an issuer profile and matched to a trade.
 6. All-terminal or deadline finalization enqueues a versioned ranking run.
-7. Rank-one trades are grouped by issuer and rendered into private R2 PNG artifacts.
-8. The owner polls status/results and downloads artifacts through the authenticated Worker.
+7. Every issuer with a valid quote in the finalized ranking snapshot is rendered into a private R2 mobile-portrait PNG artifact; rank-one issuer groups remain the default view.
+8. The owner polls status/results, switches among ranked issuers, previews the selected artifact and downloads it through the authenticated Worker.
 
 Late replies are stored but do not overwrite a finalized run. Recalculation creates a new version.
 

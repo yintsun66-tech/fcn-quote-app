@@ -27,7 +27,7 @@ The existing root-level static site remains unchanged during the backend build. 
 | Test fixtures | Anonymous fixtures are allowed in a private repository |
 | Correlation token | Allowed, but never use `##` |
 | Generated subject prefixes | Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes |
-| Multi-issuer winners | Group winning trades by issuer when generating quote images |
+| Quote-image issuer selection | Default to rank-one issuer groups and allow the owner to switch among every issuer with a valid quote in the finalized ranking snapshot |
 
 Mail systems may add reply or forwarding prefixes to inbound messages. The inbound parser must normalize such prefixes for matching while retaining the raw subject. The application itself must never add them to an outbound subject.
 
@@ -138,7 +138,8 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 
 - Renders an internal deterministic quote-card route from a finalized ranking snapshot.
 - Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
-- Groups rank-one trades by winning issuer and creates one multi-trade image per issuer group.
+- Creates one mobile-portrait image for each issuer with a valid quote in the finalized ranking snapshot, including valid quotes outside the displayed top three; each image contains that issuer's quoted trades.
+- Uses the same issuer-specific color palette as the compatibility frontend and keeps rank-one issuer groups as the default view.
 - Stores PNG output in private R2.
 
 ## End-to-end flow
@@ -182,7 +183,8 @@ Ranking occurs independently for every trade. Only valid, comparable quotes are 
 
 - The user result page loads only RFQs owned by that authenticated user.
 - It shows issuer status, top three quotes, invalid/no-quote reasons, countdown/final status, and artifacts.
-- Rank-one trades are grouped by issuer for image rendering.
+- Rank-one issuer groups remain the default image view; the owner can switch to any other issuer with a valid quote in the finalized ranking snapshot.
+- Server-rendered quote cards use a fixed portrait viewport so browser zoom and scroll do not affect the PNG.
 - Ties retain the same economic rank; the earliest valid receipt is selected only where a single deterministic image winner is required.
 
 ## RFQ lifecycle

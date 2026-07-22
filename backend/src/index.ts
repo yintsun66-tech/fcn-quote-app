@@ -88,7 +88,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const recalculateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/recalculate$/.exec(path);
   if (method === "POST" && recalculateMatch?.[1]) return recalculateRfq(request, env, session, recalculateMatch[1]);
   const artifactDownloadMatch = /^\/api\/v1\/artifacts\/([^/]+)\/download$/.exec(path);
-  if (method === "GET" && artifactDownloadMatch?.[1]) return downloadArtifact(env, session, artifactDownloadMatch[1]);
+  if (method === "GET" && artifactDownloadMatch?.[1]) return downloadArtifact(request, env, session, artifactDownloadMatch[1]);
   const rfqMatch = /^\/api\/v1\/rfqs\/([^/]+)$/.exec(path);
   if (method === "GET" && rfqMatch?.[1]) return getRfq(env, session, rfqMatch[1]);
 

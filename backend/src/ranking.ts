@@ -2,7 +2,7 @@ import { newId, nowIso } from "./db";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, TargetField } from "./types";
 
 const RULES_VERSION = "ranking-v1";
-const RENDER_PROFILE_VERSION = "quote-card-v1";
+const RENDER_PROFILE_VERSION = "quote-card-mobile-v2";
 const LEASE_MILLISECONDS = 2 * 60 * 1000;
 
 interface RankJobRow {
@@ -102,12 +102,12 @@ async function persistArtifacts(
   rfqId: string,
   runId: string,
   version: number,
-  winnerIssuers: Set<string>,
+  quotedIssuers: Set<string>,
   createdAt: string
 ): Promise<ImageRenderJob[]> {
   const jobs: ImageRenderJob[] = [];
   const statements: D1PreparedStatement[] = [];
-  for (const issuer of [...winnerIssuers].sort()) {
+  for (const issuer of [...quotedIssuers].sort()) {
     const artifactId = newId("art");
     const jobId = newId("imgjob");
     const idempotencyKey = `image:${rfqId}:v${version}:${issuer}`;
@@ -178,15 +178,18 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
   const statements: D1PreparedStatement[] = [];
-  const winnerIssuers = new Set<string>();
+  const quotedIssuers = new Set<string>();
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
+    tradeQuotes.forEach(quote => {
+      const value = quoteTargetValue(quote, trade.target_field);
+      if (quote.status === "VALID" && value !== null && Number.isFinite(value)) quotedIssuers.add(quote.issuer);
+    });
     const ranked = rankValidQuotes(tradeQuotes, trade.target_field);
     validResultCount += ranked.length;
     const firstRank = ranked.filter(result => result.economicRank === 1);
     const imageWinnerId = firstRank[0]?.quote.id ?? null;
-    if (firstRank[0]) winnerIssuers.add(firstRank[0].quote.issuer);
     for (const result of ranked) {
       statements.push(env.DB.prepare(
         `INSERT OR IGNORE INTO ranking_results
@@ -231,7 +234,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   );
   await env.DB.batch(statements);
 
-  const imageJobs = await persistArtifacts(env, job.rfq_id, run.id, job.requested_version, winnerIssuers, completedAt);
+  const imageJobs = await persistArtifacts(env, job.rfq_id, run.id, job.requested_version, quotedIssuers, completedAt);
   for (const imageJob of imageJobs) await env.IMAGE_RENDER_QUEUE.send(imageJob);
 }
 

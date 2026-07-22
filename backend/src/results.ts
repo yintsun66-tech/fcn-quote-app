@@ -93,18 +93,26 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
 export async function listRfqArtifacts(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
   const artifacts = await env.DB.prepare(
-    `SELECT a.id, a.issuer, a.content_type, a.byte_size, a.status, a.completed_at, a.expires_at
+    `SELECT a.id, a.issuer, a.content_type, a.byte_size, a.status, a.completed_at, a.expires_at,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM ranking_results winner
+              JOIN issuer_quotes winner_quote ON winner_quote.id = winner.quote_id
+              WHERE winner.ranking_run_id = a.ranking_run_id
+                AND winner.is_image_winner = 1 AND winner_quote.issuer = a.issuer
+            ) THEN 1 ELSE 0 END AS is_default
        FROM generated_artifacts a JOIN ranking_runs r ON r.id = a.ranking_run_id
       WHERE a.rfq_id = ? AND r.version = ? ORDER BY a.issuer`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
   return jsonResponse({ artifacts: artifacts.results.map(row => ({
     id: row.id, issuer: row.issuer, contentType: row.content_type, byteSize: row.byte_size,
     status: row.status, completedAt: row.completed_at, expiresAt: row.expires_at,
-    downloadUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download` : null
+    isDefault: row.is_default === 1,
+    downloadUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download` : null,
+    previewUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download?preview=1` : null
   })) });
 }
 
-export async function downloadArtifact(env: AppEnv, session: SessionContext, artifactId: string): Promise<Response> {
+export async function downloadArtifact(request: Request, env: AppEnv, session: SessionContext, artifactId: string): Promise<Response> {
   const artifact = await env.DB.prepare(
     `SELECT a.r2_object_key, a.content_type, a.issuer, a.status, a.expires_at, a.rfq_id
        FROM generated_artifacts a JOIN rfqs r ON r.id = a.rfq_id
@@ -119,7 +127,8 @@ export async function downloadArtifact(env: AppEnv, session: SessionContext, art
   if (!object) throw new AppError(404, "ARTIFACT_OBJECT_NOT_FOUND", "報價圖檔案不存在。 ");
   const headers = new Headers();
   headers.set("content-type", artifact.content_type);
-  headers.set("content-disposition", `attachment; filename="${artifact.rfq_id}-${artifact.issuer}.png"`);
+  const disposition = new URL(request.url).searchParams.get("preview") === "1" ? "inline" : "attachment";
+  headers.set("content-disposition", `${disposition}; filename="${artifact.rfq_id}-${artifact.issuer}.png"`);
   headers.set("cache-control", "private, no-store");
   headers.set("x-content-type-options", "nosniff");
   return new Response(object.body, { headers });

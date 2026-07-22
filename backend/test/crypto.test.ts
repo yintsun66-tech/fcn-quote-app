@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decryptEmployeeNumber, encryptEmployeeNumber, hashPassword, keyedHash, keyedShortCode, sha256Bytes, verifyPassword } from "../src/crypto";
+import { decryptEmployeeNumber, encryptEmployeeNumber, hashPassword, keyedHash, keyedShortCode, rfqCorrelationCode, sha256Bytes, verifyPassword } from "../src/crypto";
 
 const DATA_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -36,6 +36,7 @@ describe("crypto primitives", () => {
     expect(first).not.toBe(different);
     expect(first).toMatch(/^[0-9A-HJKMNP-TV-Z]{10}$/);
     expect(await keyedShortCode(LOOKUP_KEY, "RFQ_CORRELATION_V1:rfq_abc", 6)).toHaveLength(6);
+    expect(await rfqCorrelationCode(LOOKUP_KEY, "rfq_abc")).toBe(first);
   });
 
   it("hashes raw binary content without converting it to text", async () => {

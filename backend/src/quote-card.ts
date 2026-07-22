@@ -5,6 +5,7 @@ export interface QuoteCardTrade {
   currency: string;
   issuer: string;
   issuerDisplayName: string;
+  tradeDate: string | null;
   tenorMonths: number | null;
   guaranteedPeriodsMonths: number | null;
   underlyings: string[];
@@ -50,56 +51,54 @@ function percent(value: number | null): string {
 }
 
 function months(value: number | null): string {
-  return value === null || !Number.isFinite(value) ? "—" : `${value}M`;
+  return value === null || !Number.isFinite(value) ? "—" : `${value} 個月`;
 }
 
-export function renderQuoteCardHtml(issuer: string, trades: QuoteCardTrade[]): string {
+function underlyingLabel(value: string): string {
+  return value.trim().split(/\s+/u)[0] || value;
+}
+
+export function renderQuoteCardHtml(issuer: string, trades: QuoteCardTrade[], rfqCode = ""): string {
   const theme = THEMES[issuer] ?? THEMES.BNP!;
-  const issuerName = trades[0]?.issuerDisplayName ?? issuer;
-  const rows = trades.map(trade => `
+  const cards = trades.map(trade => `
     <article class="trade-card">
-      <div class="trade-heading">
-        <div>
-          <span class="trade-number">${escapeHtml(trade.tradeCode || `T${String(trade.sequence).padStart(2, "0")}`)}</span>
-          <strong>${escapeHtml(trade.product)} · ${escapeHtml(trade.currency)}</strong>
+      <header class="card-hero">
+        <span class="trade-index">#${escapeHtml(trade.sequence)}</span>
+        <div class="hero-row">
+          <div><h1>${escapeHtml(trade.product)} 報價</h1><p>（${escapeHtml(trade.currency)} 本金）</p></div>
+          <strong>${escapeHtml(trade.issuer)}</strong>
         </div>
-        <span class="issuer-label">${escapeHtml(issuerName)}</span>
-      </div>
-      <section class="summary">
-        <div><small>Tenor</small><b>${months(trade.tenorMonths)}</b></div>
-        <div><small>Guaranteed Period</small><b>${months(trade.guaranteedPeriodsMonths)}</b></div>
+      </header>
+      <section class="summary pair">
+        <div><small>期間</small><b>${months(trade.tenorMonths)}</b></div>
+        <div><small>年化收益率</small><b class="highlight">${percent(trade.couponPaPct)}</b></div>
       </section>
       <section class="underlying-block">
-        <small>連結標的 Underlyings</small>
-        <div class="underlyings">${trade.underlyings.map(value => `<span>${escapeHtml(value)}</span>`).join("")}</div>
+        <small>連結標的</small>
+        <div class="underlyings">${trade.underlyings.map(value => `<span>${escapeHtml(underlyingLabel(value))}</span>`).join("")}</div>
       </section>
-      <section class="metrics">
-        <div><small>Coupon p.a.</small><b>${percent(trade.couponPaPct)}</b></div>
-        <div><small>Strike</small><b>${percent(trade.strikePct)}</b></div>
-        <div><small>KO Barrier</small><b>${percent(trade.koBarrierPct)}</b></div>
-        <div><small>KI Barrier</small><b>${percent(trade.kiBarrierPct)}</b></div>
-        <div class="price"><small>Upfront / Note Price</small><b>${percent(trade.comparablePricePct)}</b></div>
+      <section class="pair terms-row">
+        <div><small>執行價</small><b>${percent(trade.strikePct)}</b></div>
+        <div><small>觸及生效價 KI</small><b>${percent(trade.kiBarrierPct)}</b><em>${escapeHtml(trade.barrierType || "—")}</em></div>
       </section>
-      <section class="terms">
-        <span><small>KO Type</small><b>${escapeHtml(trade.koType || "—")}</b></span>
-        <span><small>Barrier Type</small><b>${escapeHtml(trade.barrierType || "—")}</b></span>
+      <section class="pair terms-row">
+        <div><small>保證配息期間</small><b>${months(trade.guaranteedPeriodsMonths)}</b></div>
+        <div><small>提前出場價 KO</small><b>${percent(trade.koBarrierPct)}</b><em>${escapeHtml(trade.koType || "—")}</em></div>
       </section>
+      <footer>
+        <div class="footer-meta"><span>發行機構：${escapeHtml(trade.issuerDisplayName)}</span><span>報價日期：${escapeHtml(trade.tradeDate || "—")}</span></div>
+        <div class="rfq-reference">RFQ 編號：${escapeHtml(rfqCode ? `[RFQ:${rfqCode}]` : "—")}</div>
+      </footer>
     </article>`).join("");
   return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-    *{box-sizing:border-box}html,body{margin:0;background:#fff;color:#16313d;font-family:Arial,"Microsoft JhengHei","Noto Sans TC",sans-serif}
-    body{width:720px;padding:20px;background:linear-gradient(145deg,${theme.soft} 0%,#fff 34%,#eff7fb 100%)}
-    .sheet{overflow:hidden;border:2px solid ${theme.primary};border-radius:22px;background:#fff;box-shadow:0 16px 42px rgba(10,57,78,.16)}
-    header{padding:28px 30px 25px;border-bottom:5px solid ${theme.primary};background:linear-gradient(145deg,${theme.soft},#fff 70%);color:#246075}
-    header small{display:block;margin-bottom:7px;font-size:14px;font-weight:800;letter-spacing:1.8px}header h1{margin:0;color:${theme.primary};font-size:36px;line-height:1.12;letter-spacing:.3px}
-    header .header-note{display:inline-block;margin-top:14px;padding:7px 13px;border-radius:999px;background:linear-gradient(125deg,${theme.primary},${theme.accent});color:#fff;font-size:16px;font-weight:800}
-    main{display:grid;gap:20px;padding:22px}.trade-card{overflow:hidden;border:1px solid #b9d8df;border-radius:15px;background:#fff;box-shadow:0 5px 15px rgba(10,103,128,.12)}
-    .trade-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:72px;padding:14px 17px;background:linear-gradient(125deg,${theme.primary},${theme.accent});color:#fff}
-    .trade-heading>div{display:flex;align-items:center;gap:12px}.trade-heading strong{font-size:25px}.trade-number{display:inline-block;padding:7px 10px;border:1px solid rgba(255,255,255,.48);border-radius:8px;background:rgba(255,255,255,.12);font-size:16px;font-weight:900}
-    .issuer-label{max-width:230px;text-align:right;font-size:15px;font-weight:800;line-height:1.25;letter-spacing:.3px}
-    .summary{display:grid;grid-template-columns:1fr 1fr;background:${theme.soft}}.summary div{padding:13px 17px}.summary div+div{border-left:1px solid #b9d8df}.summary small,.metrics small,.terms small,.underlying-block>small{display:block;color:#286174;font-size:15px;font-weight:700}.summary b{display:block;margin-top:4px;color:${theme.primary};font-size:24px}
-    .underlying-block{padding:16px 17px;border-top:1px solid #d4e7e9}.underlyings{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:9px}.underlyings span{padding:7px 11px;border:1px solid #9bcfd2;border-radius:7px;background:${theme.soft};color:${theme.primary};font-size:30px;font-weight:900;line-height:1.15}
-    .metrics{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #d4e7e9}.metrics div{min-height:84px;padding:13px 17px;border-bottom:1px solid #d4e7e9}.metrics div:nth-child(odd):not(.price){border-right:1px solid #d4e7e9}.metrics b{display:block;margin-top:5px;color:${theme.primary};font-size:27px}.metrics .price{grid-column:1/-1;min-height:88px;text-align:center;background:linear-gradient(120deg,${theme.soft},#fff)}.metrics .price b{font-size:31px}
-    .terms{display:grid;grid-template-columns:1fr 1fr}.terms span{padding:13px 17px}.terms span+span{border-left:1px solid #d4e7e9}.terms b{display:block;margin-top:4px;color:#173f51;font-size:19px}
-    footer{padding:16px 24px;background:${theme.soft};color:#426776;font-size:13px;line-height:1.45;text-align:right}@media print{body{padding:0}.sheet{box-shadow:none}}
-  </style></head><body><section class="sheet"><header><small>STRUCTURED PRODUCT INDICATIVE QUOTATION</small><h1>${escapeHtml(issuerName)}</h1><span class="header-note">FCN QUOTE · ${trades.length} 筆</span></header><main>${rows}</main><footer>本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer></section></body></html>`;
+    *{box-sizing:border-box}html,body{margin:0;background:#fff;color:#153445;font-family:Arial,"Microsoft JhengHei","Noto Sans TC",sans-serif}
+    body{width:720px;padding:18px;background:linear-gradient(160deg,#f6fafb,#edf5f6)}main{display:grid;gap:22px}
+    .trade-card{overflow:hidden;border:1px solid #b8d3da;border-radius:22px;background:#fff;box-shadow:0 10px 28px rgba(13,69,88,.14)}
+    .card-hero{min-height:200px;padding:26px 32px;background:linear-gradient(130deg,${theme.primary},${theme.accent});color:#fff}.trade-index{font-size:27px;font-weight:900}.hero-row{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:20px}.hero-row h1{margin:0;font-size:48px;line-height:1.05;letter-spacing:.5px}.hero-row p{margin:14px 0 0;font-size:29px}.hero-row>strong{font-size:31px;letter-spacing:.5px;text-align:right}
+    .pair{display:grid;grid-template-columns:1fr 1fr}.pair>div{padding:28px 32px}.pair>div+div{border-left:1px solid #bdd7de}.pair small,.underlying-block>small{display:block;color:#286174;font-size:25px;line-height:1.25}.pair b{display:block;margin-top:18px;color:#153445;font-size:40px;line-height:1.1}.pair b.highlight{color:${theme.primary};font-size:44px}
+    .summary{min-height:174px;background:${theme.soft};border-bottom:1px solid #bdd7de}.underlying-block{min-height:188px;padding:30px 32px;border-bottom:1px solid #c8dce1}.underlyings{display:flex;flex-wrap:wrap;gap:14px 16px;margin-top:24px}.underlyings span{padding:10px 18px;border-radius:9px;background:#e7f2f4;color:#153f54;font-size:34px;font-weight:900;line-height:1.15}
+    .terms-row{min-height:184px;border-bottom:1px solid #c8dce1}.terms-row em{display:block;margin-top:13px;color:${theme.primary};font-size:26px;font-style:normal}
+    footer{background:linear-gradient(120deg,${theme.soft},#eef6f7);color:#286174}.footer-meta{display:flex;justify-content:space-between;gap:18px;padding:24px 32px;font-size:20px}.footer-meta span:last-child{text-align:right}.rfq-reference{padding:17px 32px;border-top:1px solid #bdd7de;font-size:19px;font-weight:800;letter-spacing:.35px;overflow-wrap:anywhere}
+    @media print{body{padding:0}.trade-card{box-shadow:none}}
+  </style></head><body><main>${cards}</main></body></html>`;
 }

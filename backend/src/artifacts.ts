@@ -1,4 +1,5 @@
 import { newId, nowIso } from "./db";
+import { rfqCorrelationCode } from "./crypto";
 import { renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
 import type { AppEnv, ImageRenderJob } from "./types";
 
@@ -20,6 +21,7 @@ interface QuoteCardRow {
   currency: string;
   issuer: string;
   issuer_display_name: string;
+  trade_date: string | null;
   tenor_months: number | null;
   guaranteed_periods_months: number | null;
   underlyings_json: string;
@@ -78,6 +80,7 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
         WHERE ranking_run_id = ? AND reason_code = 'OUTSIDE_TOP_THREE'
      ), issuer_results AS (
        SELECT t.sequence, t.trade_code, q.product, q.currency, q.issuer, q.issuer_display_name,
+              t.trade_date,
               q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
               q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
               q.ki_barrier_pct, q.comparable_price_pct,
@@ -90,7 +93,7 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
          JOIN issuer_quotes q ON q.id = snapshot.quote_id
         WHERE q.issuer = ?
      )
-     SELECT sequence, trade_code, product, currency, issuer, issuer_display_name,
+     SELECT sequence, trade_code, product, currency, issuer, issuer_display_name, trade_date,
             tenor_months, guaranteed_periods_months, underlyings_json,
             coupon_pa_pct, strike_pct, ko_barrier_pct, ko_type, barrier_type,
             ki_barrier_pct, comparable_price_pct
@@ -99,22 +102,27 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   if (!rows.results.length) throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
   const trades: QuoteCardTrade[] = rows.results.map(row => ({
     sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,
-    issuer: row.issuer, issuerDisplayName: row.issuer_display_name, tenorMonths: row.tenor_months,
+    issuer: row.issuer, issuerDisplayName: row.issuer_display_name, tradeDate: row.trade_date,
+    tenorMonths: row.tenor_months,
     guaranteedPeriodsMonths: row.guaranteed_periods_months, underlyings: safeUnderlyings(row.underlyings_json),
     couponPaPct: row.coupon_pa_pct, strikePct: row.strike_pct, koBarrierPct: row.ko_barrier_pct,
     koType: row.ko_type, barrierType: row.barrier_type, kiBarrierPct: row.ki_barrier_pct,
     comparablePricePct: row.comparable_price_pct
   }));
-  const html = renderQuoteCardHtml(job.issuer, trades);
+  const html = renderQuoteCardHtml(
+    job.issuer,
+    trades,
+    await rfqCorrelationCode(env.EMPLOYEE_LOOKUP_KEY, job.rfq_id)
+  );
   const response = await env.BROWSER.quickAction("screenshot", {
     html,
-    viewport: { width: 720, height: Math.max(1280, 360 + trades.length * 480), deviceScaleFactor: 1.5 },
+    viewport: { width: 720, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
     screenshotOptions: { type: "png", fullPage: true },
     gotoOptions: { waitUntil: "networkidle0" }
   });
   if (!response.ok) throw new Error("BROWSER_RENDER_FAILED");
   const bytes = await response.arrayBuffer();
-  const objectKey = `quote-images/v2/${job.rfq_id}/${job.ranking_run_id}/${job.issuer}.png`;
+  const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.issuer}.png`;
   await env.RAW_MAIL_BUCKET.put(objectKey, bytes, {
     httpMetadata: { contentType: "image/png", cacheControl: "private, max-age=0, no-store" },
     customMetadata: { rfqId: job.rfq_id, rankingRunId: job.ranking_run_id, issuer: job.issuer }

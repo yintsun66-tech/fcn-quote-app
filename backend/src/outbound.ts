@@ -7,7 +7,7 @@ import {
 } from "../shared/email-formats.js";
 import { archiveOutboundEmail } from "./admin-outbound";
 import { requireCsrf } from "./auth";
-import { keyedShortCode, sha256Text, stableStringify } from "./crypto";
+import { rfqCorrelationCode, sha256Text, stableStringify } from "./crypto";
 import { newId, nowIso } from "./db";
 import { AppError } from "./errors";
 import { startRfqCoordinator } from "./coordinator";
@@ -64,7 +64,7 @@ function assertFixedAddresses(env: AppEnv): void {
 async function correlationToken(env: AppEnv, rfqId: string): Promise<string> {
   // Short, human-readable subject correlation code (see ADR 0002). Deterministic per RFQ so
   // outbound storage, the worker rebuild, and inbound matching all agree on sha256(code).
-  return keyedShortCode(env.EMPLOYEE_LOOKUP_KEY, `RFQ_CORRELATION_V1:${rfqId}`, 10);
+  return rfqCorrelationCode(env.EMPLOYEE_LOOKUP_KEY, rfqId);
 }
 
 function numberText(value: number | null): string {

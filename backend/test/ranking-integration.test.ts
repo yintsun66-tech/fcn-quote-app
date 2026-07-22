@@ -4,10 +4,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { processQuoteRankJob } from "../src/ranking";
 import { processImageRenderJob } from "../src/artifacts";
 import { downloadArtifact, listRfqArtifacts } from "../src/results";
+import { rfqCorrelationCode } from "../src/crypto";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, SessionContext } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
 const BASE_URL = "https://api.yintsun66.com";
+const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
 describe("versioned ranking persistence", () => {
   beforeAll(async () => applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS));
@@ -93,11 +95,11 @@ describe("versioned ranking persistence", () => {
       "SELECT issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY issuer"
     ).bind(rfqId).all<{ issuer: string; render_profile_version: string }>();
     expect(artifacts.results).toEqual([
-      { issuer: "BNP", render_profile_version: "quote-card-mobile-v2" },
-      { issuer: "CA", render_profile_version: "quote-card-mobile-v2" },
-      { issuer: "JPM", render_profile_version: "quote-card-mobile-v2" },
-      { issuer: "SG", render_profile_version: "quote-card-mobile-v2" },
-      { issuer: "UBS", render_profile_version: "quote-card-mobile-v2" }
+      { issuer: "BNP", render_profile_version: "quote-card-reference-v3" },
+      { issuer: "CA", render_profile_version: "quote-card-reference-v3" },
+      { issuer: "JPM", render_profile_version: "quote-card-reference-v3" },
+      { issuer: "SG", render_profile_version: "quote-card-reference-v3" },
+      { issuer: "UBS", render_profile_version: "quote-card-reference-v3" }
     ]);
     const session = { user: { id: userId } } as SessionContext;
     const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
@@ -111,6 +113,7 @@ describe("versioned ranking persistence", () => {
     const renderEnv = {
       DB: testEnv.DB,
       RAW_MAIL_BUCKET: testEnv.RAW_MAIL_BUCKET,
+      EMPLOYEE_LOOKUP_KEY: LOOKUP_KEY,
       BROWSER: {
         async quickAction(_action: string, options: { html: string }) {
           renderedSgHtml = options.html;
@@ -119,11 +122,13 @@ describe("versioned ranking persistence", () => {
       }
     } as unknown as AppEnv;
     await processImageRenderJob(renderEnv, imageJobs.find(item => item.issuer === "SG")!);
-    expect(renderedSgHtml).toContain("<h1>SG</h1>");
+    expect(renderedSgHtml).toContain("<h1>FCN 報價</h1>");
     expect(renderedSgHtml).toContain("8%");
+    expect(renderedSgHtml).toContain("報價日期：21-Jul-26");
+    expect(renderedSgHtml).toContain(`RFQ 編號：[RFQ:${await rfqCorrelationCode(LOOKUP_KEY, rfqId)}]`);
 
     const bnpArtifact = artifactList.artifacts.find(item => item.issuer === "BNP")!;
-    const objectKey = `quote-images/v2/${rfqId}/test/BNP.png`;
+    const objectKey = `quote-images/v3/${rfqId}/test/BNP.png`;
     await testEnv.RAW_MAIL_BUCKET.put(objectKey, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: "image/png" } });
     await testEnv.DB.prepare(
       "UPDATE generated_artifacts SET status = 'READY', r2_object_key = ?, completed_at = ? WHERE id = ?"

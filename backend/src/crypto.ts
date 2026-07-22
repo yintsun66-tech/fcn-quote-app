@@ -73,6 +73,10 @@ export async function keyedShortCode(secret: string, value: string, length = 10)
   return code;
 }
 
+export function rfqCorrelationCode(secret: string, rfqId: string): Promise<string> {
+  return keyedShortCode(secret, `RFQ_CORRELATION_V1:${rfqId}`, 10);
+}
+
 export async function encryptEmployeeNumber(secret: string, employeeNumber: string): Promise<{ ciphertext: string; iv: string }> {
   const iv = randomBytes(12);
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await importAesKey(secret), encoder.encode(employeeNumber));

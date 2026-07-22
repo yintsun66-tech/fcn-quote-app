@@ -140,6 +140,7 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 - Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
 - Creates one mobile-portrait image for each issuer with a valid quote in the finalized ranking snapshot, including valid quotes outside the displayed top three; each image contains that issuer's quoted trades.
 - Uses the same issuer-specific color palette as the compatibility frontend and keeps rank-one issuer groups as the default view.
+- Uses the request trade date and displays the same complete `[RFQ:<10-character-code>]` reference carried by the outbound email subject. The displayed code is informational and is never accepted as authorization evidence.
 - Stores PNG output in private R2.
 
 ## End-to-end flow

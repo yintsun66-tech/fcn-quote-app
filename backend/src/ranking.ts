@@ -2,7 +2,7 @@ import { newId, nowIso } from "./db";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, TargetField } from "./types";
 
 const RULES_VERSION = "ranking-v1";
-const RENDER_PROFILE_VERSION = "quote-card-mobile-v2";
+const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
 const LEASE_MILLISECONDS = 2 * 60 * 1000;
 
 interface RankJobRow {

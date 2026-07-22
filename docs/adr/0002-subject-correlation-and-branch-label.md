@@ -63,6 +63,11 @@ long opaque token.
    length `{10,128}` over the existing `[A-Za-z0-9_-]` charset, so both the new short code and
    any in-flight long tokens correlate during and after rollout (backward compatible).
 
+6. **Reuse the exact code on authenticated quote-image artifacts.** The server-rendered quote
+   card footer may display `[RFQ:<code>]` so a downloaded image can be reconciled with the
+   original email. Outbound mail and Browser Rendering call the same deterministic helper.
+   The displayed code is not an authentication, authorization, or ownership credential.
+
 ## Consequences
 
 - **Reduced token entropy** from ~256-bit hash material to ~50 bits (10 × 5 bits). Guessing a
@@ -88,8 +93,9 @@ long opaque token.
 ## Evidence / implementation links
 
 - `backend/shared/email-formats.js` — `buildCorrelatedSubject`, `buildInstitutionEmail`, new `branchSubjectLabel`
-- `backend/src/crypto.ts` — new `keyedShortCode`
+- `backend/src/crypto.ts` — `keyedShortCode` and the shared `rfqCorrelationCode`
 - `backend/src/outbound.ts` — `correlationToken`, `sendRfq` base-subject snapshot, worker `subjectBase`
+- `backend/src/artifacts.ts`, `backend/src/quote-card.ts` — authenticated artifact reuse and display
 - `backend/src/inbound-parser.ts` — `correlationTags` length relaxation
 - Tests: `email-formats.test.ts`, `crypto.test.ts`, `inbound-parser.test.ts`, `outbound.test.ts`, `inbound.test.ts`
 - Supersedes the subject portion of the correlation design in `docs/backend/architecture.md`

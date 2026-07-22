@@ -147,7 +147,19 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
 - ⚠️ **Deploy order:** apply migration 0008 to remote D1 **then** deploy the Worker immediately
   (the new code requires `trade_code`; the old code cannot insert into the new schema). There is a
   brief window during which finalization would fail — deploy when no RFQ is mid-finalization.
-- **Status:** committed? see log. migration applied to remote D1? **no**. deployed? **no**.
+- **Status:** committed `00d1a1f`, pushed to `origin/feature/subject-branch-correlation`.
+  Migration 0008 apply to remote D1 **failed** on 2026-07-22 with Cloudflare API `7403`
+  ("account is not valid or is not authorized to access this service"). With the current
+  wrangler token, `wrangler deploy` and `d1 migrations list --remote` succeed, but
+  `d1 migrations apply --remote` is refused — a D1 edit-permission gap. Migration remains
+  **pending** (remote schema unchanged) and the Worker was **not** deployed (deploying the new
+  code without 0008 would break finalization). Production stays on the prior consistent state:
+  Worker `59815984-0172-4256-b295-408d7d352ce1`, old schema, health `ok`.
+- **To finish (needs a D1:Edit-capable credential):** re-authenticate wrangler with a token that
+  has D1 edit on this account (or run the `0008_trade_artifacts.sql` statements in the D1 Console),
+  then, back-to-back when no RFQ is mid-finalization:
+  `pnpm exec wrangler d1 migrations apply fcn-quote --remote` → `pnpm exec wrangler deploy` →
+  verify `GET /api/v1/health` and record the Worker version here.
 
 ## Latest SG outgoing-email table update
 

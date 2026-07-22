@@ -2,7 +2,7 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `8b781da feat(email): human-readable subject correlation code and branch label`
+Latest relevant commit: `206b01f fix(nomura): default effective date offset to seven`
 
 ## What is live
 
@@ -93,3 +93,11 @@ The SG table update is committed on both branches:
 - `feature/backend-foundation`: `ff12ef5`; includes `backend/shared/email-formats.js`, compatibility `app.js`, and the email-format regression test.
 - `main`: `bef54f6`; includes the static-site `app.js` format definition.
 - The focused issuer-format test passed (5 tests), both branch/main `app.js` files passed JavaScript syntax checking, and Cloudflare deployment version `47f94c36-1496-4143-973a-32f096c862d0` is live.
+
+## Latest Nomura outgoing-email default update
+
+- Nomura `Effective Date Offset` now always renders `7`, independent of the source row value.
+- `feature/subject-branch-correlation`: `206b01f`; includes the backend shared generator, compatibility `app.js`, and a regression test.
+- `main`: `07d0cc1`; includes the GitHub Pages `app.js` update.
+- Verification passed: both `app.js` syntax checks, 14 test files / 62 tests, typecheck, and Cloudflare dry-run build.
+- Cloudflare deployment version `b299861e-c569-4d64-9afe-22808c3802d8` is live. The health endpoint returned `{"status":"ok"}`, and cache-bypassed checks confirmed both deployed generator assets contain the fixed value. GitHub Pages also serves the updated `app.js`.

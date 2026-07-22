@@ -38,7 +38,7 @@
     </dialog>
     <dialog id="backendProgress" class="backend-dialog backend-results-dialog">
       <section class="backend-panel">
-        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><button id="closeBackendProgress" type="button" class="secondary">關閉</button></div>
+        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="closeBackendProgress" type="button" class="secondary">關閉</button></div></div>
         <p id="backendCountdown" class="backend-countdown"></p>
         <div id="backendIssuerStates" class="backend-issuer-grid"></div>
         <div id="backendRankings" class="backend-rankings"></div>
@@ -71,6 +71,7 @@
 
   const authDialog = document.querySelector("#backendAuth");
   const progressDialog = document.querySelector("#backendProgress");
+  const finalizeButton = document.querySelector("#backendFinalizeNow");
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
   const userbar = document.querySelector(".backend-userbar");
@@ -323,6 +324,8 @@
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
       : `狀態：${payload.rfq.workflowStatus}｜剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
     document.querySelector("#backendIssuerStates").innerHTML = payload.issuers.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${item.issuer}</b>${item.status}</span>`).join("");
+    // Offer early close only while the reply window is still open.
+    finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
   }
 
   function renderResults(payload) {
@@ -413,6 +416,21 @@
   document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
   document.querySelector("#backendLogout").addEventListener("click", async () => { await request("/auth/logout", { method: "POST", body: "{}" }); setUser(null); showAuth(); });
   document.querySelector("#closeBackendProgress").addEventListener("click", () => progressDialog.close());
+  finalizeButton.addEventListener("click", async () => {
+    if (!state.rfqId) return;
+    if (!window.confirm("確定要提早結束詢價並立即比價嗎？尚未回覆的發行機構將不列入本次排名。")) return;
+    finalizeButton.disabled = true;
+    try {
+      await request(`/rfqs/${state.rfqId}/finalize`, { method: "POST", body: "{}" });
+      finalizeButton.hidden = true;
+      document.querySelector("#backendCountdown").textContent = "已要求提早結束，正在比價…";
+      await refreshResults();
+    } catch (error) {
+      document.querySelector("#backendCountdown").textContent = error.message;
+    } finally {
+      finalizeButton.disabled = false;
+    }
+  });
   adminRegistrationsButton.addEventListener("click", openAdminRegistrationReview);
   document.querySelector("#closeBackendRegistrationReview").addEventListener("click", () => adminRegistrationReviewDialog.close());
   adminRegistrationReviewList.addEventListener("click", event => {

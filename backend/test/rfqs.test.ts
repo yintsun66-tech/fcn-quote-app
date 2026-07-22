@@ -154,4 +154,41 @@ describe("RFQ API", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: { code: "CSRF_VALIDATION_FAILED" } });
   });
+
+  it("lets the owner close the reply window early and blocks others and wrong states", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    const now = new Date().toISOString();
+    const deadline = new Date(Date.now() + 600_000).toISOString();
+    await testEnv.DB.prepare(
+      "UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING', sent_at = ?, deadline_at = ? WHERE id = ?"
+    ).bind(now, deadline, rfqId).run();
+
+    const foreign = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(foreign.status).toBe(404);
+
+    const noCsrf = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie }
+    });
+    expect(noCsrf.status).toBe(403);
+
+    const finalize = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(finalize.status).toBe(202);
+    expect(await finalize.json()).toMatchObject({ rfq: { id: rfqId, workflowStatus: "FINALIZING" } });
+    const row = await testEnv.DB.prepare("SELECT workflow_status FROM rfqs WHERE id = ?").bind(rfqId).first<{ workflow_status: string }>();
+    expect(row?.workflow_status).toBe("FINALIZING");
+    const jobs = await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM quote_rank_jobs WHERE rfq_id = ?").bind(rfqId).first<{ count: number }>();
+    expect(Number(jobs?.count)).toBe(1);
+
+    const draft = await createRfq(userA, [trade()]);
+    const draftId = (await draft.json<{ rfq: { id: string } }>()).rfq.id;
+    const wrongState = await api(`/api/v1/rfqs/${draftId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(wrongState.status).toBe(409);
+  });
 });

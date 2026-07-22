@@ -1,7 +1,8 @@
 import { requireCsrf } from "./auth";
 import { requestFinalization } from "./coordinator";
+import { insertAudit } from "./db";
 import { AppError } from "./errors";
-import { jsonResponse, requireSameOrigin } from "./http";
+import { jsonResponse, requestId, requireSameOrigin } from "./http";
 import type { AppEnv, SessionContext } from "./types";
 
 interface OwnedWorkflow {
@@ -142,5 +143,22 @@ export async function recalculateRfq(request: Request, env: AppEnv, session: Ses
     throw new AppError(409, "RFQ_NOT_FINALIZED", "只有已完成的詢價可以重新計算。 ");
   }
   await requestFinalization(env, rfqId, "RECALCULATION");
+  return jsonResponse({ rfq: { id: rfqId, workflowStatus: "FINALIZING", requestedVersion: rfq.current_ranking_version + 1 } }, 202);
+}
+
+// User-initiated early close of the reply window. Ranks whatever valid replies exist now
+// instead of waiting for the deadline. Reuses the DEADLINE finalization trigger (idempotent
+// with the eventual alarm on the same ranking version); the user actor is captured in audit.
+export async function finalizeRfqNow(request: Request, env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const rfq = await ownedWorkflow(env, session.user.id, rfqId);
+  if (!["WAITING", "PARTIAL"].includes(rfq.workflow_status)) {
+    throw new AppError(409, "RFQ_NOT_WAITING", "只有等待報價中的詢價可以提早結束。 ");
+  }
+  await insertAudit(env, "RFQ_EARLY_FINALIZE_REQUESTED", "RFQ", rfqId, session.user.id, requestId(request), {
+    fromStatus: rfq.workflow_status
+  });
+  await requestFinalization(env, rfqId, "DEADLINE");
   return jsonResponse({ rfq: { id: rfqId, workflowStatus: "FINALIZING", requestedVersion: rfq.current_ranking_version + 1 } }, 202);
 }

@@ -21,6 +21,7 @@ import { consumeImageRender } from "./artifacts";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import {
   downloadArtifact,
+  finalizeRfqNow,
   getRfqResults,
   getRfqStatus,
   listRfqArtifacts,
@@ -87,6 +88,8 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && artifactsMatch?.[1]) return listRfqArtifacts(env, session, artifactsMatch[1]);
   const recalculateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/recalculate$/.exec(path);
   if (method === "POST" && recalculateMatch?.[1]) return recalculateRfq(request, env, session, recalculateMatch[1]);
+  const finalizeMatch = /^\/api\/v1\/rfqs\/([^/]+)\/finalize$/.exec(path);
+  if (method === "POST" && finalizeMatch?.[1]) return finalizeRfqNow(request, env, session, finalizeMatch[1]);
   const artifactDownloadMatch = /^\/api\/v1\/artifacts\/([^/]+)\/download$/.exec(path);
   if (method === "GET" && artifactDownloadMatch?.[1]) return downloadArtifact(request, env, session, artifactDownloadMatch[1]);
   const rfqMatch = /^\/api\/v1\/rfqs\/([^/]+)$/.exec(path);

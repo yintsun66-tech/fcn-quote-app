@@ -69,10 +69,18 @@ The server returns `404` for resources not owned by the current user, avoiding c
 ### Controlled mutation endpoints
 
 - `POST /api/v1/rfqs/:rfqId/cancel`
+- `POST /api/v1/rfqs/:rfqId/finalize`
 - `POST /api/v1/rfqs/:rfqId/recalculate`
 - `POST /api/v1/admin/quotes/:quoteId/manual-review`
 
 Recalculation creates a new ranking version and never overwrites the previously finalized snapshot.
+
+`POST /api/v1/rfqs/:rfqId/finalize` lets the RFQ owner close the reply window early (see
+[ADR 0004](../adr/0004-user-early-finalize.md)). It is accepted only while the RFQ is `WAITING`
+or `PARTIAL`, requires same-origin + CSRF, is owner-enforced (`404` otherwise), and returns `202`
+with `workflowStatus: "FINALIZING"`. It reuses the `DEADLINE` finalization trigger, so it is
+idempotent with the eventual deadline alarm on the same ranking version; issuers that have not
+replied are excluded from that ranking exactly as at a natural deadline.
 
 ## RFQ request model
 

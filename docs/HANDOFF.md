@@ -107,6 +107,24 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
   `RFQ_DEADLINE_SECONDS=600` keeps the window at 10 minutes; lower it to shorten the "some issuers
   silent" wait.
 
+## Early-finalize button (implemented, not yet committed/deployed)
+
+- New owner-scoped endpoint `POST /api/v1/rfqs/:rfqId/finalize` lets a user close the reply window
+  early and rank immediately, instead of waiting out `RFQ_DEADLINE_SECONDS`. See
+  [ADR 0004](adr/0004-user-early-finalize.md) and `docs/backend/contracts.md`.
+- Accepted only in `WAITING`/`PARTIAL`; same-origin + CSRF + ownership enforced (`404`/`403`/`409`).
+  Reuses the `DEADLINE` finalization trigger (idempotent with the deadline alarm on the same
+  ranking version) — no new trigger value, no D1 migration. User actor captured in a
+  `RFQ_EARLY_FINALIZE_REQUESTED` audit event.
+- Frontend: a "提早結束並比價" button in the RFQ progress dialog, shown only while waiting; confirms
+  before finalizing, then refreshes results. Non-responding issuers are excluded from that ranking,
+  exactly as at a natural deadline.
+- Files: `backend/src/results.ts`, `backend/src/index.ts`, `backend-client.js`,
+  `backend/test/rfqs.test.ts`, `docs/backend/contracts.md`, ADR 0004.
+- **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
+  `pnpm test` passed (14 files, 64 tests); `pnpm run build` (dry run) passed.
+- **Status:** committed? pending. deployed? pending.
+
 ## Latest SG outgoing-email table update
 
 The SG table update is committed on both branches:

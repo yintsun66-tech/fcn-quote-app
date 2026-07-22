@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `b19da0e feat(email): unify inbound and outbound address`
+Latest relevant commit: `e4c0b7d feat(artifacts): add mobile issuer-switchable quote images`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `71b1a0ba-70e0-4e6a-b341-54ddc938ecf6`
+- Latest verified Cloudflare Worker version: `6496baa9-8c7c-4c0b-b93e-215af221fc69`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -111,10 +111,12 @@ The SG table update is committed on both branches:
 - Email Routing rule `e5c5b106730a444b9bcf2a71aef4c5c3` was explicitly updated and verified after deployment: enabled, priority 1, literal matcher `to = rfq@yintsun66.com`, action `worker:fcn-quote-api`. A Worker deploy alone did not update the pre-existing `reply@yintsun66.com` routing rule.
 - End-to-end inbound delivery is not proven until the bank forwards a controlled issuer reply to `rfq@yintsun66.com`. Exclude messages originally sent by `rfq@yintsun66.com` from the bank forwarding rule so outbound RFQs are not re-ingested as unrelated inbound mail.
 
-## Mobile quote-image and issuer switching (local, not deployed)
+## Mobile quote-image and issuer switching (deployed)
 
 - Backend quote images now use a fixed 720 CSS-pixel portrait layout at 1.5 device scale, larger underlying text, and the same eleven issuer palettes as the main compatibility quote image.
 - A finalized ranking now queues one artifact for every issuer with a valid quote, including valid `OUTSIDE_TOP_THREE` quotes recorded in that same snapshot. Rank-one issuer groups remain the default; the authenticated result dialog can switch to another valid issuer, preview its private-R2 PNG inline, and download it.
 - The artifact API now returns `isDefault` and an authenticated `previewUrl`; the existing download URL remains attachment-oriented. No D1 migration, binding, secret, mail format, ranking direction, or authentication change was made.
 - Local verification: `node --check backend-client.js` passed; direct source/test TypeScript checks passed; focused quote-card/ranking integration tests passed (2 files, 3 tests); the full suite passed (14 files, 63 tests); and the Cloudflare dry-run build passed after rerunning outside the filesystem sandbox. The sandboxed Wrangler attempt failed only because it could not traverse the parent profile directory.
-- This work is not committed, pushed, or deployed. Preserve the existing untracked `.claude/` directory and the earlier unified-mailbox handoff edit.
+- Implementation commit `e4c0b7d` is pushed to `origin/feature/subject-branch-correlation` and deployed to Cloudflare as Worker version `6496baa9-8c7c-4c0b-b93e-215af221fc69`.
+- Post-deploy verification: API health returned HTTP 200 with `{"status":"ok"}`; cache-bypassed application asset checks returned HTTP 200 and contained `backendArtifactIssuer`, `previewUrl`, and `backend-artifact-preview-frame` markers.
+- Existing finalized RFQs retain their previous artifact set; create a new RFQ or run a versioned recalculation to generate the mobile v2 artifacts. Preserve the untracked `.claude/` directory.

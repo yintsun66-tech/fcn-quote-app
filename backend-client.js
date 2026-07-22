@@ -283,6 +283,13 @@
     const sendButton = document.querySelector("#sendQuotes");
     sendButton.disabled = true;
     sendButton.textContent = "建立詢價中…";
+    // Open the progress dialog immediately so the user gets instant feedback while the
+    // create/validate/send round trips run, instead of a frozen button.
+    if (!progressDialog.open) progressDialog.showModal();
+    document.querySelector("#backendCountdown").textContent = "正在建立並寄送詢價…";
+    document.querySelector("#backendIssuerStates").innerHTML = "";
+    document.querySelector("#backendRankings").innerHTML = "";
+    artifactContainer.innerHTML = "";
     try {
       const created = await request("/rfqs", {
         method: "POST", headers: { "idempotency-key": idempotency("create") },
@@ -296,13 +303,13 @@
       state.rfqId = rfqId;
       state.artifactSelection = "BEST";
       state.hasRankings = false;
-      statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在 10 分鐘內完成比價。`;
+      statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
       statusElement.classList.add("success");
-      if (!progressDialog.open) progressDialog.showModal();
       await refreshResults();
     } catch (error) {
       statusElement.textContent = error.message;
       statusElement.classList.remove("success");
+      document.querySelector("#backendCountdown").textContent = `建立失敗：${error.message}`;
     } finally {
       sendButton.disabled = false;
       sendButton.textContent = "發送詢價條件";
@@ -365,14 +372,17 @@
     try {
       const status = await request(`/rfqs/${state.rfqId}/status`);
       renderStatus(status);
+      // Once the reply window has closed, the finalize→rank tail is short, so poll every 2s
+      // to surface the result sooner; keep the calmer 4s cadence during the long wait.
+      const deadlinePassed = status.rfq.deadlineAt ? Date.parse(status.rfq.deadlineAt) <= Date.now() : false;
       if (["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)) {
         renderResults(await request(`/rfqs/${state.rfqId}/results`));
         const artifacts = await renderArtifacts();
         if (state.hasRankings && (artifacts.length === 0 || artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING"))) {
-          state.timer = setTimeout(refreshResults, 4000);
+          state.timer = setTimeout(refreshResults, 2000);
         }
       } else {
-        state.timer = setTimeout(refreshResults, 4000);
+        state.timer = setTimeout(refreshResults, deadlinePassed ? 2000 : 4000);
       }
     } catch (error) {
       document.querySelector("#backendCountdown").textContent = error.message;

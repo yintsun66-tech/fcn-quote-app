@@ -13,7 +13,8 @@
     "OUTBOUND_FROM": "rfq@yintsun66.com",
     "OUTBOUND_TO": "i14053@firstbank.com.tw",
     "INBOUND_ADDRESS": "rfq@yintsun66.com",
-    "MAX_INBOUND_EMAIL_BYTES": "26214400"
+    "MAX_INBOUND_EMAIL_BYTES": "26214400",
+    "RFQ_DEADLINE_SECONDS": "600"
   },
   "secrets": {
     "required": ["EMPLOYEE_DATA_KEY", "EMPLOYEE_LOOKUP_KEY"]
@@ -120,7 +121,7 @@
       {
         "queue": "fcn-quote-rank",
         "max_batch_size": 3,
-        "max_batch_timeout": 5,
+        "max_batch_timeout": 2,
         "max_retries": 3,
         "dead_letter_queue": "fcn-quote-rank-dlq",
         "max_concurrency": 3

@@ -61,8 +61,14 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
 
   const idleSeconds = Number(env.SESSION_IDLE_SECONDS);
   const nextExpiryMs = Math.min(now.getTime() + idleSeconds * 1000, Date.parse(row.absolute_expires_at));
-  await env.DB.prepare("UPDATE user_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?")
-    .bind(now.toISOString(), new Date(nextExpiryMs).toISOString(), row.session_id).run();
+  // Coalesce the sliding-expiry write (ADR 0003): persist only when the expiry would advance
+  // by more than the threshold. This removes the per-request D1 write from hot paths such as
+  // the 4s result polling, while keeping the idle-timeout semantics within ~60s granularity.
+  const SLIDING_WRITE_THRESHOLD_MS = 60_000;
+  if (nextExpiryMs - Date.parse(row.expires_at) > SLIDING_WRITE_THRESHOLD_MS) {
+    await env.DB.prepare("UPDATE user_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?")
+      .bind(now.toISOString(), new Date(nextExpiryMs).toISOString(), row.session_id).run();
+  }
 
   return {
     id: row.session_id,

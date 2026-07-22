@@ -61,6 +61,13 @@ function assertFixedAddresses(env: AppEnv): void {
   }
 }
 
+// Quote-reply window in seconds (see ADR 0003). Configurable via RFQ_DEADLINE_SECONDS;
+// falls back to the original 600s (10 minutes) if unset or invalid.
+function rfqDeadlineSeconds(env: AppEnv): number {
+  const seconds = Number(env.RFQ_DEADLINE_SECONDS);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 600;
+}
+
 async function correlationToken(env: AppEnv, rfqId: string): Promise<string> {
   // Short, human-readable subject correlation code (see ADR 0002). Deterministic per RFQ so
   // outbound storage, the worker rebuild, and inbound matching all agree on sha256(code).
@@ -359,7 +366,7 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
        FROM outbound_email_batches WHERE rfq_id = ?`
   ).bind(batch.rfq_id).first<{ total_count: number; sent_count: number }>();
   if (summary && summary.total_count === BATCH_CODES.length && summary.sent_count === BATCH_CODES.length) {
-    const deadlineAt = new Date(Date.parse(sentAt) + 10 * 60 * 1000).toISOString();
+    const deadlineAt = new Date(Date.parse(sentAt) + rfqDeadlineSeconds(env) * 1000).toISOString();
     await env.DB.prepare(
       `UPDATE rfqs SET dispatch_status = 'WAITING', sent_at = COALESCE(sent_at, ?),
               deadline_at = COALESCE(deadline_at, ?), workflow_status = 'WAITING'

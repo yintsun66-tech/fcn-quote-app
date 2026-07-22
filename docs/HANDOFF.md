@@ -82,6 +82,28 @@ For the current backend branch through commit `ff12ef5`:
 - Not yet proven: that the shorter subject actually clears the bank filter. Confirm with a real
   forwarded issuer reply before treating automatic recognition as production-proven.
 
+## Quote-turnaround tuning (implemented, not yet committed/deployed)
+
+Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr/0003-quote-turnaround-tuning.md).
+
+- **P1 configurable deadline** — `outbound.ts` now reads `RFQ_DEADLINE_SECONDS` (default `"600"`,
+  added to `wrangler.jsonc`); behavior unchanged at the default. Lets the reply window be tuned
+  without a code change.
+- **P2 faster ranking** — `fcn-quote-rank` queue `max_batch_timeout` lowered 5→2 in `wrangler.jsonc`,
+  shaving the post-finalization tail before the ranking appears.
+- **P3 adaptive polling** — `backend-client.js` polls results every 2s once the deadline has passed
+  (4s during the long wait); surfaces the completed quote sooner.
+- **P4 coalesced session writes** — `db.ts` `loadSession` skips the sliding-expiry `UPDATE` unless the
+  expiry advances by >60s, removing ~95% of per-request D1 writes (idle-timeout preserved to ~60s
+  granularity). Touches session/auth — recorded in ADR 0003.
+- **P5 instant progress feedback** — `backend-client.js` opens the progress dialog immediately on
+  submit instead of after the three create/validate/send round trips.
+- **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
+  `pnpm test` passed (14 files, 63 tests); `pnpm run build` (dry run) passed.
+- **Status:** committed? no. deployed? no. Awaiting the user's commit/deploy instruction. The
+  default deadline (600s) means deploying is behavior-neutral except for the faster rank batch and
+  frontend polling; `RFQ_DEADLINE_SECONDS` can be lowered later to shorten the window.
+
 ## Latest SG outgoing-email table update
 
 The SG table update is committed on both branches:

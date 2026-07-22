@@ -57,6 +57,13 @@ describe("shared issuer email formats", () => {
     expect(email.html.match(/<td\b/g) ?? []).toHaveLength(21);
   });
 
+  it("keeps Nomura's effective-date offset fixed at seven calendar days", () => {
+    const email = buildInstitutionEmail("NOMURA", [{ ...trade, effectiveDateOffset: "3" }]);
+    const values = email.plainText.split("\r\n")[1]?.split("\t") ?? [];
+    expect(EMAIL_INSTITUTIONS.NOMURA?.columns.at(-2)?.label).toBe("Effective Date Offset");
+    expect(values.at(-2)).toBe("7");
+  });
+
   it("preserves a final empty cell in HTML and plain text", () => {
     for (const key of ["UBS", "CITI", "CA"]) {
       const email = buildInstitutionEmail(key, [trade]);

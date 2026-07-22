@@ -63,7 +63,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
       productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Non-call Periods", "guaranteedPeriods"),
       { label: "Guaranteed Coupon Periods", value: record => productForIssuer(record, "", recordValue(record, "guaranteedPeriods")) },
       sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"),
-      sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), sourceColumn("Effective Date Offset", "effectiveDateOffset"), sourceColumn("Trade Date", "tradeDate"),
+      sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), { label: "Effective Date Offset", value: () => "7" }, sourceColumn("Trade Date", "tradeDate"),
     ],
   },
   UBS: {

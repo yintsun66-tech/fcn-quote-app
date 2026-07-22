@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `88ae57d feat(perf): tune quote turnaround and session write cost`
+Latest relevant commit: `c4a2851 feat(rfq): user-initiated early finalization button`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `9ce5e3b8-4e1e-4877-9dd6-05fce6aef806`
+- Latest verified Cloudflare Worker version: `59815984-0172-4256-b295-408d7d352ce1`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -123,7 +123,10 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
   `backend/test/rfqs.test.ts`, `docs/backend/contracts.md`, ADR 0004.
 - **Verification (local):** `node --check backend-client.js` passed; `pnpm run typecheck` passed;
   `pnpm test` passed (14 files, 64 tests); `pnpm run build` (dry run) passed.
-- **Status:** committed? pending. deployed? pending.
+- **Status:** committed `c4a2851`, pushed to `origin/feature/subject-branch-correlation` (not merged
+  to `main`). Deployed on 2026-07-22 — Worker version `59815984-0172-4256-b295-408d7d352ce1`.
+  Verified `GET /api/v1/health` → `{"status":"ok"}` and the live `backend-client.js` (26275 bytes)
+  contains the `backendFinalizeNow` button and `/finalize` call.
 
 ## Latest SG outgoing-email table update
 

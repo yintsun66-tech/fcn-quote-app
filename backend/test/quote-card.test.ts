@@ -41,4 +41,17 @@ describe("quote card HTML", () => {
     expect(sg).toContain("#0875b9");
     expect(sg).toContain("#008a73");
   });
+
+  it("adds the DAC/DRA floating-income note below the guaranteed periods, only for DAC", () => {
+    const base = {
+      sequence: 1, tradeCode: "T01", currency: "USD", issuer: "BNP", issuerDisplayName: "BNP",
+      tradeDate: "22-Jul-26", tenorMonths: 12, guaranteedPeriodsMonths: 3, underlyings: ["AAPL UW"],
+      couponPaPct: 12.5, strikePct: 80, koBarrierPct: 100, koType: "Daily Memory",
+      barrierType: "NONE", kiBarrierPct: null, comparablePricePct: 98
+    };
+    const dac = renderQuoteCardHtml("BNP", [{ ...base, product: "DAC" }]);
+    expect(dac).toContain("*DAC/DRA第4個月起為浮動收益");
+    const fcn = renderQuoteCardHtml("BNP", [{ ...base, product: "FCN" }]);
+    expect(fcn).not.toContain("浮動收益");
+  });
 });

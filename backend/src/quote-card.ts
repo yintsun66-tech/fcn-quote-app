@@ -54,6 +54,12 @@ function months(value: number | null): string {
   return value === null || !Number.isFinite(value) ? "—" : `${value} 個月`;
 }
 
+// DAC/DRA pays a fixed coupon only for the guaranteed periods; from month X+1 it accrues (floats).
+function dacFloatingNote(trade: QuoteCardTrade): string {
+  if (trade.product !== "DAC" || trade.guaranteedPeriodsMonths === null || !Number.isFinite(trade.guaranteedPeriodsMonths)) return "";
+  return `<em class="dac-note">*DAC/DRA第${trade.guaranteedPeriodsMonths + 1}個月起為浮動收益</em>`;
+}
+
 function underlyingLabel(value: string): string {
   return value.trim().split(/\s+/u)[0] || value;
 }
@@ -82,7 +88,7 @@ export function renderQuoteCardHtml(issuer: string, trades: QuoteCardTrade[], rf
         <div><small>觸及生效價 KI</small><b>${percent(trade.kiBarrierPct)}</b><em>${escapeHtml(trade.barrierType || "—")}</em></div>
       </section>
       <section class="pair terms-row">
-        <div><small>保證配息期間</small><b>${months(trade.guaranteedPeriodsMonths)}</b></div>
+        <div><small>保證配息期間</small><b>${months(trade.guaranteedPeriodsMonths)}</b>${dacFloatingNote(trade)}</div>
         <div><small>提前出場價 KO</small><b>${percent(trade.koBarrierPct)}</b><em>${escapeHtml(trade.koType || "—")}</em></div>
       </section>
       <footer>
@@ -97,7 +103,7 @@ export function renderQuoteCardHtml(issuer: string, trades: QuoteCardTrade[], rf
     .card-hero{min-height:200px;padding:26px 32px;background:linear-gradient(130deg,${theme.primary},${theme.accent});color:#fff}.trade-index{font-size:27px;font-weight:900}.hero-row{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:20px}.hero-row h1{margin:0;font-size:48px;line-height:1.05;letter-spacing:.5px}.hero-row p{margin:14px 0 0;font-size:29px}.hero-row>strong{font-size:31px;letter-spacing:.5px;text-align:right}
     .pair{display:grid;grid-template-columns:1fr 1fr}.pair>div{padding:28px 32px}.pair>div+div{border-left:1px solid #bdd7de}.pair small,.underlying-block>small{display:block;color:#286174;font-size:25px;line-height:1.25}.pair b{display:block;margin-top:18px;color:#153445;font-size:40px;line-height:1.1}.pair b.highlight{color:${theme.primary};font-size:44px}
     .summary{min-height:174px;background:${theme.soft};border-bottom:1px solid #bdd7de}.underlying-block{min-height:188px;padding:30px 32px;border-bottom:1px solid #c8dce1}.underlyings{display:flex;flex-wrap:wrap;gap:14px 16px;margin-top:24px}.underlyings span{padding:10px 18px;border-radius:9px;background:#e7f2f4;color:#153f54;font-size:34px;font-weight:900;line-height:1.15}
-    .terms-row{min-height:184px;border-bottom:1px solid #c8dce1}.terms-row em{display:block;margin-top:13px;color:${theme.primary};font-size:26px;font-style:normal}
+    .terms-row{min-height:184px;border-bottom:1px solid #c8dce1}.terms-row em{display:block;margin-top:13px;color:${theme.primary};font-size:26px;font-style:normal}.dac-note{display:block;margin-top:12px;color:#b45309;font-size:20px;font-style:normal;font-weight:700;line-height:1.3}
     footer{background:linear-gradient(120deg,${theme.soft},#eef6f7);color:#286174}.footer-meta{display:flex;justify-content:space-between;gap:18px;padding:24px 32px;font-size:20px}.footer-meta span:last-child{text-align:right}.rfq-reference{padding:17px 32px;border-top:1px solid #bdd7de;font-size:19px;font-weight:800;letter-spacing:.35px;overflow-wrap:anywhere}
     @media print{body{padding:0}.trade-card{box-shadow:none}}
   </style></head><body><main>${cards}</main></body></html>`;

@@ -151,7 +151,9 @@ the deployment. Treat that as the smallest remaining UI verification task.
   + an "all" toggle); only the selected issuers are queried and ranked. `POST /send` accepts an
   optional `{ issuers: [...] }` (absent → all eleven). BMJB is a shared email, so selecting any of
   BNP/MS/JPM/BARCLAYS sends the BMJB batch but ranks only the selected ones.
-- Verified: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test` (16 files, 75);
+- Quote image (`quote-card.ts`): for DAC products the card now adds a note under 保證配息期間 —
+  「*DAC/DRA第{X+1}個月起為浮動收益」 (X = guaranteed periods). FCN cards are unchanged.
+- Verified: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test` (16 files, 76);
   `pnpm run build` (dry run). Committed; deploy status recorded at the Worker-version line above.
 
 ## Production gaps and cautions

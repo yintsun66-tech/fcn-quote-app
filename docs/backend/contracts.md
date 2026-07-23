@@ -58,6 +58,7 @@ Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and 
 
 ### User read endpoints
 
+- `GET /api/v1/rfqs?scope=active|completed|all&limit=20&cursor=...`
 - `GET /api/v1/rfqs/:rfqId`
 - `GET /api/v1/rfqs/:rfqId/status`
 - `GET /api/v1/rfqs/:rfqId/results`
@@ -65,6 +66,13 @@ Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and 
 - `GET /api/v1/artifacts/:artifactId/download`
 
 The server returns `404` for resources not owned by the current user, avoiding cross-user existence disclosure.
+
+The RFQ collection endpoint is always filtered by the authenticated `user_id`. It returns
+workspace summaries ordered by creation time and opaque ID, an opaque `nextCursor`, and
+`summary.activeCount`. `scope` defaults to `all`; `limit` defaults to 20 and is capped at 50.
+Each summary includes workflow/dispatch status, timestamps, trade count, the first trade's
+underlyings and target field, issuer terminal/valid-reply counts, ranking version and ready image
+count. It never returns another user's RFQ or raw email content.
 
 Artifacts are keyed to an exact persisted ranking quote (ADR 0007): each `artifacts[]` entry
 carries `tradeCode`, `quoteId`, `issuer`, `rank`, `isDefault`, `status`, `downloadUrl`, and

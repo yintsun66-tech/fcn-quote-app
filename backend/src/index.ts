@@ -15,7 +15,7 @@ import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
 import { consumeInboundEmail } from "./inbound-parser";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
-import { createRfq, getRfq, validateRfq } from "./rfqs";
+import { createRfq, getRfq, listRfqs, validateRfq } from "./rfqs";
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, requestTradeArtifact } from "./artifacts";
@@ -78,6 +78,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && rejectMatch?.[1]) return rejectRegistration(request, env, session, rejectMatch[1]);
 
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);
+  if (method === "GET" && path === "/api/v1/rfqs") return listRfqs(request, env, session);
   const validateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/validate$/.exec(path);
   if (method === "POST" && validateMatch?.[1]) return validateRfq(request, env, session, validateMatch[1]);
   const sendMatch = /^\/api\/v1\/rfqs\/([^/]+)\/send$/.exec(path);

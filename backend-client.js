@@ -4,13 +4,24 @@
 
   const api = "/api/v1";
   const statusElement = document.querySelector("#status");
-  const state = { user: null, rfqId: null, timer: null, hasRankings: false };
+  const state = {
+    user: null,
+    rfqId: null,
+    timer: null,
+    badgeTimer: null,
+    hasRankings: false,
+    rfqListScope: "active",
+    rfqListCursor: null,
+    rfqListItems: []
+  };
 
   const shell = document.createElement("section");
   shell.className = "backend-shell";
   shell.innerHTML = `
     <div class="backend-userbar" hidden>
       <span id="backendUser"></span>
+      <button id="backendNewRfq" type="button" class="secondary">新增詢價</button>
+      <button id="backendMyRfqs" type="button" class="secondary">我的詢價 <span id="backendRfqBadge" class="backend-rfq-badge" hidden>0</span></button>
       <button id="backendAdminRegistrations" type="button" class="secondary" hidden>使用者申請審核</button>
       <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
       <button id="backendAdminTimelines" type="button" class="secondary" hidden>RFQ 處理時間軸</button>
@@ -39,11 +50,28 @@
     </dialog>
     <dialog id="backendProgress" class="backend-dialog backend-results-dialog">
       <section class="backend-panel">
-        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="closeBackendProgress" type="button" class="secondary">關閉</button></div></div>
+        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="backendBackToRfqs" type="button" class="secondary">我的詢價</button><button id="closeBackendProgress" type="button" class="secondary">返回輸入</button></div></div>
         <p id="backendCountdown" class="backend-countdown"></p>
         <div id="backendIssuerStates" class="backend-issuer-grid"></div>
         <div id="backendRankings" class="backend-rankings"></div>
         <div id="backendArtifacts" class="backend-artifacts"></div>
+      </section>
+    </dialog>
+    <dialog id="backendRfqHistory" class="backend-dialog backend-rfq-history-dialog">
+      <section class="backend-panel">
+        <div class="backend-results-heading">
+          <div><p class="eyebrow">MY QUOTE WORKSPACE</p><h2>我的詢價</h2></div>
+          <button id="closeBackendRfqHistory" type="button" class="secondary">關閉</button>
+        </div>
+        <p class="backend-archive-note">詢價由後端持續處理，離開等待畫面不會中止。可從這裡回到任何進行中或已完成的結果。</p>
+        <div class="backend-rfq-tabs" role="tablist" aria-label="詢價清單篩選">
+          <button type="button" class="secondary" data-rfq-scope="active" aria-selected="true">進行中</button>
+          <button type="button" class="secondary" data-rfq-scope="completed" aria-selected="false">已完成</button>
+          <button type="button" class="secondary" data-rfq-scope="all" aria-selected="false">全部</button>
+        </div>
+        <p id="backendRfqHistoryError" class="backend-error" role="alert"></p>
+        <div id="backendRfqHistoryList" class="backend-rfq-history-list" aria-live="polite"></div>
+        <button id="backendRfqLoadMore" type="button" class="secondary backend-rfq-load-more" hidden>載入更多</button>
       </section>
     </dialog>
     <dialog id="backendOutboundArchive" class="backend-dialog backend-archive-dialog">
@@ -81,6 +109,13 @@
   const authDialog = document.querySelector("#backendAuth");
   const progressDialog = document.querySelector("#backendProgress");
   const finalizeButton = document.querySelector("#backendFinalizeNow");
+  const newRfqButton = document.querySelector("#backendNewRfq");
+  const myRfqsButton = document.querySelector("#backendMyRfqs");
+  const rfqBadge = document.querySelector("#backendRfqBadge");
+  const rfqHistoryDialog = document.querySelector("#backendRfqHistory");
+  const rfqHistoryList = document.querySelector("#backendRfqHistoryList");
+  const rfqHistoryError = document.querySelector("#backendRfqHistoryError");
+  const rfqLoadMoreButton = document.querySelector("#backendRfqLoadMore");
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
   const userbar = document.querySelector(".backend-userbar");
@@ -139,6 +174,11 @@
     adminOutboundButton.hidden = !user || user.role !== "ADMIN";
     adminTimelinesButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
+    if (!user) {
+      clearTimeout(state.timer);
+      clearTimeout(state.badgeTimer);
+      setRfqBadge(0);
+    }
     if (user && authDialog.open) authDialog.close();
   }
 
@@ -152,6 +192,158 @@
     if (!value) return "—";
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-TW", { hour12: false });
+  }
+
+  const activeWorkflowStatuses = new Set(["DRAFT", "VALIDATED", "QUEUED", "SENDING", "WAITING", "PARTIAL", "FINALIZING"]);
+  const workflowLabels = {
+    DRAFT: "草稿",
+    VALIDATED: "準備寄送",
+    QUEUED: "排隊中",
+    SENDING: "寄送中",
+    WAITING: "等待回覆",
+    PARTIAL: "已有部分報價",
+    FINALIZING: "正在比價",
+    COMPLETED: "已完成",
+    NO_VALID_QUOTE: "無有效報價",
+    FAILED: "處理失敗",
+    CANCELLED: "已取消"
+  };
+
+  function setRfqBadge(count) {
+    const value = Math.max(0, Number(count) || 0);
+    rfqBadge.textContent = String(value);
+    rfqBadge.hidden = value === 0;
+    myRfqsButton.setAttribute("aria-label", value ? `我的詢價，${value} 筆進行中` : "我的詢價");
+  }
+
+  function currentRfqFromUrl() {
+    const rfqId = new URL(location.href).searchParams.get("rfq");
+    return rfqId && /^rfq_[A-Za-z0-9-]+$/u.test(rfqId) ? rfqId : null;
+  }
+
+  function updateRfqUrl(rfqId, replace = false) {
+    const url = new URL(location.href);
+    if (rfqId) url.searchParams.set("rfq", rfqId);
+    else url.searchParams.delete("rfq");
+    history[replace ? "replaceState" : "pushState"]({ rfqId }, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function rfqTimingText(rfq) {
+    if (!activeWorkflowStatuses.has(rfq.workflowStatus)) {
+      return rfq.finalizedAt ? `完成於 ${formatDateTime(rfq.finalizedAt)}` : `建立於 ${formatDateTime(rfq.createdAt)}`;
+    }
+    if (!rfq.deadlineAt) return `建立於 ${formatDateTime(rfq.createdAt)}`;
+    const remaining = Date.parse(rfq.deadlineAt) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) return "已達回覆截止，正在完成比價";
+    return `回覆截止剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
+  }
+
+  function renderRfqHistory() {
+    if (!state.rfqListItems.length) {
+      rfqHistoryList.innerHTML = `<p class="backend-rfq-empty">${state.rfqListScope === "active"
+        ? "目前沒有進行中的詢價。送出後可以放心離開，後端仍會繼續處理。"
+        : "目前沒有符合此篩選條件的詢價。"}</p>`;
+      return;
+    }
+    rfqHistoryList.innerHTML = state.rfqListItems.map(rfq => {
+      const expected = Number(rfq.expectedIssuerCount) || 0;
+      const terminal = Number(rfq.terminalIssuerCount) || 0;
+      const percent = expected > 0 ? Math.min(100, Math.round(terminal / expected * 100)) : 0;
+      const underlyings = Array.isArray(rfq.firstTrade?.underlyings) ? rfq.firstTrade.underlyings : [];
+      const remainingTrades = Math.max(0, Number(rfq.tradeCount) - 1);
+      const action = activeWorkflowStatuses.has(rfq.workflowStatus) ? "查看進度" : "查看結果";
+      return `<article class="backend-rfq-card status-${escapeHtml(rfq.workflowStatus.toLowerCase())}">
+        <header>
+          <div><strong>${escapeHtml(rfq.id)}</strong><small>${escapeHtml(formatDateTime(rfq.createdAt))}</small></div>
+          <span>${escapeHtml(workflowLabels[rfq.workflowStatus] || rfq.workflowStatus)}</span>
+        </header>
+        <p class="backend-rfq-underlyings">${escapeHtml(underlyings.join(" / ") || "尚無連結標的")}${remainingTrades ? ` <small>等 ${remainingTrades + 1} 筆交易</small>` : ""}</p>
+        <div class="backend-rfq-meta">
+          <span>${escapeHtml(rfq.firstTrade?.targetField || "—")}</span>
+          <span>${escapeHtml(rfq.tradeCount)} 筆交易</span>
+          <span>有效回覆 ${escapeHtml(rfq.validReplyCount)} 家</span>
+          ${rfq.readyArtifactCount ? `<span>${escapeHtml(rfq.readyArtifactCount)} 張報價圖</span>` : ""}
+        </div>
+        ${expected ? `<div class="backend-rfq-progress"><span style="width:${percent}%"></span></div><small>已處理 ${terminal}/${expected} 家發行機構</small>` : ""}
+        <footer><span>${escapeHtml(rfqTimingText(rfq))}</span><button type="button" class="primary" data-open-rfq="${escapeHtml(rfq.id)}">${action}</button></footer>
+      </article>`;
+    }).join("");
+  }
+
+  async function loadRfqHistory({ append = false } = {}) {
+    rfqHistoryError.textContent = "";
+    if (!append) {
+      state.rfqListCursor = null;
+      state.rfqListItems = [];
+      rfqHistoryList.innerHTML = "<p class=\"backend-rfq-empty\">正在載入詢價紀錄…</p>";
+    }
+    const parameters = new URLSearchParams({ scope: state.rfqListScope, limit: "20" });
+    if (append && state.rfqListCursor) parameters.set("cursor", state.rfqListCursor);
+    try {
+      const payload = await request(`/rfqs?${parameters}`);
+      state.rfqListItems = append ? state.rfqListItems.concat(payload.rfqs) : payload.rfqs;
+      state.rfqListCursor = payload.nextCursor;
+      setRfqBadge(payload.summary.activeCount);
+      rfqLoadMoreButton.hidden = !payload.nextCursor;
+      renderRfqHistory();
+    } catch (error) {
+      rfqHistoryError.textContent = error.message;
+      if (!append) rfqHistoryList.innerHTML = "";
+    }
+  }
+
+  async function refreshRfqBadge() {
+    clearTimeout(state.badgeTimer);
+    if (!state.user) return;
+    try {
+      const payload = await request("/rfqs?scope=active&limit=1");
+      setRfqBadge(payload.summary.activeCount);
+    } catch {
+      setRfqBadge(0);
+    } finally {
+      if (state.user) state.badgeTimer = setTimeout(refreshRfqBadge, 30000);
+    }
+  }
+
+  async function openRfqHistory() {
+    clearTimeout(state.timer);
+    state.rfqId = null;
+    if (progressDialog.open) progressDialog.close();
+    updateRfqUrl(null);
+    state.rfqListScope = "active";
+    document.querySelectorAll("[data-rfq-scope]").forEach(button => {
+      button.setAttribute("aria-selected", String(button.dataset.rfqScope === state.rfqListScope));
+    });
+    if (!rfqHistoryDialog.open) rfqHistoryDialog.showModal();
+    await loadRfqHistory();
+  }
+
+  async function openRfq(rfqId, { updateUrl = true, replace = false } = {}) {
+    if (!/^rfq_[A-Za-z0-9-]+$/u.test(rfqId)) return;
+    clearTimeout(state.timer);
+    if (rfqHistoryDialog.open) rfqHistoryDialog.close();
+    state.rfqId = rfqId;
+    state.hasRankings = false;
+    document.querySelector("#backendCountdown").textContent = "正在載入詢價進度…";
+    document.querySelector("#backendIssuerStates").innerHTML = "";
+    document.querySelector("#backendRankings").innerHTML = "";
+    artifactContainer.innerHTML = "";
+    if (updateUrl) updateRfqUrl(rfqId, replace);
+    if (!progressDialog.open) progressDialog.showModal();
+    await refreshResults();
+  }
+
+  function closeRfqProgress({ updateUrl = true } = {}) {
+    clearTimeout(state.timer);
+    state.rfqId = null;
+    if (progressDialog.open) progressDialog.close();
+    if (updateUrl) updateRfqUrl(null);
+    void refreshRfqBadge();
+  }
+
+  async function restoreRfqFromUrl() {
+    const rfqId = currentRfqFromUrl();
+    if (rfqId && state.user) await openRfq(rfqId, { updateUrl: false });
   }
 
   function renderAdminOutboundList(records) {
@@ -305,7 +497,11 @@
   }
 
   async function loadSession() {
-    try { setUser((await request("/auth/session")).user); }
+    try {
+      setUser((await request("/auth/session")).user);
+      void refreshRfqBadge();
+      await restoreRfqFromUrl();
+    }
     catch { setUser(null); showAuth(); }
   }
 
@@ -357,8 +553,10 @@
       });
       state.rfqId = rfqId;
       state.hasRankings = false;
+      updateRfqUrl(rfqId);
       statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
       statusElement.classList.add("success");
+      void refreshRfqBadge();
       await refreshResults();
     } catch (error) {
       statusElement.textContent = error.message;
@@ -463,6 +661,10 @@
       }
     } catch (error) {
       document.querySelector("#backendCountdown").textContent = error.message;
+      if (error.code === "RFQ_NOT_FOUND") {
+        document.querySelector("#backendRankings").innerHTML = "<p>此詢價不存在，或不屬於目前登入的使用者。請回到「我的詢價」重新選擇。</p>";
+        return;
+      }
       state.timer = setTimeout(refreshResults, 8000);
     }
   }
@@ -492,7 +694,12 @@
   loginForm.addEventListener("submit", async event => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(loginForm));
-    try { setUser((await request("/auth/login", { method: "POST", body: JSON.stringify(data) })).user); document.querySelector("#backendAuthError").textContent = ""; }
+    try {
+      setUser((await request("/auth/login", { method: "POST", body: JSON.stringify(data) })).user);
+      document.querySelector("#backendAuthError").textContent = "";
+      void refreshRfqBadge();
+      await restoreRfqFromUrl();
+    }
     catch (error) { document.querySelector("#backendAuthError").textContent = error.message; }
   });
   registrationForm.addEventListener("submit", async event => {
@@ -505,8 +712,42 @@
   });
   document.querySelector("#showRegistration").addEventListener("click", () => { loginForm.hidden = true; registrationForm.hidden = false; });
   document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
-  document.querySelector("#backendLogout").addEventListener("click", async () => { await request("/auth/logout", { method: "POST", body: "{}" }); setUser(null); showAuth(); });
-  document.querySelector("#closeBackendProgress").addEventListener("click", () => progressDialog.close());
+  newRfqButton.addEventListener("click", () => {
+    if (rfqHistoryDialog.open) rfqHistoryDialog.close();
+    closeRfqProgress();
+    document.querySelector(".entry-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  myRfqsButton.addEventListener("click", openRfqHistory);
+  document.querySelector("#backendBackToRfqs").addEventListener("click", openRfqHistory);
+  document.querySelector("#closeBackendRfqHistory").addEventListener("click", () => rfqHistoryDialog.close());
+  document.querySelector(".backend-rfq-tabs").addEventListener("click", event => {
+    const target = event.target.closest("[data-rfq-scope]");
+    if (!target) return;
+    state.rfqListScope = target.dataset.rfqScope;
+    document.querySelectorAll("[data-rfq-scope]").forEach(button => {
+      button.setAttribute("aria-selected", String(button === target));
+    });
+    void loadRfqHistory();
+  });
+  rfqHistoryList.addEventListener("click", event => {
+    const target = event.target.closest("[data-open-rfq]");
+    if (target) void openRfq(target.dataset.openRfq);
+  });
+  rfqLoadMoreButton.addEventListener("click", () => {
+    if (state.rfqListCursor) void loadRfqHistory({ append: true });
+  });
+  document.querySelector("#backendLogout").addEventListener("click", async () => {
+    await request("/auth/logout", { method: "POST", body: "{}" });
+    if (rfqHistoryDialog.open) rfqHistoryDialog.close();
+    closeRfqProgress();
+    setUser(null);
+    showAuth();
+  });
+  document.querySelector("#closeBackendProgress").addEventListener("click", () => closeRfqProgress());
+  progressDialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    closeRfqProgress();
+  });
   finalizeButton.addEventListener("click", async () => {
     if (!state.rfqId) return;
     if (!window.confirm("確定要提早結束詢價並立即比價嗎？尚未回覆的發行機構將不列入本次排名。")) return;
@@ -536,5 +777,16 @@
   });
   adminTimelinesButton.addEventListener("click", openAdminRfqTimelines);
   document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
+  addEventListener("popstate", () => {
+    const rfqId = currentRfqFromUrl();
+    if (rfqId && state.user) void openRfq(rfqId, { updateUrl: false });
+    else if (progressDialog.open) closeRfqProgress({ updateUrl: false });
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.user) {
+      void refreshRfqBadge();
+      if (state.rfqId) void refreshResults();
+    }
+  });
   loadSession();
 })();

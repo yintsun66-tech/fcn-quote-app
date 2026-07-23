@@ -12,6 +12,32 @@ interface IdempotencyRow {
   response_json: string;
 }
 
+type RfqListScope = "all" | "active" | "completed";
+
+interface RfqListCursor {
+  createdAt: string;
+  id: string;
+}
+
+interface RfqListRow {
+  id: string;
+  status: string;
+  dispatch_status: string;
+  workflow_status: string;
+  trade_count: number;
+  created_at: string;
+  sent_at: string | null;
+  deadline_at: string | null;
+  finalized_at: string | null;
+  current_ranking_version: number;
+  expected_issuer_count: number;
+  terminal_issuer_count: number;
+  valid_reply_count: number;
+  ready_artifact_count: number;
+  first_target_field: string;
+  first_underlyings_json: string;
+}
+
 export interface RfqRow {
   id: string;
   status: "DRAFT" | "VALIDATED" | "CANCELLED";
@@ -79,6 +105,128 @@ function publicTrade(row: TradeRow): Record<string, unknown> {
     createdAt: row.created_at,
     frozenAt: row.frozen_at
   };
+}
+
+function parseListScope(request: Request): RfqListScope {
+  const scope = new URL(request.url).searchParams.get("scope") ?? "all";
+  if (!["all", "active", "completed"].includes(scope)) {
+    throw new AppError(400, "INVALID_RFQ_LIST_SCOPE", "詢價清單篩選條件無效。");
+  }
+  return scope as RfqListScope;
+}
+
+function parseListLimit(request: Request): number {
+  const raw = new URL(request.url).searchParams.get("limit");
+  if (raw === null) return 20;
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new AppError(400, "INVALID_RFQ_LIST_LIMIT", "詢價清單每頁筆數必須介於 1 到 50。");
+  }
+  return limit;
+}
+
+function encodeListCursor(row: RfqListCursor): string {
+  return btoa(JSON.stringify(row)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function parseListCursor(request: Request): RfqListCursor | null {
+  const encoded = new URL(request.url).searchParams.get("cursor");
+  if (!encoded) return null;
+  try {
+    const base64 = encoded.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const parsed = JSON.parse(atob(padded)) as Partial<RfqListCursor>;
+    if (
+      typeof parsed.createdAt !== "string"
+      || !Number.isFinite(Date.parse(parsed.createdAt))
+      || typeof parsed.id !== "string"
+      || !parsed.id.startsWith("rfq_")
+    ) {
+      throw new Error("INVALID_CURSOR");
+    }
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  } catch {
+    throw new AppError(400, "INVALID_RFQ_LIST_CURSOR", "詢價清單游標無效。");
+  }
+}
+
+function safeStringArray(json: string): string[] {
+  try {
+    const value = JSON.parse(json) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listRfqs(request: Request, env: AppEnv, session: SessionContext): Promise<Response> {
+  const scope = parseListScope(request);
+  const limit = parseListLimit(request);
+  const cursor = parseListCursor(request);
+  const scopeCondition = scope === "active"
+    ? "AND r.workflow_status IN ('DRAFT', 'VALIDATED', 'QUEUED', 'SENDING', 'WAITING', 'PARTIAL', 'FINALIZING')"
+    : scope === "completed"
+      ? "AND r.workflow_status IN ('COMPLETED', 'NO_VALID_QUOTE', 'FAILED', 'CANCELLED')"
+      : "";
+  const cursorCondition = cursor
+    ? "AND (r.created_at < ? OR (r.created_at = ? AND r.id < ?))"
+    : "";
+  const bindings: Array<string | number> = [session.user.id];
+  if (cursor) bindings.push(cursor.createdAt, cursor.createdAt, cursor.id);
+  bindings.push(limit + 1);
+  const rows = await env.DB.prepare(
+    `SELECT r.id, r.status, r.dispatch_status, r.workflow_status, r.trade_count,
+            r.created_at, r.sent_at, r.deadline_at, r.finalized_at,
+            r.current_ranking_version, r.expected_issuer_count,
+            first_trade.target_field AS first_target_field,
+            first_trade.underlyings_json AS first_underlyings_json,
+            (SELECT COUNT(*) FROM rfq_expected_issuers issuer
+              WHERE issuer.rfq_id = r.id AND issuer.status != 'PENDING') AS terminal_issuer_count,
+            (SELECT COUNT(*) FROM rfq_expected_issuers issuer
+              WHERE issuer.rfq_id = r.id AND issuer.status = 'VALID_REPLY') AS valid_reply_count,
+            (SELECT COUNT(*) FROM generated_artifacts artifact
+              WHERE artifact.rfq_id = r.id AND artifact.status = 'READY') AS ready_artifact_count
+       FROM rfqs r
+       JOIN rfq_trades first_trade ON first_trade.rfq_id = r.id AND first_trade.sequence = 1
+      WHERE r.user_id = ?
+        ${scopeCondition}
+        ${cursorCondition}
+      ORDER BY r.created_at DESC, r.id DESC
+      LIMIT ?`
+  ).bind(...bindings).all<RfqListRow>();
+  const page = rows.results.slice(0, limit);
+  const last = page.at(-1);
+  const activeCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM rfqs
+      WHERE user_id = ?
+        AND workflow_status IN ('DRAFT', 'VALIDATED', 'QUEUED', 'SENDING', 'WAITING', 'PARTIAL', 'FINALIZING')`
+  ).bind(session.user.id).first<{ count: number }>();
+  return jsonResponse({
+    rfqs: page.map(row => ({
+      id: row.id,
+      status: row.status,
+      dispatchStatus: row.dispatch_status,
+      workflowStatus: row.workflow_status,
+      tradeCount: row.trade_count,
+      createdAt: row.created_at,
+      sentAt: row.sent_at,
+      deadlineAt: row.deadline_at,
+      finalizedAt: row.finalized_at,
+      rankingVersion: row.current_ranking_version,
+      expectedIssuerCount: row.expected_issuer_count,
+      terminalIssuerCount: row.terminal_issuer_count,
+      validReplyCount: row.valid_reply_count,
+      readyArtifactCount: row.ready_artifact_count,
+      firstTrade: {
+        targetField: row.first_target_field,
+        underlyings: safeStringArray(row.first_underlyings_json)
+      }
+    })),
+    summary: { activeCount: Number(activeCount?.count ?? 0) },
+    nextCursor: rows.results.length > limit && last
+      ? encodeListCursor({ createdAt: last.created_at, id: last.id })
+      : null
+  });
 }
 
 export async function fetchOwnedRfq(env: AppEnv, userId: string, rfqId: string): Promise<{ rfq: RfqRow; trades: TradeRow[] }> {

@@ -48,6 +48,21 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   `data-artifact-quote`, and the quote-specific artifact route. Deployed Worker version:
   `f2e4ea60-5cd0-4bb0-979e-28f1b86e9a5f`.
 
+### Recoverable user RFQ workspace (implemented locally; not committed/deployed)
+
+- Adds owner-scoped `GET /api/v1/rfqs` with active/completed/all scopes, bounded cursor
+  pagination, safe status summaries and `activeCount`.
+- Adds permanent **新增詢價 / 我的詢價** controls, an active badge, responsive RFQ cards, filters,
+  load-more pagination and direct reopen actions.
+- The selected result is represented by `?rfq=<id>` so reload, browser history and login recovery
+  return to the same RFQ. D1 remains authoritative; no terms/results are stored in the browser.
+- Closing the foreground result stops its polling but does not alter the server-side workflow.
+  Existing status/results/artifact APIs continue to enforce ownership.
+- No D1 migration, dependency, lockfile, binding or deployment-config change. Existing
+  `rfqs(user_id, created_at)` supports the list ordering. See ADR 0008.
+- Verification: root JavaScript syntax, TypeScript checks, the full test suite (16 files /
+  72 tests), and the Cloudflare Worker dry-run build all passed.
+
 ### Phase A–E acceleration work (committed, pushed, and deployed)
 
 - SG parser maps current reply tables by normalized headers and variable Underlying columns.

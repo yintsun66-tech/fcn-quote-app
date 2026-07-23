@@ -131,6 +131,80 @@ describe("RFQ API", () => {
     expect(other.status).toBe(404);
   });
 
+  it("lists only the current user's RFQs with scopes and stable pagination", async () => {
+    const activeCreated = await createRfq(userA, [trade({ underlyings: ["ACTIVE UW"] })]);
+    const activeId = (await activeCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const completedCreated = await createRfq(userA, [trade({ underlyings: ["DONE UW"] })]);
+    const completedId = (await completedCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const foreignCreated = await createRfq(userB, [trade({ underlyings: ["FOREIGN UW"] })]);
+    const foreignId = (await foreignCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET workflow_status = 'WAITING', dispatch_status = 'WAITING',
+                status = 'VALIDATED', expected_issuer_count = 11,
+                created_at = '2099-01-03T00:00:00.000Z'
+          WHERE id = ?`
+      ).bind(activeId),
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET workflow_status = 'COMPLETED', dispatch_status = 'WAITING',
+                status = 'VALIDATED', current_ranking_version = 1,
+                created_at = '2099-01-02T00:00:00.000Z',
+                finalized_at = '2099-01-02T00:15:00.000Z'
+          WHERE id = ?`
+      ).bind(completedId),
+      testEnv.DB.prepare(
+        "UPDATE rfqs SET created_at = '2099-01-04T00:00:00.000Z' WHERE id = ?"
+      ).bind(foreignId)
+    ]);
+
+    const firstPage = await api("/api/v1/rfqs?scope=all&limit=1", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(firstPage.status).toBe(200);
+    const firstBody = await firstPage.json<{
+      rfqs: Array<{ id: string; workflowStatus: string; firstTrade: { underlyings: string[] } }>;
+      summary: { activeCount: number };
+      nextCursor: string | null;
+    }>();
+    expect(firstBody.rfqs).toEqual([expect.objectContaining({
+      id: activeId,
+      workflowStatus: "WAITING",
+      firstTrade: expect.objectContaining({ underlyings: ["ACTIVE UW"] })
+    })]);
+    expect(firstBody.summary.activeCount).toBeGreaterThanOrEqual(1);
+    expect(firstBody.nextCursor).toBeTruthy();
+
+    const secondPage = await api(
+      `/api/v1/rfqs?scope=all&limit=1&cursor=${encodeURIComponent(firstBody.nextCursor ?? "")}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    const secondBody = await secondPage.json<{ rfqs: Array<{ id: string }> }>();
+    expect(secondBody.rfqs[0]?.id).toBe(completedId);
+    expect(secondBody.rfqs.some(item => item.id === foreignId)).toBe(false);
+
+    const active = await api("/api/v1/rfqs?scope=active&limit=50", {
+      headers: { cookie: userA.cookie }
+    });
+    const activeBody = await active.json<{ rfqs: Array<{ id: string }> }>();
+    expect(activeBody.rfqs.some(item => item.id === activeId)).toBe(true);
+    expect(activeBody.rfqs.some(item => item.id === completedId)).toBe(false);
+
+    const completed = await api("/api/v1/rfqs?scope=completed&limit=50", {
+      headers: { cookie: userA.cookie }
+    });
+    const completedBody = await completed.json<{ rfqs: Array<{ id: string }> }>();
+    expect(completedBody.rfqs.some(item => item.id === completedId)).toBe(true);
+    expect(completedBody.rfqs.some(item => item.id === activeId)).toBe(false);
+
+    const invalidCursor = await api("/api/v1/rfqs?cursor=not-a-valid-cursor", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json()).toMatchObject({ error: { code: "INVALID_RFQ_LIST_CURSOR" } });
+  });
+
   it("validates and freezes a draft RFQ", async () => {
     const created = await createRfq(userA, [trade()]);
     const body = await created.json<{ rfq: { id: string } }>();

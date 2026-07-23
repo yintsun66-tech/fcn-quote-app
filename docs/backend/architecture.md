@@ -67,6 +67,9 @@ flowchart LR
 - Worker static assets host the existing application and RFQ/result views on `app.yintsun66.com`; GitHub Pages remains the compatibility deployment.
 - Does not decide ownership, rank quotes, or expose private R2 objects directly.
 - Uses relative static asset paths until an approved migration changes the current GitHub Pages-compatible layout.
+- Provides an authenticated **我的詢價** workspace backed by `GET /api/v1/rfqs`. A stable
+  `?rfq=<id>` locator restores the selected result after reload/login; the ID never replaces
+  server-side ownership authorization (ADR 0008).
 
 ### Application API Worker
 
@@ -193,6 +196,8 @@ an explicit recalculation.
 
 ### 5. Results and images
 
+- The user can leave the waiting view without affecting the Durable Object, Queue or ranking
+  workflow. Active/completed RFQs remain discoverable from the owner-scoped workspace.
 - The user result page loads only RFQs owned by that authenticated user. During
   `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top five with the
   exact production ranking function.

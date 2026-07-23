@@ -149,8 +149,16 @@ the deployment. Treat that as the smallest remaining UI verification task.
    original sender/domain.
 4. Subject/body correlation fallback exists, but some real forwarded messages have reached
    `UNMATCHED_RFQ`. Never guess ownership or trade matching.
-5. GS had no observed inbound messages in the previous production review. CA was sparse/late.
-   Confirm upstream quoting/forwarding before treating every timeout as a parser defect.
+5. **GS/CA reply behavior (reviewed 2026-07-23).** GS has never produced an observed inbound
+   message — likely no upstream quoting/forwarding, not a parser defect. CA *does* reply and its
+   format parses and matches trades correctly (not a format bug like SG was); the issue is speed.
+   Correlated CA replies were observed **~12.8 and ~25.4 minutes after send**, measured under the
+   old 600s deadline so both landed as `LATE_REPLY`/`TIMEOUT`. The current 900s (15-minute) hard
+   deadline would capture the ~13-minute case but not the ~25-minute one; CA has not yet been
+   re-tested under 900s. Reliably capturing CA's slow replies would need a longer
+   `RFQ_DEADLINE_SECONDS` (e.g. 1800s), which lengthens the wait for every RFQ — a user decision.
+   Some CA replies also reached `UNMATCHED_RFQ` (subject-correlation failure, see item 4). Confirm
+   upstream/timing before treating a CA timeout as a parser defect.
 6. MS is displayed as `MS（OBU不得承做）`, but no approved account-level OBU attribute or blocking
    rule exists. Do not silently exclude or enforce it.
 7. Browser Rendering and Cloudflare email/Queue limits need continued observation under real

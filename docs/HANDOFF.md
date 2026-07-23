@@ -48,7 +48,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   `data-artifact-quote`, and the quote-specific artifact route. Deployed Worker version:
   `f2e4ea60-5cd0-4bb0-979e-28f1b86e9a5f`.
 
-### Recoverable user RFQ workspace (implemented locally; not committed/deployed)
+### Recoverable user RFQ workspace (committed, pushed, and deployed)
 
 - Adds owner-scoped `GET /api/v1/rfqs` with active/completed/all scopes, bounded cursor
   pagination, safe status summaries and `activeCount`.
@@ -62,6 +62,9 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   `rfqs(user_id, created_at)` supports the list ordering. See ADR 0008.
 - Verification: root JavaScript syntax, TypeScript checks, the full test suite (16 files /
   72 tests), and the Cloudflare Worker dry-run build all passed.
+- Implementation commit: `61c07c7`. Production Worker version:
+  `49fbfd94-552b-4130-a562-0aba54e9345c`. The live `backend-client.js` and `styles.css`
+  were read back from `app.yintsun66.com` and contain the workspace behavior/styles.
 
 ### Phase A–E acceleration work (committed, pushed, and deployed)
 

@@ -9,6 +9,7 @@ import {
   sessionInfo
 } from "./auth";
 import { getAdminOutboundEmail, listAdminOutboundEmails } from "./admin-outbound";
+import { listAdminRfqTimelines } from "./admin-rfq";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
@@ -17,7 +18,7 @@ import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, validateRfq } from "./rfqs";
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
-import { consumeImageRender } from "./artifacts";
+import { consumeImageRender, requestTradeArtifact } from "./artifacts";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import {
   downloadArtifact,
@@ -67,6 +68,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
   if (method === "GET" && path === "/api/v1/admin/registrations") return listRegistrations(env, session);
   if (method === "GET" && path === "/api/v1/admin/outbound-emails") return listAdminOutboundEmails(request, env, session);
+  if (method === "GET" && path === "/api/v1/admin/rfq-timelines") return listAdminRfqTimelines(request, env, session);
   const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);
   if (method === "GET" && outboundEmailMatch?.[1]) return getAdminOutboundEmail(request, env, session, outboundEmailMatch[1]);
 
@@ -86,6 +88,10 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && resultsMatch?.[1]) return getRfqResults(env, session, resultsMatch[1]);
   const artifactsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/artifacts$/.exec(path);
   if (method === "GET" && artifactsMatch?.[1]) return listRfqArtifacts(env, session, artifactsMatch[1]);
+  const tradeArtifactMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/artifact$/.exec(path);
+  if (method === "POST" && tradeArtifactMatch?.[1] && tradeArtifactMatch[2]) {
+    return requestTradeArtifact(request, env, session, tradeArtifactMatch[1], tradeArtifactMatch[2]);
+  }
   const recalculateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/recalculate$/.exec(path);
   if (method === "POST" && recalculateMatch?.[1]) return recalculateRfq(request, env, session, recalculateMatch[1]);
   const finalizeMatch = /^\/api\/v1\/rfqs\/([^/]+)\/finalize$/.exec(path);

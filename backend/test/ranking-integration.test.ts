@@ -2,9 +2,9 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { processQuoteRankJob } from "../src/ranking";
-import { processImageRenderJob } from "../src/artifacts";
-import { downloadArtifact, listRfqArtifacts } from "../src/results";
-import { rfqCorrelationCode } from "../src/crypto";
+import { processImageRenderJob, requestTradeArtifact } from "../src/artifacts";
+import { downloadArtifact, getRfqResults, listRfqArtifacts } from "../src/results";
+import { rfqCorrelationCode, sha256Text } from "../src/crypto";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, SessionContext } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
@@ -14,7 +14,7 @@ const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 describe("versioned ranking persistence", () => {
   beforeAll(async () => applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS));
 
-  it("persists dense top-three ranks and queues switchable issuer images", async () => {
+  it("shows provisional ranks, persists final ranks, and creates images only when requested", async () => {
     const suffix = crypto.randomUUID();
     const userId = `usr_${suffix}`;
     const rfqId = `rfq_${crypto.randomUUID()}`;
@@ -81,6 +81,29 @@ describe("versioned ranking persistence", () => {
       DB: testEnv.DB,
       IMAGE_RENDER_QUEUE: { async send(job: ImageRenderJob) { imageJobs.push(job); } } as unknown as Queue<ImageRenderJob>
     } as AppEnv;
+    const csrfToken = "ranking-artifact-csrf";
+    const session = {
+      id: `ses_${crypto.randomUUID()}`,
+      csrfTokenHash: await sha256Text(csrfToken),
+      absoluteExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      user: {
+        id: userId,
+        username: "ranker",
+        displayName: "Ranker",
+        branchName: "Test",
+        role: "USER",
+        credentialVersion: 1
+      }
+    } as SessionContext;
+    const provisional = await (await getRfqResults(testEnv, session, rfqId)).json<{
+      rfq: { isProvisional: boolean; allTradesHaveThreeValidQuotes: boolean };
+      trades: Array<{ validQuoteCount: number; rankings: Array<{ rank: number; value: number }> }>;
+    }>();
+    expect(provisional.rfq).toMatchObject({ isProvisional: true, allTradesHaveThreeValidQuotes: true });
+    expect(provisional.trades[0]?.validQuoteCount).toBe(5);
+    expect(provisional.trades[0]?.rankings.map(item => [item.rank, item.value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
+    expect(await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM ranking_runs WHERE rfq_id = ?").bind(rfqId).first<{ count: number }>()).toEqual({ count: 0 });
+
     const job: QuoteRankJob = { jobId, rfqId, trigger: "ALL_TERMINAL", requestedVersion: 1 };
     await processQuoteRankJob(appEnv, job);
     await processQuoteRankJob(appEnv, job);
@@ -90,15 +113,46 @@ describe("versioned ranking persistence", () => {
     ).bind(rfqId).all<{ economic_rank: number; is_image_winner: number; normalized_value: number }>();
     expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
-    // One image per trade: the single trade T01 yields one job, for its rank-1 winner BNP.
-    expect(imageJobs.map(job => [job.tradeCode, job.issuer])).toEqual([["T01", "BNP"]]);
+    expect(imageJobs).toHaveLength(0);
     const artifacts = await testEnv.DB.prepare(
       "SELECT trade_code, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
     ).bind(rfqId).all<{ trade_code: string; issuer: string; render_profile_version: string }>();
-    expect(artifacts.results).toEqual([
+    expect(artifacts.results).toEqual([]);
+
+    const artifactRequest = new Request(`${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/artifact`, {
+      method: "POST",
+      headers: {
+        origin: BASE_URL,
+        cookie: `__Host-fcn_csrf=${csrfToken}`,
+        "x-csrf-token": csrfToken
+      }
+    });
+    await expect(requestTradeArtifact(
+      artifactRequest.clone(),
+      appEnv,
+      { ...session, user: { ...session.user, id: `usr_${crypto.randomUUID()}` } },
+      rfqId,
+      "T01"
+    )).rejects.toMatchObject({ code: "RFQ_NOT_FOUND" });
+    await expect(requestTradeArtifact(
+      new Request(artifactRequest.url, {
+        method: "POST",
+        headers: { origin: BASE_URL, cookie: "__Host-fcn_csrf=wrong", "x-csrf-token": "wrong" }
+      }),
+      appEnv,
+      session,
+      rfqId,
+      "T01"
+    )).rejects.toMatchObject({ code: "CSRF_VALIDATION_FAILED" });
+    expect((await requestTradeArtifact(artifactRequest, appEnv, session, rfqId, "T01")).status).toBe(202);
+    expect((await requestTradeArtifact(artifactRequest.clone(), appEnv, session, rfqId, "T01")).status).toBe(202);
+    expect(imageJobs.map(job => [job.tradeCode, job.issuer])).toEqual([["T01", "BNP"]]);
+    const storedArtifacts = await testEnv.DB.prepare(
+      "SELECT trade_code, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
+    ).bind(rfqId).all<{ trade_code: string; issuer: string; render_profile_version: string }>();
+    expect(storedArtifacts.results).toEqual([
       { trade_code: "T01", issuer: "BNP", render_profile_version: "quote-card-reference-v3" }
     ]);
-    const session = { user: { id: userId } } as SessionContext;
     const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
       artifacts: Array<{ id: string; tradeCode: string; issuer: string; previewUrl: string | null }>;
     }>();

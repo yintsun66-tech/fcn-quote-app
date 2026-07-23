@@ -1,9 +1,13 @@
-import { newId, nowIso } from "./db";
+import { requireCsrf } from "./auth";
+import { insertAudit, newId, nowIso } from "./db";
 import { rfqCorrelationCode } from "./crypto";
+import { AppError } from "./errors";
+import { jsonResponse, requestId, requireSameOrigin } from "./http";
 import { renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
-import type { AppEnv, ImageRenderJob } from "./types";
+import type { AppEnv, ImageRenderJob, SessionContext } from "./types";
 
 const LEASE_MILLISECONDS = 3 * 60 * 1000;
+const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
 
 interface ArtifactJobRow {
   id: string;
@@ -33,6 +37,144 @@ interface QuoteCardRow {
   barrier_type: string | null;
   ki_barrier_pct: number | null;
   comparable_price_pct: number | null;
+}
+
+interface ArtifactRequestWinner {
+  ranking_run_id: string;
+  ranking_version: number;
+  issuer: string;
+}
+
+interface RequestedArtifact {
+  id: string;
+  ranking_run_id: string;
+  trade_code: string;
+  issuer: string;
+  status: "QUEUED" | "RENDERING" | "READY" | "FAILED";
+  completed_at: string | null;
+  expires_at: string;
+}
+
+function artifactResponse(artifact: RequestedArtifact): Record<string, unknown> {
+  return {
+    id: artifact.id,
+    tradeCode: artifact.trade_code,
+    issuer: artifact.issuer,
+    status: artifact.status,
+    completedAt: artifact.completed_at,
+    expiresAt: artifact.expires_at,
+    downloadUrl: artifact.status === "READY" ? `/api/v1/artifacts/${artifact.id}/download` : null,
+    previewUrl: artifact.status === "READY" ? `/api/v1/artifacts/${artifact.id}/download?preview=1` : null
+  };
+}
+
+export async function requestTradeArtifact(
+  request: Request,
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string,
+  tradeCode: string
+): Promise<Response> {
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const rfq = await env.DB.prepare(
+    "SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ? AND user_id = ?"
+  ).bind(rfqId, session.user.id).first<{ workflow_status: string; current_ranking_version: number }>();
+  if (!rfq) throw new AppError(404, "RFQ_NOT_FOUND", "找不到此詢價，或您沒有權限查看。 ");
+  if (rfq.workflow_status !== "COMPLETED" || rfq.current_ranking_version < 1) {
+    throw new AppError(409, "RFQ_NOT_FINALIZED", "詢價完成且有有效第一名後，才能產出報價圖。 ");
+  }
+  const winner = await env.DB.prepare(
+    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.issuer
+       FROM ranking_runs run
+       JOIN ranking_results result ON result.ranking_run_id = run.id AND result.is_image_winner = 1
+       JOIN rfq_trades trade ON trade.id = result.trade_id
+       JOIN issuer_quotes q ON q.id = result.quote_id
+      WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
+      LIMIT 1`
+  ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestWinner>();
+  if (!winner) throw new AppError(404, "RANK_ONE_QUOTE_NOT_FOUND", "此筆交易沒有可產圖的第一名報價。 ");
+
+  const idempotencyKey = `image:${rfqId}:v${winner.ranking_version}:${tradeCode}`;
+  let artifact = await env.DB.prepare(
+    `SELECT id, ranking_run_id, trade_code, issuer, status, completed_at, expires_at
+       FROM generated_artifacts WHERE idempotency_key = ?`
+  ).bind(idempotencyKey).first<RequestedArtifact>();
+  let shouldEnqueue = false;
+  const now = nowIso();
+  if (!artifact) {
+    const artifactId = newId("art");
+    const expiresAt = new Date(Date.parse(now) + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const inserted = await env.DB.prepare(
+      `INSERT OR IGNORE INTO generated_artifacts
+        (id, rfq_id, ranking_run_id, trade_code, issuer, status, render_profile_version,
+         idempotency_key, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
+    ).bind(
+      artifactId, rfqId, winner.ranking_run_id, tradeCode, winner.issuer,
+      RENDER_PROFILE_VERSION, idempotencyKey, now, expiresAt
+    ).run();
+    artifact = await env.DB.prepare(
+      `SELECT id, ranking_run_id, trade_code, issuer, status, completed_at, expires_at
+         FROM generated_artifacts WHERE idempotency_key = ?`
+    ).bind(idempotencyKey).first<RequestedArtifact>();
+    shouldEnqueue = inserted.meta.changes > 0;
+  } else if (artifact.status === "FAILED") {
+    const reset = await env.DB.prepare(
+      `UPDATE generated_artifacts SET status = 'QUEUED', last_error_code = NULL
+        WHERE id = ? AND status = 'FAILED'`
+    ).bind(artifact.id).run();
+    shouldEnqueue = reset.meta.changes > 0;
+    if (shouldEnqueue) artifact = { ...artifact, status: "QUEUED" };
+  }
+  if (!artifact) throw new AppError(500, "ARTIFACT_CREATE_FAILED", "無法建立報價圖工作。 ");
+
+  let job = await env.DB.prepare(
+    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status
+       FROM image_render_jobs WHERE idempotency_key = ?`
+  ).bind(idempotencyKey).first<ArtifactJobRow>();
+  if (!job) {
+    const jobId = newId("imgjob");
+    const inserted = await env.DB.prepare(
+      `INSERT OR IGNORE INTO image_render_jobs
+        (id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, idempotency_key,
+         status, available_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
+    ).bind(
+      jobId, artifact.id, rfqId, winner.ranking_run_id, tradeCode, winner.issuer,
+      idempotencyKey, now, now, now
+    ).run();
+    shouldEnqueue = shouldEnqueue || inserted.meta.changes > 0;
+    job = await env.DB.prepare(
+      `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status
+         FROM image_render_jobs WHERE idempotency_key = ?`
+    ).bind(idempotencyKey).first<ArtifactJobRow>();
+  } else if (shouldEnqueue && job.status === "FAILED") {
+    await env.DB.prepare(
+      `UPDATE image_render_jobs SET status = 'QUEUED', last_error_code = NULL,
+              lease_expires_at = NULL, available_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'FAILED'`
+    ).bind(now, now, job.id).run();
+    job = { ...job, status: "QUEUED" };
+  }
+  if (!job) throw new AppError(500, "IMAGE_RENDER_JOB_CREATE_FAILED", "無法建立報價圖佇列工作。 ");
+  if (shouldEnqueue) {
+    await env.IMAGE_RENDER_QUEUE.send({
+      jobId: job.id,
+      artifactId: artifact.id,
+      rfqId,
+      rankingRunId: winner.ranking_run_id,
+      tradeCode,
+      issuer: winner.issuer
+    });
+  }
+  await insertAudit(env, "QUOTE_IMAGE_REQUESTED", "ARTIFACT", artifact.id, session.user.id, requestId(request), {
+    rfqId,
+    tradeCode,
+    issuer: winner.issuer,
+    enqueued: shouldEnqueue
+  });
+  return jsonResponse({ artifact: artifactResponse(artifact) }, artifact.status === "READY" ? 200 : 202);
 }
 
 function safeUnderlyings(json: string): string[] {

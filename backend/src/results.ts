@@ -3,7 +3,9 @@ import { requestFinalization } from "./coordinator";
 import { insertAudit } from "./db";
 import { AppError } from "./errors";
 import { jsonResponse, requestId, requireSameOrigin } from "./http";
-import type { AppEnv, SessionContext } from "./types";
+import { quoteTargetValue, rankingDirection, rankValidQuotes, type QuoteRankRow } from "./ranking";
+import { rfqSoftDeadlineAt } from "./rfq-timing";
+import type { AppEnv, SessionContext, TargetField } from "./types";
 
 interface OwnedWorkflow {
   id: string;
@@ -14,6 +16,11 @@ interface OwnedWorkflow {
   finalized_at: string | null;
   finalization_trigger: string | null;
   current_ranking_version: number;
+}
+
+interface ProvisionalQuoteRow extends QuoteRankRow {
+  issuer_display_name: string;
+  normalization_warnings_json: string;
 }
 
 async function ownedWorkflow(env: AppEnv, userId: string, rfqId: string): Promise<OwnedWorkflow> {
@@ -41,7 +48,8 @@ export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: 
   return jsonResponse({
     rfq: {
       id: rfq.id, workflowStatus: rfq.workflow_status, createdAt: rfq.created_at,
-      sentAt: rfq.sent_at, deadlineAt: rfq.deadline_at, finalizedAt: rfq.finalized_at,
+      sentAt: rfq.sent_at, softDeadlineAt: rfqSoftDeadlineAt(env, rfq.sent_at),
+      deadlineAt: rfq.deadline_at, finalizedAt: rfq.finalized_at,
       finalizationTrigger: rfq.finalization_trigger, rankingVersion: rfq.current_ranking_version
     },
     issuers: issuers.results.map(row => ({ issuer: row.issuer, status: row.status, terminalAt: row.terminal_at, reason: row.terminal_reason })),
@@ -58,6 +66,7 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
     `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
        FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
   ).bind(rfqId).all<Record<string, unknown>>();
+  const isProvisional = rfq.current_ranking_version === 0 && ["WAITING", "PARTIAL", "FINALIZING"].includes(rfq.workflow_status);
   const results = rfq.current_ranking_version > 0 ? await env.DB.prepare(
     `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
             r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
@@ -73,21 +82,82 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
        JOIN ranking_runs run ON run.id = e.ranking_run_id
       WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
-  return jsonResponse({
-    rfq: { id: rfq.id, workflowStatus: rfq.workflow_status, rankingVersion: rfq.current_ranking_version },
-    trades: trades.results.map(trade => ({
-      id: trade.id, sequence: trade.sequence, tradeCode: trade.trade_code, product: trade.product,
-      currency: trade.currency, targetField: trade.target_field,
-      underlyings: JSON.parse(String(trade.underlyings_json ?? "[]")) as unknown,
-      rankings: results.results.filter(result => result.trade_id === trade.id).map(result => ({
+  const provisionalQuotes = isProvisional ? await env.DB.prepare(
+    `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
+            strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
+            ki_barrier_pct, normalization_warnings_json
+       FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
+  ).bind(rfqId).all<ProvisionalQuoteRow>() : { results: [] as ProvisionalQuoteRow[] };
+  const provisionalByTrade = new Map<string, ReturnType<typeof rankValidQuotes>>();
+  const provisionalValidCounts = new Map<string, number>();
+  const provisionalLastUpdated = new Map<string, string | null>();
+  if (isProvisional) {
+    for (const trade of trades.results) {
+      const tradeId = String(trade.id);
+      const targetField = String(trade.target_field) as TargetField;
+      const tradeQuotes = provisionalQuotes.results.filter(quote => quote.trade_id === tradeId);
+      provisionalByTrade.set(tradeId, rankValidQuotes(tradeQuotes, targetField));
+      provisionalValidCounts.set(tradeId, new Set(tradeQuotes.filter(quote => {
+        const value = quoteTargetValue(quote, targetField);
+        return quote.status === "VALID" && value !== null && Number.isFinite(value);
+      }).map(quote => quote.issuer)).size);
+      provisionalLastUpdated.set(tradeId, tradeQuotes.at(-1)?.received_at ?? null);
+    }
+  }
+  const tradePayloads = trades.results.map(trade => {
+    const tradeId = String(trade.id);
+    const targetField = String(trade.target_field) as TargetField;
+    const provisionalRankings = provisionalByTrade.get(tradeId) ?? [];
+    const rankings = isProvisional
+      ? provisionalRankings.map(result => {
+        const quote = result.quote as ProvisionalQuoteRow;
+        return {
+          quoteId: quote.id,
+          rank: result.economicRank,
+          displayOrder: result.displayOrder,
+          issuer: quote.issuer,
+          issuerDisplayName: quote.issuer_display_name,
+          value: result.value,
+          direction: rankingDirection(targetField),
+          isImageWinner: false,
+          tie: provisionalRankings.filter(candidate => candidate.tieGroup === result.tieGroup).length > 1,
+          receivedAt: quote.received_at,
+          warnings: JSON.parse(quote.normalization_warnings_json || "[]") as unknown
+        };
+      })
+      : results.results.filter(result => result.trade_id === trade.id).map(result => ({
         quoteId: result.quote_id, rank: result.economic_rank, displayOrder: result.display_order,
         issuer: result.issuer, issuerDisplayName: result.issuer_display_name,
         value: result.normalized_value, direction: result.direction,
-        isImageWinner: result.is_image_winner === 1, tie: results.results.filter(candidate => candidate.trade_id === trade.id && candidate.tie_group === result.tie_group).length > 1,
+        isImageWinner: result.is_image_winner === 1,
+        tie: results.results.filter(candidate => candidate.trade_id === trade.id && candidate.tie_group === result.tie_group).length > 1,
         receivedAt: result.received_at, warnings: JSON.parse(String(result.normalization_warnings_json ?? "[]")) as unknown
-      })),
-      exclusions: exclusions.results.filter(exclusion => exclusion.trade_id === trade.id).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
-    }))
+      }));
+    return {
+      id: trade.id, sequence: trade.sequence, tradeCode: trade.trade_code, product: trade.product,
+      currency: trade.currency, targetField: trade.target_field,
+      underlyings: JSON.parse(String(trade.underlyings_json ?? "[]")) as unknown,
+      validQuoteCount: isProvisional ? provisionalValidCounts.get(tradeId) ?? 0 : rankings.length,
+      lastUpdatedAt: isProvisional ? provisionalLastUpdated.get(tradeId) ?? null : rfq.finalized_at,
+      rankings,
+      exclusions: isProvisional
+        ? provisionalQuotes.results
+          .filter(quote => quote.trade_id === tradeId && quote.status !== "VALID")
+          .map(quote => ({ issuer: quote.issuer, reason: quote.status }))
+        : exclusions.results.filter(exclusion => exclusion.trade_id === trade.id).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
+    };
+  });
+  return jsonResponse({
+    rfq: {
+      id: rfq.id,
+      workflowStatus: rfq.workflow_status,
+      rankingVersion: rfq.current_ranking_version,
+      isProvisional,
+      allTradesHaveThreeValidQuotes: isProvisional && tradePayloads.length > 0
+        ? tradePayloads.every(trade => trade.validQuoteCount >= 3)
+        : false
+    },
+    trades: tradePayloads
   });
 }
 

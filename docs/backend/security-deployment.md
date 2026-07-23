@@ -179,7 +179,8 @@ The following must be completed or verified before production deployment:
 8. D1/R2/Queues/Durable Objects/Browser Rendering plans and limits are checked for the expected load.
 9. Anonymous parser fixtures are stored only in a private repository or protected test storage.
 10. CITI normalization and ranking fixtures pass.
-11. A load test covers 50 concurrent users, 20 trades per RFQ, eleven expected issuers, and the ten-minute deadline.
+11. A load test covers 50 concurrent users, 20 trades per RFQ, eleven expected issuers, the
+    seven-minute reminder, and the fifteen-minute hard deadline.
 12. Monitoring, dead-letter handling, incident response, backup/export, and rollback procedures are documented.
 
 ## Threats requiring explicit tests

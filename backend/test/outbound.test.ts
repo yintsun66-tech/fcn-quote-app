@@ -139,7 +139,7 @@ describe("outbound RFQ email workflow", () => {
       "SELECT dispatch_status, sent_at, deadline_at, correlation_token_hash FROM rfqs WHERE id = ?"
     ).bind(RFQ_ID).first<{ dispatch_status: string; sent_at: string; deadline_at: string; correlation_token_hash: string }>();
     expect(rfq?.dispatch_status).toBe("WAITING");
-    expect(Date.parse(rfq?.deadline_at ?? "") - Date.parse(rfq?.sent_at ?? "")).toBe(10 * 60 * 1000);
+    expect(Date.parse(rfq?.deadline_at ?? "") - Date.parse(rfq?.sent_at ?? "")).toBe(15 * 60 * 1000);
     expect(rfq?.correlation_token_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const batches = await testEnv.DB.prepare(
       "SELECT status, provider_message_id, content_hash FROM outbound_email_batches WHERE rfq_id = ?"

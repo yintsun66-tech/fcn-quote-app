@@ -14,7 +14,8 @@
     "OUTBOUND_TO": "i14053@firstbank.com.tw",
     "INBOUND_ADDRESS": "rfq@yintsun66.com",
     "MAX_INBOUND_EMAIL_BYTES": "26214400",
-    "RFQ_DEADLINE_SECONDS": "600"
+    "RFQ_SOFT_DEADLINE_SECONDS": "420",
+    "RFQ_DEADLINE_SECONDS": "900"
   },
   "secrets": {
     "required": ["EMPLOYEE_DATA_KEY", "EMPLOYEE_LOOKUP_KEY"]
@@ -96,40 +97,40 @@
     "consumers": [
       {
         "queue": "fcn-outbound-email",
-        "max_batch_size": 8,
-        "max_batch_timeout": 5,
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-outbound-email-dlq",
         "max_concurrency": 5
       },
       {
         "queue": "fcn-email-parse",
-        "max_batch_size": 5,
-        "max_batch_timeout": 5,
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-email-parse-dlq",
         "max_concurrency": 5
       },
       {
         "queue": "fcn-quote-normalize",
-        "max_batch_size": 5,
-        "max_batch_timeout": 5,
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-quote-normalize-dlq",
         "max_concurrency": 5
       },
       {
         "queue": "fcn-quote-rank",
-        "max_batch_size": 3,
-        "max_batch_timeout": 2,
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-quote-rank-dlq",
         "max_concurrency": 3
       },
       {
         "queue": "fcn-image-render",
-        "max_batch_size": 3,
-        "max_batch_timeout": 5,
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-image-render-dlq",
         "max_concurrency": 3

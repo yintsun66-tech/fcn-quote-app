@@ -5,11 +5,13 @@ Date: 2026-07-22
 
 ## Context
 
-The reply window is fixed at `RFQ_DEADLINE_SECONDS` (default 600s / 10 minutes, ADR 0003).
+The reply window is configured by `RFQ_DEADLINE_SECONDS`. It was 600 seconds when this decision
+was accepted; ADR 0006 changes the current hard default to 900 seconds and adds a 420-second
+soft reminder.
 Early finalization already happens automatically when all expected issuers reach a terminal
 state. But when the issuers a user actually cares about have replied and the rest are expected
 to stay silent, the user still waits out the remaining window. The user asked for a control to
-end the wait and rank immediately, while keeping the 10-minute default for the untouched case.
+end the wait and rank immediately, while keeping the configured hard deadline for the untouched case.
 
 ## Decision
 

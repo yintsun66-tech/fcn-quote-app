@@ -40,8 +40,9 @@ on its own.
 ## Evidence / implementation links
 
 - `backend/migrations/0008_trade_artifacts.sql`
-- `backend/src/ranking.ts` (per-trade winners → `persistArtifacts`), `backend/src/artifacts.ts`
-  (per-trade render), `backend/src/results.ts` (`tradeCode` in status/list), `backend/src/types.ts`
+- `backend/src/ranking.ts` (persists deterministic per-trade winner), `backend/src/artifacts.ts`
+  (idempotent on-demand request + per-trade render), `backend/src/results.ts` (`tradeCode` in
+  status/list), `backend/src/types.ts`
   (`ImageRenderJob.tradeCode`)
 - `backend-client.js` (inline per-trade link + per-trade download list)
 - `backend/test/ranking-integration.test.ts`

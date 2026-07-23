@@ -1,6 +1,6 @@
 import type { Issuer } from "./inbound-parser";
 
-export const ISSUER_PROFILE_VERSION = "issuer-fcn-v1";
+export const ISSUER_PROFILE_VERSION = "issuer-fcn-v2";
 
 export type QuoteStatus =
   | "VALID"
@@ -98,6 +98,23 @@ interface StandardProfile {
   unit: Unit;
   priceLabel: string;
   priceSemantics: PriceSemantics;
+}
+
+interface SgColumns {
+  underlyings: number[];
+  tenor: number;
+  observation: number;
+  currency: number;
+  coupon: number;
+  fixedCoupons: number;
+  guaranteed: number;
+  strike: number;
+  koBarrier: number;
+  koType: number;
+  barrierType: number;
+  kiBarrier: number;
+  price: number;
+  comment?: number;
 }
 
 const STANDARD_PROFILES: Partial<Record<Issuer, StandardProfile>> = Object.freeze({
@@ -245,6 +262,62 @@ function comparablePrice(raw: number | null, semantics: PriceSemantics): number 
   return semantics === "UPFRONT" ? 100 - raw : raw;
 }
 
+function normalizedHeader(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/gu, "");
+}
+
+function findHeaderIndex(headers: readonly string[], aliases: readonly string[]): number {
+  const normalizedAliases = new Set(aliases.map(normalizedHeader));
+  return headers.findIndex(header => normalizedAliases.has(normalizedHeader(header)));
+}
+
+function sgColumns(rows: readonly string[][]): SgColumns | null {
+  for (const row of rows) {
+    const underlyings = row
+      .map((header, index) => ({ header: normalizedHeader(header), index }))
+      .filter(item => /^UNDERLYING\d*$/u.test(item.header))
+      .map(item => item.index);
+    const columns: SgColumns = {
+      underlyings,
+      tenor: findHeaderIndex(row, ["No. of Periods", "No of Periods", "Periods"]),
+      observation: findHeaderIndex(row, ["Settlement Frequency", "Frequency"]),
+      currency: findHeaderIndex(row, ["Currency"]),
+      coupon: findHeaderIndex(row, ["Coupon p.a.", "Coupon pa", "Coupon"]),
+      fixedCoupons: findHeaderIndex(row, ["Fixed Coupons"]),
+      guaranteed: findHeaderIndex(row, ["Non-Call (m)", "Non Call", "Non-call"]),
+      strike: findHeaderIndex(row, ["Put Strike", "Strike"]),
+      koBarrier: findHeaderIndex(row, ["AutoCall", "Autocall Barrier", "KO Barrier"]),
+      koType: findHeaderIndex(row, ["KO Type"]),
+      barrierType: findHeaderIndex(row, ["KI Type", "Barrier Type"]),
+      kiBarrier: findHeaderIndex(row, ["KI", "KI Barrier"]),
+      price: findHeaderIndex(row, ["Offer Price"]),
+      comment: findHeaderIndex(row, ["Comment", "Comments"])
+    };
+    const required = [
+      columns.tenor,
+      columns.observation,
+      columns.currency,
+      columns.coupon,
+      columns.fixedCoupons,
+      columns.guaranteed,
+      columns.strike,
+      columns.koBarrier,
+      columns.koType,
+      columns.barrierType,
+      columns.kiBarrier,
+      columns.price
+    ];
+    if (underlyings.length > 0 && required.every(index => index >= 0)) {
+      if (columns.comment !== undefined && columns.comment < 0) delete columns.comment;
+      return columns;
+    }
+  }
+  return null;
+}
+
 function standardRow(profile: StandardProfile, row: string[], tableIndex: number, rowIndex: number): ParsedIssuerRow | null {
   const columns = profile.columns;
   const parsedProduct = product(text(row, columns.product));
@@ -318,28 +391,46 @@ function msRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssue
   };
 }
 
-function sgRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssuerRow | null {
-  const parsedCurrency = currency(text(row, 11));
-  const underlyings = [4, 5, 6, 7, 8].map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
-  const fixedCoupons = text(row, 14).toUpperCase();
+function sgRow(row: string[], tableIndex: number, rowIndex: number, detectedColumns: SgColumns | null): ParsedIssuerRow | null {
+  const columns: SgColumns = detectedColumns ?? {
+    underlyings: [4, 5, 6, 7, 8],
+    tenor: 9,
+    observation: 10,
+    currency: 11,
+    coupon: 13,
+    fixedCoupons: 14,
+    guaranteed: 15,
+    strike: 16,
+    koBarrier: 17,
+    koType: 18,
+    barrierType: 19,
+    kiBarrier: 20,
+    price: 21,
+    comment: 23
+  };
+  const parsedCurrency = currency(text(row, columns.currency));
+  const underlyings = columns.underlyings.map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
+  const fixedCoupons = text(row, columns.fixedCoupons).toUpperCase();
   const parsedProduct: CanonicalProduct | null = fixedCoupons === "ALL PERIODS" ? "FCN" : null;
   if (!parsedProduct || !parsedCurrency || underlyings.length === 0) return null;
-  const rawTargets = targetRaw(row, 16, 17, 13, 21, 20);
+  const rawTargets = targetRaw(row, columns.strike, columns.koBarrier, columns.coupon, columns.price, columns.kiBarrier);
   const rawPriceValue = percentage(rawTargets.price, "DECIMAL_FRACTION");
-  const comment = optionalText(row, 23);
-  const barrierType = barrier(text(row, 19));
+  const comment = optionalText(row, columns.comment);
+  const barrierType = barrier(text(row, columns.barrierType));
   return {
-    issuer: "SG", issuerDisplayName: "SG", parserProfile: "SG_FCN_V1",
+    issuer: "SG", issuerDisplayName: "SG", parserProfile: detectedColumns ? "SG_FCN_V2" : "SG_FCN_V1",
     sourceTableIndex: tableIndex, sourceRowIndex: rowIndex, rawValues: row,
-    product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, 9)),
-    guaranteedPeriodsMonths: integer(text(row, 15)), underlyings,
-    strikePct: percentage(rawTargets.strike, "DECIMAL_FRACTION"), koType: koType(text(row, 18)),
+    product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, columns.tenor)),
+    guaranteedPeriodsMonths: integer(text(row, columns.guaranteed)), underlyings,
+    strikePct: percentage(rawTargets.strike, "DECIMAL_FRACTION"), koType: koType(text(row, columns.koType)),
     koBarrierPct: percentage(rawTargets.koBarrier, "DECIMAL_FRACTION"), couponPaPct: percentage(rawTargets.coupon, "DECIMAL_FRACTION"),
     rawPriceValue, rawPriceLabel: "Offer Price", priceSemantics: "OFFER_PRICE", comparablePricePct: rawPriceValue,
     barrierType, kiBarrierPct: barrierType === "NONE" ? null : percentage(rawTargets.kiBarrier, "DECIMAL_FRACTION"),
-    observationFrequencyMonths: /^MONTHLY$/iu.test(text(row, 10)) ? 1 : months(text(row, 10)),
+    observationFrequencyMonths: /^MONTHLY$/iu.test(text(row, columns.observation)) ? 1 : months(text(row, columns.observation)),
     otc: "Note", effectiveDateOffsetCalendarDays: null, quoteReference: null, issuerComment: comment,
-    rejectionReason: rejection(comment, rawTargets, barrierType), warnings: ["SG_SOURCE_HEADERS_ARE_POSITIONAL"], rawTargetValues: rawTargets
+    rejectionReason: rejection(comment, rawTargets, barrierType),
+    warnings: [detectedColumns ? "SG_HEADER_MAPPED_DYNAMICALLY" : "SG_SOURCE_HEADERS_ARE_POSITIONAL"],
+    rawTargetValues: rawTargets
   };
 }
 
@@ -374,12 +465,13 @@ function citiRow(row: string[], tableIndex: number, rowIndex: number): ParsedIss
 export function parseIssuerTables(issuer: Issuer, document: ParsedTablesDocument): ParsedIssuerRow[] {
   const result: ParsedIssuerRow[] = [];
   for (const table of document.tables ?? []) {
+    const detectedSgColumns = issuer === "SG" ? sgColumns(table.rows) : null;
     for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) {
       const source = table.rows[rowIndex] ?? [];
       const row = issuer === "MS"
         ? msRow(source, table.index, rowIndex)
         : issuer === "SG"
-          ? sgRow(source, table.index, rowIndex)
+          ? sgRow(source, table.index, rowIndex, detectedSgColumns)
           : issuer === "CITI"
             ? citiRow(source, table.index, rowIndex)
             : STANDARD_PROFILES[issuer]

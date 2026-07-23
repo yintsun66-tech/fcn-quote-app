@@ -83,10 +83,48 @@ describe("issuer parser profiles", () => {
     });
   });
 
-  it("normalizes SG shifted fields and decimal fractions", () => {
-    const row = cells(24, { 4: "AAA UW", 9: 6, 10: "Monthly", 11: "USD", 13: 0.125, 14: "All Periods", 15: 1, 16: 0.8, 17: 1, 18: "Daily Memory", 19: "N/A", 20: "N/A", 21: 0.98, 23: "Accepted" });
-    const parsed = parseIssuerTables("SG", { tables: [{ index: 0, rows: [row] }] });
-    expect(parsed[0]).toMatchObject({ product: "FCN", strikePct: 80, couponPaPct: 12.5, comparablePricePct: 98, guaranteedPeriodsMonths: 1 });
+  it("maps current SG headers dynamically when the reply contains fewer than five underlyings", () => {
+    const headers = [
+      "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",
+      "Underlying 1", "Underlying 2", "No. of Periods", "Settlement Frequency",
+      "Currency", "Quote ?", "Coupon p.a.", "Fixed Coupons", "Non-Call (m)",
+      "Put Strike", "AutoCall", "KO Type", "KI Type", "KI", "Offer Price",
+      "Funding Spread (Bps)", "Comment"
+    ];
+    const first = cells(headers.length, {
+      4: "TSM UN", 5: "ISRG UW", 6: 12, 7: "Monthly", 8: "USD", 9: "Coupon",
+      10: "12.58%", 11: "All Periods", 12: 3, 13: "65%", 14: "100%",
+      15: "Daily Memory", 16: "N/A", 17: "N/A", 18: "99.7%", 20: "Accepted"
+    });
+    const second = cells(headers.length, {
+      4: "NVDA UW", 6: 6, 7: "Monthly", 8: "USD", 9: "Coupon",
+      10: 0.1447, 11: "All Periods", 12: 1, 13: 0.85, 14: 1,
+      15: "Daily Memory", 16: "EKI", 17: 0.7, 18: 0.98
+    });
+    const parsed = parseIssuerTables("SG", { tables: [{ index: 0, rows: [headers, first, second] }] });
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({
+      parserProfile: "SG_FCN_V2",
+      product: "FCN",
+      currency: "USD",
+      tenorMonths: 12,
+      guaranteedPeriodsMonths: 3,
+      underlyings: ["TSM UN", "ISRG UW"],
+      strikePct: 65,
+      koBarrierPct: 100,
+      couponPaPct: 12.58,
+      comparablePricePct: 99.7,
+      barrierType: "NONE",
+      kiBarrierPct: null,
+      warnings: ["SG_HEADER_MAPPED_DYNAMICALLY"]
+    });
+    expect(parsed[1]).toMatchObject({
+      underlyings: ["NVDA UW"],
+      strikePct: 85,
+      barrierType: "EKI",
+      kiBarrierPct: 70
+    });
+    expect(parsed[1]?.couponPaPct).toBeCloseTo(14.47);
   });
 
   it("converts CITI Upfront to comparable Note Price and derives KO type", () => {

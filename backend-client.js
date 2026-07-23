@@ -13,6 +13,7 @@
       <span id="backendUser"></span>
       <button id="backendAdminRegistrations" type="button" class="secondary" hidden>使用者申請審核</button>
       <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
+      <button id="backendAdminTimelines" type="button" class="secondary" hidden>RFQ 處理時間軸</button>
       <button id="backendLogout" type="button" class="secondary">登出</button>
     </div>
     <dialog id="backendAuth" class="backend-dialog">
@@ -66,6 +67,14 @@
         <p id="backendRegistrationReviewStatus" class="backend-admin-status" role="status"></p>
         <div id="backendRegistrationReviewList" class="backend-registration-list"></div>
       </section>
+    </dialog>
+    <dialog id="backendRfqTimelines" class="backend-dialog backend-timeline-dialog">
+      <section class="backend-panel">
+        <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>RFQ 處理時間軸</h2></div><button id="closeBackendRfqTimelines" type="button" class="secondary">關閉</button></div>
+        <p class="backend-archive-note">僅顯示安全的處理狀態與耗時統計，不顯示郵件全文、RFQ token 或私人 R2 路徑。</p>
+        <p id="backendRfqTimelinesError" class="backend-error" role="alert"></p>
+        <div id="backendRfqTimelinesList" class="backend-timeline-list"></div>
+      </section>
     </dialog>`;
   document.body.append(shell);
 
@@ -87,6 +96,10 @@
   const adminOutboundSubject = document.querySelector("#backendOutboundArchiveSubject");
   const adminOutboundMeta = document.querySelector("#backendOutboundArchiveMeta");
   const adminOutboundFrame = document.querySelector("#backendOutboundArchiveFrame");
+  const adminTimelinesButton = document.querySelector("#backendAdminTimelines");
+  const adminTimelinesDialog = document.querySelector("#backendRfqTimelines");
+  const adminTimelinesList = document.querySelector("#backendRfqTimelinesList");
+  const adminTimelinesError = document.querySelector("#backendRfqTimelinesError");
   const artifactContainer = document.querySelector("#backendArtifacts");
 
   function cookie(name) {
@@ -124,6 +137,7 @@
     userbar.hidden = !user;
     adminRegistrationsButton.hidden = !user || user.role !== "ADMIN";
     adminOutboundButton.hidden = !user || user.role !== "ADMIN";
+    adminTimelinesButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
     if (user && authDialog.open) authDialog.close();
   }
@@ -250,6 +264,46 @@
     }
   }
 
+  function formatDuration(value) {
+    if (value === null || value === undefined) return "—";
+    const minutes = Math.floor(value / 60);
+    const seconds = value % 60;
+    return minutes ? `${minutes}分 ${seconds}秒` : `${seconds}秒`;
+  }
+
+  function renderAdminRfqTimelines(records) {
+    if (!records.length) {
+      adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有 RFQ 處理紀錄。</p>";
+      return;
+    }
+    adminTimelinesList.innerHTML = records.map(record => `
+      <article class="backend-timeline-card">
+        <header><div><b>${escapeHtml(record.rfqId)}</b><small>${escapeHtml(record.requester.displayName)}｜${escapeHtml(record.requester.branchName)}｜${record.tradeCount} 筆</small></div><span>${escapeHtml(record.workflowStatus)}</span></header>
+        <div class="backend-timeline-metrics">
+          <span>排隊→寄完：<b>${formatDuration(record.durationsSeconds.queueToSent)}</b></span>
+          <span>寄完→首封回覆：<b>${formatDuration(record.durationsSeconds.sentToFirstInbound)}</b></span>
+          <span>寄完→完成：<b>${formatDuration(record.durationsSeconds.sentToFinalized)}</b></span>
+          <span>完成→最後圖片：<b>${formatDuration(record.durationsSeconds.finalizedToLastArtifact)}</b></span>
+        </div>
+        <p>外寄 ${record.outbound.sent}/${record.outbound.total}｜回信 ${record.inbound.total}（已解析 ${record.inbound.parsed}、逾時 ${record.inbound.late}、待人工 ${record.inbound.manualReview}、未配對 ${record.inbound.unmatched}）｜圖片 ${record.artifacts.ready}/${record.artifacts.total}</p>
+        <div class="backend-timeline-issuers">${record.issuerStates.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${escapeHtml(item.issuer)}</b>${escapeHtml(item.status)}</span>`).join("")}</div>
+        <small>建立 ${escapeHtml(formatDateTime(record.timestamps.createdAt))}｜寄完 ${escapeHtml(formatDateTime(record.timestamps.sentAt))}｜截止 ${escapeHtml(formatDateTime(record.timestamps.deadlineAt))}</small>
+      </article>`).join("");
+  }
+
+  async function openAdminRfqTimelines() {
+    if (state.user?.role !== "ADMIN") return;
+    adminTimelinesError.textContent = "";
+    adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">正在載入 RFQ 時間軸…</p>";
+    if (!adminTimelinesDialog.open) adminTimelinesDialog.showModal();
+    try {
+      renderAdminRfqTimelines((await request("/admin/rfq-timelines?limit=50")).records);
+    } catch (error) {
+      adminTimelinesError.textContent = error.message;
+      adminTimelinesList.innerHTML = "";
+    }
+  }
+
   async function loadSession() {
     try { setUser((await request("/auth/session")).user); }
     catch { setUser(null); showAuth(); }
@@ -318,17 +372,24 @@
 
   function renderStatus(payload) {
     const deadline = payload.rfq.deadlineAt ? Date.parse(payload.rfq.deadlineAt) : null;
+    const softDeadline = payload.rfq.softDeadlineAt ? Date.parse(payload.rfq.softDeadlineAt) : null;
     const remaining = deadline ? Math.max(0, deadline - Date.now()) : 0;
+    const softReminder = softDeadline && Date.now() >= softDeadline && remaining > 0
+      ? "｜已達 7 分鐘，可查看暫定前三名或提早結束"
+      : "";
     document.querySelector("#backendCountdown").textContent = ["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
-      : `狀態：${payload.rfq.workflowStatus}｜剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
+      : `狀態：${payload.rfq.workflowStatus}｜硬截止剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}${softReminder}`;
     document.querySelector("#backendIssuerStates").innerHTML = payload.issuers.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${item.issuer}</b>${item.status}</span>`).join("");
     // Offer early close only while the reply window is still open.
     finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
   }
 
-  function artifactLinkHtml(artifact) {
-    if (!artifact) return "";
+  function artifactLinkHtml(artifact, tradeCode, provisional) {
+    if (provisional) return "";
+    if (!artifact) {
+      return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}">產出報價圖</button>`;
+    }
     if (artifact.status === "READY") {
       const href = artifact.previewUrl || artifact.downloadUrl;
       return ` <a class="artifact-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">報價圖</a>`;
@@ -338,12 +399,17 @@
 
   function renderResults(payload, artifactByTrade = {}) {
     state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
-    document.querySelector("#backendRankings").innerHTML = payload.trades.map(trade => {
+    const provisional = Boolean(payload.rfq.isProvisional);
+    finalizeButton.classList.toggle("attention", Boolean(payload.rfq.allTradesHaveThreeValidQuotes));
+    const banner = provisional
+      ? `<p class="backend-provisional">${payload.rfq.allTradesHaveThreeValidQuotes ? "每筆交易均已有至少三家有效報價，可提早結束並產生正式結果。" : "以下為暫定報價，回覆期間內仍可能變動，不會建立正式排名或報價圖。"}</p>`
+      : "";
+    document.querySelector("#backendRankings").innerHTML = banner + payload.trades.map(trade => {
       // One image per trade: link the trade's rank-1 (winning) issuer name to that trade's image.
-      const link = artifactLinkHtml(artifactByTrade[trade.tradeCode]);
+      const link = artifactLinkHtml(artifactByTrade[trade.tradeCode], trade.tradeCode, provisional);
       return `
-      <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}</small></h3>
-      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${item.rank === 1 ? link : ""}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
+      <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}｜${provisional ? `有效 ${trade.validQuoteCount} 家${trade.lastUpdatedAt ? `｜更新 ${escapeHtml(formatDateTime(trade.lastUpdatedAt))}` : ""}` : "正式結果"}</small></h3>
+      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${item.isImageWinner ? link : ""}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
     </section>`;
     }).join("");
   }
@@ -351,7 +417,7 @@
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">報價圖建立中，請稍候。</p>"
+        ? "<p class=\"artifact-pending\">請在各筆交易的第一名旁按「產出報價圖」，系統才會建立該張圖片。</p>"
         : "";
       return;
     }
@@ -372,13 +438,17 @@
       // Once the reply window has closed, the finalize→rank tail is short, so poll every 2s
       // to surface the result sooner; keep the calmer 4s cadence during the long wait.
       const deadlinePassed = status.rfq.deadlineAt ? Date.parse(status.rfq.deadlineAt) <= Date.now() : false;
-      if (["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)) {
+      if (["WAITING", "PARTIAL", "FINALIZING", "COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)) {
         const results = await request(`/rfqs/${state.rfqId}/results`);
-        const artifacts = (await request(`/rfqs/${state.rfqId}/artifacts`)).artifacts;
+        const artifacts = ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)
+          ? (await request(`/rfqs/${state.rfqId}/artifacts`)).artifacts
+          : [];
         renderResults(results, Object.fromEntries(artifacts.map(item => [item.tradeCode, item])));
-        renderArtifactSummary(artifacts);
-        if (state.hasRankings && (artifacts.length === 0 || artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING"))) {
+        if (!results.rfq.isProvisional) renderArtifactSummary(artifacts);
+        if (artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")) {
           state.timer = setTimeout(refreshResults, 2000);
+        } else if (results.rfq.isProvisional) {
+          state.timer = setTimeout(refreshResults, deadlinePassed ? 2000 : 4000);
         }
       } else {
         state.timer = setTimeout(refreshResults, deadlinePassed ? 2000 : 4000);
@@ -394,6 +464,23 @@
       event.preventDefault(); event.stopImmediatePropagation(); submitRfq();
     }
   }, true);
+  document.querySelector("#backendRankings").addEventListener("click", async event => {
+    const target = event.target.closest("[data-artifact-trade]");
+    if (!target || !state.rfqId) return;
+    target.disabled = true;
+    target.textContent = "建立中…";
+    try {
+      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(target.dataset.artifactTrade)}/artifact`, {
+        method: "POST",
+        body: "{}"
+      });
+      await refreshResults();
+    } catch (error) {
+      target.disabled = false;
+      target.textContent = "重試產圖";
+      document.querySelector("#backendCountdown").textContent = error.message;
+    }
+  });
   loginForm.addEventListener("submit", async event => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(loginForm));
@@ -439,5 +526,7 @@
     const target = event.target.closest("[data-outbound-id]");
     if (target) openAdminOutboundRecord(target.dataset.outboundId);
   });
+  adminTimelinesButton.addEventListener("click", openAdminRfqTimelines);
+  document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
   loadSession();
 })();

@@ -50,9 +50,10 @@ flowchart LR
     Q2 --> D
     Q2 --> O[RFQ Durable Object]
     O --> Q3[Ranking queue]
-    O -->|10-minute alarm| Q3
+    O -->|15-minute hard alarm| Q3
     Q3 --> D
-    Q3 --> Q4[Image render queue]
+    U -->|request one trade image| A
+    A --> Q4[Image render queue]
     Q4 --> BR[Browser Rendering]
     BR --> B
     D --> A
@@ -117,11 +118,13 @@ Implemented logical queues:
 - `image-render`
 
 Every consumer must be idempotent, record attempts and terminal errors, and have a dead-letter path. A failure for one issuer or RFQ must not block another RFQ.
+Consumers use one-message, one-second batches with bounded per-queue concurrency to reduce
+batch-wait latency without creating unbounded parallel work.
 
 ### Durable Object per RFQ
 
 - Coordinates issuer completion state for one RFQ.
-- Sets one alarm at `sent_at + 10 minutes`.
+- Exposes a seven-minute soft reminder to the UI and sets one hard alarm at `sent_at + 15 minutes`.
 - Requests finalization when all expected issuers are terminal or the alarm fires.
 - Treats alarm and queue delivery as at-least-once operations.
 - Uses a finalization idempotency key and ranking version to prevent duplicate results or images.
@@ -138,7 +141,8 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 
 - Renders an internal deterministic quote-card route from a finalized ranking snapshot.
 - Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
-- Creates one mobile-portrait image per trade — the trade's rank-1 winner in the finalized ranking snapshot (ADR 0005). A trade with no valid quote produces no image.
+- Creates a mobile-portrait image only after the owner requests that trade's rank-1 winner
+  (ADR 0006). A trade with no valid quote produces no image.
 - Uses the same issuer-specific color palette as the compatibility frontend, themed by each trade's winning issuer.
 - Uses the request trade date and displays the same complete `[RFQ:<10-character-code>]` reference carried by the outbound email subject. The displayed code is informational and is never accepted as authorization evidence.
 - Stores PNG output in private R2.
@@ -160,14 +164,17 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 3. Server validates the target field and all non-target conditions.
 4. Server snapshots the expected eleven issuers and eight outbound batches.
 5. An idempotent send request queues the eight emails.
-6. On successful dispatch, the RFQ deadline becomes `sent_at + 10 minutes` and its Durable Object alarm is set.
+6. On successful dispatch, the UI reminder becomes `sent_at + 7 minutes`; the RFQ hard deadline
+   becomes `sent_at + 15 minutes`, and its Durable Object alarm is set.
 
 ### 3. Reply ingestion
 
 1. The bank mailbox forwards issuer replies to `rfq@yintsun66.com`.
 2. Email Worker stores raw MIME and rejects exact duplicates by message ID/content hash.
 3. Parser identifies issuer from verified sender evidence, not from subject label alone.
-4. Parser correlates the opaque RFQ token, message thread evidence, and D1 ownership.
+4. Parser correlates the opaque RFQ token, message thread evidence, and D1 ownership. If forwarding
+   removed the subject tag, exactly one matching tag in sanitized body content may be used;
+   conflicting tags require manual review.
 5. Parsed rows are matched to immutable trade IDs and normalized into canonical quotes.
 6. Unknown, conflicting, or ambiguous evidence is quarantined for manual review and excluded from ranking.
 
@@ -176,15 +183,18 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 Finalization begins at the earlier of:
 
 - all expected issuers reaching a terminal state; or
-- the ten-minute deadline.
+- the fifteen-minute hard deadline.
 
 Ranking occurs independently for every trade. Only valid, comparable quotes are considered. The first three economic ranks are persisted as a versioned snapshot. Late replies are stored as `LATE_REPLY` and do not overwrite a finalized result without an explicit recalculation.
 
 ### 5. Results and images
 
-- The user result page loads only RFQs owned by that authenticated user.
+- The user result page loads only RFQs owned by that authenticated user. During
+  `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top three with the
+  exact production ranking function.
 - It shows issuer status, top three quotes, invalid/no-quote reasons, countdown/final status, and artifacts.
-- Each trade's winning issuer name links to that trade's image (one image per trade, ADR 0005).
+- Each trade's winning issuer offers an explicit **產出報價圖** action. The action creates or
+  reuses one idempotent, owner-scoped image job for that trade.
 - Server-rendered quote cards use a fixed portrait viewport so browser zoom and scroll do not affect the PNG.
 - Ties retain the same economic rank; the earliest valid receipt is selected only where a single deterministic image winner is required.
 

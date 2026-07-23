@@ -87,8 +87,14 @@ interface CorrelatedRfq {
   batchId: string;
   batchCode: MailBatchCode;
   deadlineAt: string | null;
-  source: "TOKEN" | "REPLY_HEADER";
+  source: "TOKEN" | "BODY_TOKEN" | "REPLY_HEADER";
   tokenHash: string | null;
+}
+
+interface CorrelationEvidence {
+  tags: { token: string; batchCode: MailBatchCode } | null;
+  source: "TOKEN" | "BODY_TOKEN" | null;
+  conflict: boolean;
 }
 
 export interface SenderEvidence {
@@ -155,11 +161,20 @@ export function requesterMarker(subject: string): string | null {
 }
 
 export function correlationTags(subject: string): { token: string; batchCode: MailBatchCode } | null {
+  const candidates = correlationTagCandidates(subject);
+  return candidates.length === 1 ? candidates[0] ?? null : null;
+}
+
+export function correlationTagCandidates(value: string): Array<{ token: string; batchCode: MailBatchCode }> {
   // Length 10 accepts the short Crockford code (ADR 0002); the wider range keeps any
   // in-flight long tokens correlatable across a rollout. Matching is by sha256 lookup.
-  const match = /\[RFQ:([A-Za-z0-9_-]{10,128})\]\s*\[BATCH:(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]/iu.exec(subject);
-  if (!match?.[1] || !match[2]) return null;
-  return { token: match[1], batchCode: match[2].toUpperCase() as MailBatchCode };
+  const candidates = new Map<string, { token: string; batchCode: MailBatchCode }>();
+  for (const match of value.matchAll(/\[RFQ:([A-Za-z0-9_-]{10,128})\]\s*\[BATCH:(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]/giu)) {
+    if (!match[1] || !match[2]) continue;
+    const candidate = { token: match[1], batchCode: match[2].toUpperCase() as MailBatchCode };
+    candidates.set(`${candidate.token}:${candidate.batchCode}`, candidate);
+  }
+  return [...candidates.values()];
 }
 
 function issuerForDomain(domain: string): Issuer | null {
@@ -251,6 +266,23 @@ function stripExecutableSections(html: string): string {
     safe = safe.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*$`, "giu"), "");
   }
   return safe;
+}
+
+function correlationEvidence(subject: string, email: Email): CorrelationEvidence {
+  const subjectCandidates = correlationTagCandidates(subject);
+  const body = bounded(`${email.text ?? ""}\n${stripExecutableSections(email.html ?? "")}`, 1_048_576);
+  const bodyCandidates = correlationTagCandidates(body);
+  if (subjectCandidates.length > 1 || bodyCandidates.length > 1) {
+    return { tags: null, source: null, conflict: true };
+  }
+  const subjectTag = subjectCandidates[0] ?? null;
+  const bodyTag = bodyCandidates[0] ?? null;
+  if (subjectTag && bodyTag && (subjectTag.token !== bodyTag.token || subjectTag.batchCode !== bodyTag.batchCode)) {
+    return { tags: null, source: null, conflict: true };
+  }
+  if (subjectTag) return { tags: subjectTag, source: "TOKEN", conflict: false };
+  if (bodyTag) return { tags: bodyTag, source: "BODY_TOKEN", conflict: false };
+  return { tags: null, source: null, conflict: false };
 }
 
 interface MutableTable {
@@ -410,6 +442,7 @@ function referenceIds(value: string): string[] {
 async function correlateRfq(
   env: AppEnv,
   tags: { token: string; batchCode: MailBatchCode } | null,
+  tagSource: CorrelationEvidence["source"],
   inReplyTo: string,
   references: string
 ): Promise<CorrelatedRfq | null> {
@@ -426,7 +459,7 @@ async function correlateRfq(
       batchId: match.batch_id,
       batchCode: match.batch_code,
       deadlineAt: match.deadline_at,
-      source: "TOKEN",
+      source: tagSource ?? "TOKEN",
       tokenHash
     };
   }
@@ -455,8 +488,10 @@ function terminalOutcome(
   sender: SenderDetection,
   subjectBatch: MailBatchCode | null,
   tags: { token: string; batchCode: MailBatchCode } | null,
-  correlation: CorrelatedRfq | null
+  correlation: CorrelatedRfq | null,
+  correlationConflict = false
 ): { status: InboundTerminalStatus; errorCode: string | null } {
+  if (correlationConflict) return { status: "MANUAL_REVIEW", errorCode: "CORRELATION_TOKEN_CONFLICT" };
   if (sender.conflict) return { status: "SENDER_MISMATCH", errorCode: "MULTIPLE_ISSUER_EVIDENCE" };
   if (!sender.issuer) return { status: "MANUAL_REVIEW", errorCode: "UNKNOWN_ISSUER" };
   const expectedBatch = ISSUER_BATCH[sender.issuer];
@@ -491,17 +526,19 @@ export async function processInboundEmailJob(env: AppEnv, requested: InboundEmai
   const rawSubject = email.subject ?? claimed.message.raw_subject;
   const normalizedSubject = bounded(normalizeEmailSubject(rawSubject), 8_192);
   const subjectBatch = subjectBatchCode(normalizedSubject);
-  const tags = correlationTags(normalizedSubject);
+  const evidence = correlationEvidence(normalizedSubject, email);
+  const tags = evidence.tags;
   const marker = requesterMarker(normalizedSubject);
   const markerHash = marker ? await keyedHash(env.EMPLOYEE_LOOKUP_KEY, `REQUESTER_MARKER_V1:${marker.normalize("NFKC").toLowerCase()}`) : null;
   const sender = detectSender(email, claimed.message);
   const correlation = await correlateRfq(
     env,
     tags,
+    evidence.source,
     email.inReplyTo ?? claimed.message.in_reply_to ?? "",
     email.references ?? claimed.message.references_header ?? ""
   );
-  const outcome = terminalOutcome(sender, subjectBatch, tags, correlation);
+  const outcome = terminalOutcome(sender, subjectBatch, tags, correlation, evidence.conflict);
   const extracted = email.html ? await extractHtmlTables(email.html) : { tables: [], warnings: ["HTML_BODY_NOT_PRESENT"] };
   const warnings = [...new Set([...sender.warnings, ...extracted.warnings])];
   const parsedAt = nowIso();
@@ -546,7 +583,7 @@ export async function processInboundEmailJob(env: AppEnv, requested: InboundEmai
       sender.issuer,
       correlation?.rfqId ?? null,
       correlation?.batchId ?? null,
-      correlation?.source ?? null,
+      correlation?.source === "BODY_TOKEN" ? "TOKEN" : correlation?.source ?? null,
       correlation?.tokenHash ?? null,
       parsedKey,
       extracted.tables.length,

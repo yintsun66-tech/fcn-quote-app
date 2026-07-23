@@ -185,4 +185,68 @@ describe("inbound email ingestion", () => {
     expect(parsed.tables[0]?.rows).toEqual([["Product", "Coupon"], ["FCN", "12.34%"]]);
     expect(JSON.stringify(parsed)).not.toContain("doNotPersist");
   });
+
+  it("uses a sanitized body token when forwarding removed the token from the subject", async () => {
+    const userId = "usr_30000000-0000-4000-8000-000000000001";
+    const rfqId = "rfq_30000000-0000-4000-8000-000000000002";
+    const batchId = "obm_30000000-0000-4000-8000-000000000003";
+    const token = "body-token-0123456789abcdef";
+    const tokenHash = await sha256Text(token);
+    const now = new Date().toISOString();
+    const deadline = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO users
+          (id, username_normalized, display_name, branch_name, employee_number_ciphertext,
+           employee_number_iv, employee_number_lookup_hash, password_hash, password_salt,
+           password_algorithm, password_iterations, status, role, created_at, updated_at)
+         VALUES (?, 'bodytokenuser', 'Body Token User', 'Test Branch', 'ciphertext', 'iv', 'body-token-lookup',
+                 'password', 'salt', 'test', 1, 'ACTIVE', 'USER', ?, ?)`
+      ).bind(userId, now, now),
+      testEnv.DB.prepare(
+        `INSERT INTO rfqs
+          (id, user_id, status, trade_count, created_at, validated_at, version,
+           dispatch_status, correlation_token_hash, sent_at, deadline_at, expected_issuer_count, outbound_batch_count)
+         VALUES (?, ?, 'VALIDATED', 1, ?, ?, 2, 'WAITING', ?, ?, ?, 11, 8)`
+      ).bind(rfqId, userId, now, now, tokenHash, now, deadline),
+      testEnv.DB.prepare(
+        `INSERT INTO outbound_email_batches
+          (id, rfq_id, batch_code, sender, recipient, base_subject, correlation_token_hash,
+           status, queued_at, sent_at, provider_message_id)
+         VALUES (?, ?, 'BMJB', 'rfq@yintsun66.com', 'i14053@firstbank.com.tw',
+                 'BMJB quote', ?, 'SENT', ?, ?, '<outbound-body-token@example.invalid>')`
+      ).bind(batchId, rfqId, tokenHash, now, now)
+    ]);
+
+    const inboundId = `<body-token-${crypto.randomUUID()}@example.invalid>`;
+    const raw = [
+      "From: BNP Pricing <quotation.tw@bnpparibas.com>",
+      "Return-Path: <quotation.tw@bnpparibas.com>",
+      "Authentication-Results: mx.example; dkim=pass header.d=bnpparibas.com",
+      "Subject: RE: BMJB[quote]FCBKTPE: FCN(T+7)",
+      `Message-ID: ${inboundId}`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      `<html><body><script>[RFQ:conflict000][BATCH:SG]</script><p>[RFQ:${token}][BATCH:BMJB]</p></body></html>`
+    ].join("\r\n");
+    await ingestInboundEmail(email(raw, { id: inboundId }), appEnv);
+    const job = queued.at(-1);
+    if (!job) throw new Error("Missing body-token parse job");
+    await processInboundEmailJob(appEnv, job);
+
+    const row = await testEnv.DB.prepare(
+      "SELECT status, rfq_id, correlation_source, last_error_code FROM inbound_messages WHERE message_id = ?"
+    ).bind(inboundId).first<Record<string, string | null>>();
+    expect(row).toMatchObject({
+      status: "PARSED",
+      rfq_id: rfqId,
+      correlation_source: "TOKEN",
+      last_error_code: null
+    });
+    const inboundAudit = await testEnv.DB.prepare(
+      "SELECT safe_metadata_json FROM audit_events WHERE entity_id = ? AND action = 'INBOUND_EMAIL_PARSED'"
+    ).bind((await testEnv.DB.prepare("SELECT id FROM inbound_messages WHERE message_id = ?").bind(inboundId).first<{ id: string }>())?.id ?? "").first<{ safe_metadata_json: string }>();
+    expect(inboundAudit?.safe_metadata_json).toContain('"correlationSource":"BODY_TOKEN"');
+  });
 });

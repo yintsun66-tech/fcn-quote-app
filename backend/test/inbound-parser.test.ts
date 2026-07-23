@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Email } from "postal-mime";
 import {
+  correlationTagCandidates,
   correlationTags,
   detectSender,
   extractHtmlTables,
@@ -28,6 +29,16 @@ describe("inbound subject and sender evidence", () => {
     const normalized = normalizeEmailSubject(subject);
     expect(subjectBatchCode(normalized)).toBe("SG");
     expect(correlationTags(normalized)).toEqual({ token: "K7P2R9QTBM", batchCode: "SG" });
+  });
+
+  it("deduplicates repeated tags but refuses conflicting tags", () => {
+    const repeated = "[RFQ:K7P2R9QTBM][BATCH:SG] quoted [RFQ:K7P2R9QTBM][BATCH:SG]";
+    expect(correlationTagCandidates(repeated)).toEqual([{ token: "K7P2R9QTBM", batchCode: "SG" }]);
+    expect(correlationTags(repeated)).toEqual({ token: "K7P2R9QTBM", batchCode: "SG" });
+
+    const conflicting = `${repeated} [RFQ:Z9P2R9QTBM][BATCH:SG]`;
+    expect(correlationTagCandidates(conflicting)).toHaveLength(2);
+    expect(correlationTags(conflicting)).toBeNull();
   });
 
   it("uses sender evidence to disambiguate BMJB", () => {

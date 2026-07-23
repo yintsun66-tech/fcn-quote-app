@@ -13,6 +13,7 @@ import { AppError } from "./errors";
 import { startRfqCoordinator } from "./coordinator";
 import { jsonResponse, requestId, requireIdempotencyKey, requireSameOrigin } from "./http";
 import { fetchOwnedRfq, type TradeRow } from "./rfqs";
+import { rfqHardDeadlineSeconds } from "./rfq-timing";
 import type { AppEnv, MailBatchCode, OutboundEmailJob, SessionContext } from "./types";
 
 const EXPECTED_OUTBOUND_FROM = "rfq@yintsun66.com";
@@ -59,13 +60,6 @@ function assertFixedAddresses(env: AppEnv): void {
   if (env.OUTBOUND_FROM.toLowerCase() !== EXPECTED_OUTBOUND_FROM || env.OUTBOUND_TO.toLowerCase() !== EXPECTED_OUTBOUND_TO) {
     throw new AppError(500, "INVALID_OUTBOUND_EMAIL_CONFIGURATION", "伺服器寄信設定不正確。 ");
   }
-}
-
-// Quote-reply window in seconds (see ADR 0003). Configurable via RFQ_DEADLINE_SECONDS;
-// falls back to the original 600s (10 minutes) if unset or invalid.
-function rfqDeadlineSeconds(env: AppEnv): number {
-  const seconds = Number(env.RFQ_DEADLINE_SECONDS);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : 600;
 }
 
 async function correlationToken(env: AppEnv, rfqId: string): Promise<string> {
@@ -366,7 +360,7 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
        FROM outbound_email_batches WHERE rfq_id = ?`
   ).bind(batch.rfq_id).first<{ total_count: number; sent_count: number }>();
   if (summary && summary.total_count === BATCH_CODES.length && summary.sent_count === BATCH_CODES.length) {
-    const deadlineAt = new Date(Date.parse(sentAt) + rfqDeadlineSeconds(env) * 1000).toISOString();
+    const deadlineAt = new Date(Date.parse(sentAt) + rfqHardDeadlineSeconds(env) * 1000).toISOString();
     await env.DB.prepare(
       `UPDATE rfqs SET dispatch_status = 'WAITING', sent_at = COALESCE(sent_at, ?),
               deadline_at = COALESCE(deadline_at, ?), workflow_status = 'WAITING'

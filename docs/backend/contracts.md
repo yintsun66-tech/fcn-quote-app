@@ -71,11 +71,17 @@ and the winning `issuer`, plus `status`, `downloadUrl`, and `previewUrl` (`?prev
 inline). `GET /status` also returns `tradeCode` on its artifact entries. The results UI links each
 trade's image from that trade's rank-1 issuer name.
 
+While an RFQ is `WAITING`, `PARTIAL`, or `FINALIZING`, `GET /results` returns
+`rfq.isProvisional: true`, `allTradesHaveThreeValidQuotes`, and per-trade
+`validQuoteCount`/`lastUpdatedAt`. These ranks use the final ranking algorithm but are not written
+to `ranking_runs` or `ranking_results`.
+
 ### Controlled mutation endpoints
 
 - `POST /api/v1/rfqs/:rfqId/cancel`
 - `POST /api/v1/rfqs/:rfqId/finalize`
 - `POST /api/v1/rfqs/:rfqId/recalculate`
+- `POST /api/v1/rfqs/:rfqId/trades/:tradeCode/artifact`
 - `POST /api/v1/admin/quotes/:quoteId/manual-review`
 
 Recalculation creates a new ranking version and never overwrites the previously finalized snapshot.
@@ -86,6 +92,11 @@ or `PARTIAL`, requires same-origin + CSRF, is owner-enforced (`404` otherwise), 
 with `workflowStatus: "FINALIZING"`. It reuses the `DEADLINE` finalization trigger, so it is
 idempotent with the eventual deadline alarm on the same ranking version; issuers that have not
 replied are excluded from that ranking exactly as at a natural deadline.
+
+The trade-artifact endpoint is accepted only for the owner of a finalized `COMPLETED` RFQ and a
+trade with a persisted rank-one winner. It requires same-origin + CSRF, returns the existing
+artifact when repeated, and enqueues at most one idempotent render job. Images are not generated
+automatically at finalization.
 
 ## RFQ request model
 
@@ -241,6 +252,9 @@ Requirements:
 - Preserve the existing issuer subject before the appended token.
 - Inbound normalization may remove repeated mail-system reply/forward prefixes for matching, but always preserves `rawSubject`.
 - Subject evidence is never sufficient for authorization or ownership.
+- If the subject tag is missing, exactly one tag found in sanitized message body content may be
+  used as correlation evidence. Multiple or conflicting subject/body tags produce
+  `MANUAL_REVIEW`; sender/batch/ownership checks are unchanged.
 
 ## Parser interface draft
 
@@ -300,7 +314,12 @@ Every finalized result records:
 
 ## Artifact contract
 
-Generated quote images are based only on a finalized ranking snapshot. Rank-one issuer groups are the default view, while the owner may switch among every issuer with a valid quote in that snapshot, including valid `OUTSIDE_TOP_THREE` exclusions. Rejected, invalid, unmatched, late and timed-out quotes remain unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's theme. An artifact response exposes `isDefault`, authenticated preview/download endpoints and metadata, never the private R2 object key or a permanent public URL.
+Generated quote images are based only on a finalized ranking snapshot. The owner requests one
+image for a selected trade; the deterministic `is_image_winner = 1` quote supplies its issuer and
+data. Rejected, invalid, unmatched, late and timed-out quotes remain unavailable. Each artifact is
+rendered as a mobile-portrait PNG using that issuer's theme. An artifact response exposes
+`tradeCode`, authenticated preview/download endpoints and metadata, never the private R2 object
+key or a permanent public URL.
 
 The quote-card footer displays the complete outbound subject reference as `[RFQ:<10-character-code>]`, derived with the same server-side correlation helper used by outbound email. It is a display/reference value only; ownership continues to be enforced by the authenticated RFQ/artifact join.
 

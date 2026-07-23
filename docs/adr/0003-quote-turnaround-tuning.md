@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-07-22
 
+Current note: ADR 0006 supersedes the 600-second default and Queue batch settings with a
+seven-minute soft reminder, fifteen-minute hard deadline, and one-message/one-second batches.
+
 ## Context
 
 The quote pipeline is architecturally sound: replies are parsed and normalized as they

@@ -1,8 +1,7 @@
 import { newId, nowIso } from "./db";
-import type { AppEnv, ImageRenderJob, QuoteRankJob, TargetField } from "./types";
+import type { AppEnv, QuoteRankJob, TargetField } from "./types";
 
 const RULES_VERSION = "ranking-v1";
-const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
 const LEASE_MILLISECONDS = 2 * 60 * 1000;
 
 interface RankJobRow {
@@ -19,7 +18,7 @@ interface TradeTargetRow {
   target_field: TargetField;
 }
 
-interface QuoteRankRow {
+export interface QuoteRankRow {
   id: string;
   trade_id: string | null;
   issuer: string;
@@ -32,7 +31,7 @@ interface QuoteRankRow {
   ki_barrier_pct: number | null;
 }
 
-interface RankedQuote {
+export interface RankedQuote {
   quote: QuoteRankRow;
   economicRank: number;
   displayOrder: number;
@@ -40,7 +39,7 @@ interface RankedQuote {
   tieGroup: string;
 }
 
-function direction(field: TargetField): "ASC" | "DESC" {
+export function rankingDirection(field: TargetField): "ASC" | "DESC" {
   return field === "COUPON" ? "DESC" : "ASC";
 }
 
@@ -57,7 +56,7 @@ export function rankValidQuotes(quotes: QuoteRankRow[], field: TargetField): Ran
     const value = quoteTargetValue(quote, field);
     return quote.status === "VALID" && value !== null && Number.isFinite(value) ? [{ quote, value }] : [];
   });
-  const multiplier = direction(field) === "ASC" ? 1 : -1;
+  const multiplier = rankingDirection(field) === "ASC" ? 1 : -1;
   sortable.sort((left, right) => {
     const economic = multiplier * (left.value - right.value);
     if (Math.abs(economic) > 1e-9) return economic;
@@ -96,47 +95,6 @@ async function claimJob(env: AppEnv, requested: QuoteRankJob): Promise<RankJobRo
   ).bind(lease, now, row.id, now).run();
   if (claimed.meta.changes === 0) throw new Error("QUOTE_RANK_JOB_LEASED");
   return row;
-}
-
-async function persistArtifacts(
-  env: AppEnv,
-  rfqId: string,
-  runId: string,
-  version: number,
-  winners: { tradeCode: string; issuer: string }[],
-  createdAt: string
-): Promise<ImageRenderJob[]> {
-  const statements: D1PreparedStatement[] = [];
-  for (const winner of winners) {
-    const artifactId = newId("art");
-    const jobId = newId("imgjob");
-    const idempotencyKey = `image:${rfqId}:v${version}:${winner.tradeCode}`;
-    const expiresAt = new Date(Date.parse(createdAt) + 90 * 24 * 60 * 60 * 1000).toISOString();
-    statements.push(
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO generated_artifacts
-          (id, rfq_id, ranking_run_id, trade_code, issuer, status, render_profile_version,
-           idempotency_key, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
-      ).bind(artifactId, rfqId, runId, winner.tradeCode, winner.issuer, RENDER_PROFILE_VERSION, idempotencyKey, createdAt, expiresAt),
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO image_render_jobs
-          (id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, idempotency_key,
-           status, available_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
-      ).bind(jobId, artifactId, rfqId, runId, winner.tradeCode, winner.issuer, idempotencyKey, createdAt, createdAt, createdAt)
-    );
-  }
-  if (statements.length) await env.DB.batch(statements);
-  const stored = await env.DB.prepare(
-    `SELECT j.id, j.artifact_id, j.rfq_id, j.ranking_run_id, j.trade_code, j.issuer
-       FROM image_render_jobs j JOIN generated_artifacts a ON a.id = j.artifact_id
-      WHERE j.ranking_run_id = ? AND j.status = 'QUEUED' ORDER BY j.trade_code`
-  ).bind(runId).all<{ id: string; artifact_id: string; rfq_id: string; ranking_run_id: string; trade_code: string; issuer: string }>();
-  return stored.results.map(row => ({
-    jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
-    rankingRunId: row.ranking_run_id, tradeCode: row.trade_code, issuer: row.issuer
-  }));
 }
 
 export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob): Promise<void> {
@@ -178,7 +136,6 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
   const statements: D1PreparedStatement[] = [];
-  const winners: { tradeCode: string; issuer: string }[] = [];
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
@@ -186,8 +143,6 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
     validResultCount += ranked.length;
     const firstRank = ranked.filter(result => result.economicRank === 1);
     const imageWinnerId = firstRank[0]?.quote.id ?? null;
-    // One image per trade (ADR 0005): the deterministic rank-1 winner represents the trade.
-    if (firstRank[0]) winners.push({ tradeCode: trade.trade_code, issuer: firstRank[0].quote.issuer });
     for (const result of ranked) {
       statements.push(env.DB.prepare(
         `INSERT OR IGNORE INTO ranking_results
@@ -196,7 +151,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         newId("res"), run.id, job.rfq_id, trade.id, result.quote.id, result.economicRank,
-        result.displayOrder, trade.target_field, result.value, direction(trade.target_field),
+        result.displayOrder, trade.target_field, result.value, rankingDirection(trade.target_field),
         result.quote.id === imageWinnerId ? 1 : 0, result.tieGroup, startedAt
       ));
     }
@@ -231,9 +186,6 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
     ).bind(newId("aud"), job.rfq_id, `queue:${job.id}`, JSON.stringify({ version: job.requested_version, resultStatus, validResultCount }), completedAt)
   );
   await env.DB.batch(statements);
-
-  const imageJobs = await persistArtifacts(env, job.rfq_id, run.id, job.requested_version, winners, completedAt);
-  for (const imageJob of imageJobs) await env.IMAGE_RENDER_QUEUE.send(imageJob);
 }
 
 async function markFailure(env: AppEnv, job: QuoteRankJob, terminal: boolean, code: string): Promise<void> {

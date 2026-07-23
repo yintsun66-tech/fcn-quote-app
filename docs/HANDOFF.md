@@ -1,6 +1,6 @@
 # Project handoff
 
-Updated: 2026-07-22 (Asia/Taipei)  
+Updated: 2026-07-23 (Asia/Taipei)
 Branch: `feature/subject-branch-correlation`  
 Latest relevant commit: `a66ea8c fix(parser): NONE-barrier KI "NA" misread as ISSUER_REJECTED`
 
@@ -18,12 +18,27 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 
 - Root static application remains compatibility UI for FCN/DAC and GitHub Pages.
 - `app.yintsun66.com` serves the same root application assets through the Cloudflare Worker and activates `backend-client.js`.
-- The backend supports registration, application-managed username/password login, ADMIN role checks, RFQ creation/validation/sending, eight outbound mail batches, eleven expected issuers, inbound MIME intake, parsing/normalization, ten-minute finalization, ranking, and private quote-image artifacts.
+- The backend supports registration, application-managed username/password login, ADMIN role checks, RFQ creation/validation/sending, eight outbound mail batches, eleven expected issuers, inbound MIME intake, parsing/normalization, ranking, and private quote-image artifacts.
 - Outbound mail is sent from `rfq@yintsun66.com` to the fixed recipient `i14053@firstbank.com.tw` through the Cloudflare email binding.
 - Issuer replies must be forwarded from the bank mailbox to `rfq@yintsun66.com`; Cloudflare cannot log into or poll the bank mailbox directly.
 - ADMIN controls currently include:
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
+
+### Local Phase A–E acceleration work (implemented and verified; not committed/deployed)
+
+- SG parser maps current reply tables by normalized headers and variable Underlying columns.
+- Inbound correlation may recover one RFQ tag from sanitized body content when the subject lost
+  it; conflicting tags go to `MANUAL_REVIEW`.
+- ADMIN has an RFQ timing view with safe counts/statuses/durations only.
+- Waiting RFQs expose non-persistent provisional top-three rankings.
+- Seven-minute soft reminder and fifteen-minute hard deadline (`420`/`900` seconds).
+- Queue consumers use one-message, one-second batches with their existing bounded concurrency.
+- Finalization no longer generates every image. Owners request one finalized trade image at a
+  time through an idempotent, CSRF- and ownership-protected endpoint.
+- No migration, dependency, lockfile, secret, or mailbox-address change.
+- Local verification: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test`
+  (16 files / 70 tests); `pnpm run build` (Wrangler dry-run) all passed.
 
 ## Important current limitations / known gaps
 
@@ -32,9 +47,9 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 3. MS remains display-warning only (`MS（OBU不得承做）`). There is no approved account-level OBU attribute or enforcement rule.
 4. The true Cloudflare Browser Rendering capacity and email-product limits need observation under real traffic. Queue retries protect workflow progress but do not prove capacity.
 5. Several older design documents contain historical language such as “Phase 1 draft” or “no deployment.” Use current code, `wrangler.jsonc`, Git history, this handoff, and live verification for current state; update stale documents only in a scoped documentation task.
-6. **Issuer reply timing vs the 10-minute deadline (observed 2026-07-23).** Many issuer replies arrive ~11–14 minutes after send — after the 600s deadline — so they land as `LATE_REPLY` and their expected-issuer status becomes `TIMEOUT` even though the reply carried valid quotes (seen for JPM, CITI, and intermittently BNP/UBS/DBS/Nomura/Barclays). The short deadline is the dominant cause of `TIMEOUT`. `RFQ_DEADLINE_SECONDS` (ADR 0003, default 600) is the lever; raising it to ~900–1200 would capture most late-but-valid replies, at the cost of a longer wait on every RFQ. Not yet changed.
+6. **Issuer reply timing (observed 2026-07-23).** Many issuer replies arrive ~11–14 minutes after send. The current local Phase A–E change raises the hard deadline from 600s to 900s and adds a 420s soft reminder; this remains uncommitted and undeployed until the user requests release.
 7. **Issuer-specific reply gaps (observed 2026-07-23).** Triage method: `inbound_messages.status` = `PARSED` (on time), `LATE_REPLY` (after deadline), or absent (no reply); `normalized_quote_count = 0` means the reply was received but parsed to zero rows (format mismatch).
-   - **SG** replies, but its current email template no longer matches the `sgRow` column mapping in `backend/src/issuer-profiles.ts` (the "Fixed Coupons / All Periods" product gate, currency, and underlying columns are shifted), so SG parses to zero rows → `PARSE_ERROR` / no quotes. Needs an `sgRow` remap against a current SG sample (same method as the MS fix).
+   - **SG** replies use variable Underlying columns. The current local Phase A–E change maps SG by normalized headers and includes a two-underlying regression fixture; it remains uncommitted and undeployed.
    - **GS** has never appeared in `inbound_messages` — no GS reply ever reached the inbound address. Upstream matter (GS not quoting via this forward chain, or the bank mailbox not forwarding GS), not a parser bug.
    - **CA** replies rarely and has never succeeded (late or `UNMATCHED_RFQ`); effectively the same upstream/forwarding gap as GS.
    - A notable share of otherwise-valid replies land as `UNMATCHED_RFQ` (correlation failed); worth a separate look at whether the subject correlation code survives the bank forward chain.
@@ -60,7 +75,7 @@ For the current backend branch through commit `ff12ef5`:
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
 2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `rfq@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
 3. Consider raising `RFQ_DEADLINE_SECONDS` (~900–1200) to capture late-but-valid issuer replies (JPM/CITI/late SG); weigh the longer per-RFQ wait first (known gap 6).
-4. Remap `sgRow` columns in `backend/src/issuer-profiles.ts` against a current SG reply (same approach as the MS fix) and add a regression test (known gap 7).
+4. After release, confirm the header-aware SG parser against a newly forwarded production reply.
 5. Confirm with the desk whether GS/CA actually quote and forward through this chain; if yes, obtain a sample and fix their parser mapping — otherwise their `TIMEOUT` is upstream, not a code issue.
 6. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
 

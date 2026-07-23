@@ -2,7 +2,7 @@
 
 Updated: 2026-07-23 (Asia/Taipei)
 Branch: `feature/subject-branch-correlation`  
-Latest implementation commit: `83209d4 feat: accelerate live RFQ workflow`
+Latest implementation commit: `31100ce feat(results): add top-five quote image choices`
 
 ## What is live
 
@@ -25,7 +25,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
 
-### Top-five ranking and selectable issuer images (implemented locally; not committed/deployed)
+### Top-five ranking and selectable issuer images (committed locally; not deployed)
 
 - Ranking now retains the first five economic ranks and every quote tied at rank five.
 - Finalization creates and queues only the deterministic rank-one image for each trade.

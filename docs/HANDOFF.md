@@ -32,6 +32,12 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 3. MS remains display-warning only (`MS（OBU不得承做）`). There is no approved account-level OBU attribute or enforcement rule.
 4. The true Cloudflare Browser Rendering capacity and email-product limits need observation under real traffic. Queue retries protect workflow progress but do not prove capacity.
 5. Several older design documents contain historical language such as “Phase 1 draft” or “no deployment.” Use current code, `wrangler.jsonc`, Git history, this handoff, and live verification for current state; update stale documents only in a scoped documentation task.
+6. **Issuer reply timing vs the 10-minute deadline (observed 2026-07-23).** Many issuer replies arrive ~11–14 minutes after send — after the 600s deadline — so they land as `LATE_REPLY` and their expected-issuer status becomes `TIMEOUT` even though the reply carried valid quotes (seen for JPM, CITI, and intermittently BNP/UBS/DBS/Nomura/Barclays). The short deadline is the dominant cause of `TIMEOUT`. `RFQ_DEADLINE_SECONDS` (ADR 0003, default 600) is the lever; raising it to ~900–1200 would capture most late-but-valid replies, at the cost of a longer wait on every RFQ. Not yet changed.
+7. **Issuer-specific reply gaps (observed 2026-07-23).** Triage method: `inbound_messages.status` = `PARSED` (on time), `LATE_REPLY` (after deadline), or absent (no reply); `normalized_quote_count = 0` means the reply was received but parsed to zero rows (format mismatch).
+   - **SG** replies, but its current email template no longer matches the `sgRow` column mapping in `backend/src/issuer-profiles.ts` (the "Fixed Coupons / All Periods" product gate, currency, and underlying columns are shifted), so SG parses to zero rows → `PARSE_ERROR` / no quotes. Needs an `sgRow` remap against a current SG sample (same method as the MS fix).
+   - **GS** has never appeared in `inbound_messages` — no GS reply ever reached the inbound address. Upstream matter (GS not quoting via this forward chain, or the bank mailbox not forwarding GS), not a parser bug.
+   - **CA** replies rarely and has never succeeded (late or `UNMATCHED_RFQ`); effectively the same upstream/forwarding gap as GS.
+   - A notable share of otherwise-valid replies land as `UNMATCHED_RFQ` (correlation failed); worth a separate look at whether the subject correlation code survives the bank forward chain.
 
 ## Preserve this user-owned work
 
@@ -53,7 +59,10 @@ For the current backend branch through commit `ff12ef5`:
 
 1. Log in with an account whose application role is `ADMIN`; open **使用者申請審核** and approve/reject a controlled test registration.
 2. Verify the bank-mailbox forwarding rule by forwarding a controlled real issuer-style reply to `rfq@yintsun66.com` and inspect its preserved headers through the application’s private intake/audit path.
-3. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
+3. Consider raising `RFQ_DEADLINE_SECONDS` (~900–1200) to capture late-but-valid issuer replies (JPM/CITI/late SG); weigh the longer per-RFQ wait first (known gap 6).
+4. Remap `sgRow` columns in `backend/src/issuer-profiles.ts` against a current SG reply (same approach as the MS fix) and add a regression test (known gap 7).
+5. Confirm with the desk whether GS/CA actually quote and forward through this chain; if yes, obtain a sample and fix their parser mapping — otherwise their `TIMEOUT` is upstream, not a code issue.
+6. Before changes, follow `AGENTS.md`; after changes, update this file with exact test/deploy evidence.
 
 ## Subject-line correlation change (implemented on `feature/subject-branch-correlation`)
 

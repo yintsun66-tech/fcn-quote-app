@@ -31,8 +31,12 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
 1. Check the RFQ status and issuer status in the application.
 2. Confirm the bank mailbox received the outbound request.
 3. Confirm issuer replies were forwarded to `rfq@yintsun66.com`.
-4. Treat missing, malformed, rejected, mismatched, or late replies as excluded from ranking; do not directly edit quotes or rankings in D1.
-5. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not copy raw mail into public chat or Git.
+4. Understand what an issuer `TIMEOUT` means — it has three distinct causes, which are treated the same for ranking but need different follow-up:
+   - **No reply** reached the inbound address before finalization.
+   - **Late reply** — the issuer replied, but after the 10-minute deadline (`LATE_REPLY`); the quote was valid but not counted. Frequent, because some issuers reply ~11–14 minutes after send. See `docs/HANDOFF.md` known gap 6 (`RFQ_DEADLINE_SECONDS`).
+   - **Unrecognized format** — the reply arrived and correlated, but parsed to zero rows because the issuer's template no longer matches its parser profile. See `docs/HANDOFF.md` known gap 7 (currently SG).
+5. Treat missing, malformed, rejected, mismatched, or late replies as excluded from ranking; do not directly edit quotes or rankings in D1.
+6. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not copy raw mail into public chat or Git.
 
 ## Emergency boundary
 

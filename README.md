@@ -13,8 +13,9 @@
 ### Cloudflare 正式模式
 
 正式應用位於 `https://app.yintsun66.com`。同一套根目錄資產由 Cloudflare Worker
-提供，並透過 `backend-client.js` 加入登入、後端自動寄信、回覆解析、前五名比價、
-私人報價圖、可恢復的「我的詢價」工作區及 ADMIN 管理功能。
+提供，並透過 `backend-client.js` 加入登入、可勾選發行機構的後端自動寄信、回覆解析、
+前五名比價、私人報價圖（DAC 產品加註浮動收益）、可恢復的「我的詢價」工作區及
+ADMIN 管理功能。
 
 API 位於 `https://api.yintsun66.com`。後端程式、D1 migrations、Queue consumers、
 Durable Object、R2 與測試位於 `backend/`。

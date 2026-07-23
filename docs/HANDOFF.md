@@ -1,28 +1,29 @@
 # Project handoff
 
-Updated: 2026-07-23 (Asia/Taipei)
+Updated: 2026-07-24 (Asia/Taipei)
 
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`61c07c7 feat(rfq): add recoverable quote workspace`
+`376f48c feat(artifacts): add DAC/DRA floating-income note to quote image`
 
-Production deployment record commit:
-`016bd28 docs: record recoverable RFQ deployment`
+Production deployment record:
+Worker `c33e0b05-5052-4567-8a82-c87750346630` deployed 2026-07-24 (records commits `4a45ad5` +
+`376f48c`); recorded in this handoff update.
 
 Branch remote state when this handoff was updated: synchronized with
 `origin/feature/subject-branch-correlation`; not merged to `main`.
 
-This documentation refresh is limited to `CLAUDE.md`, `README.md`, and this file. The separate
-untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
+The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
 ## Production snapshot
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `899a108e-e7f5-4dbd-8832-9405488f1bcc` (DAC-alias + MS-DRA parser fix, deployed 2026-07-24;
-  `GET /api/v1/health` → `{"status":"ok"}`).
+  `c33e0b05-5052-4567-8a82-c87750346630` (selective issuer send + UI tweaks + DAC/DRA image note,
+  deployed 2026-07-24; `GET /api/v1/health` → `{"status":"ok"}`; the deployed `index.html` and
+  `backend-client.js` carry the `manual-email-button` and the issuer picker).
 - D1 database: `fcn-quote`; migrations in the repository currently run through
   `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
   top-five deployment; verify remote migration state again before any future migration.
@@ -154,7 +155,8 @@ the deployment. Treat that as the smallest remaining UI verification task.
 - Quote image (`quote-card.ts`): for DAC products the card now adds a note under 保證配息期間 —
   「*DAC/DRA第{X+1}個月起為浮動收益」 (X = guaranteed periods). FCN cards are unchanged.
 - Verified: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test` (16 files, 76);
-  `pnpm run build` (dry run). Committed; deploy status recorded at the Worker-version line above.
+  `pnpm run build` (dry run). Committed (`4a45ad5`, `376f48c`) and deployed 2026-07-24 as Worker
+  `c33e0b05-5052-4567-8a82-c87750346630` (health `ok`; live assets carry the new button + picker).
 
 ## Production gaps and cautions
 
@@ -224,6 +226,11 @@ the deployment. Treat that as the smallest remaining UI verification task.
 6. Before handback, run the applicable verification baseline, inspect the complete Git diff,
    update this file with exact evidence, and report whether commit, push, migration, and deploy
    each occurred.
+7. End-to-end checks still owed for the 2026-07-24 deploy (need an authorized real RFQ): the issuer
+   picker on 「發送詢價條件」 and per-issuer sending (BMJB grouping, ADR 0009); the DAC/DRA
+   floating-income note on the quote image; and the DAC-alias / MS-DRA parser fix against real
+   DAC/DRA replies. Known open items: SG DAC layout needs a real sample (gap 11); CA reply
+   latency (gap 5).
 
 ## Deployment reminder
 

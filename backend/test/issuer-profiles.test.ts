@@ -74,6 +74,8 @@ describe("issuer parser profiles", () => {
       barrierType: "NONE",
       kiBarrierPct: null,
       koType: "Daily Memory",
+      // NONE-barrier KI "NA" must not be read as an issuer rejection.
+      rejectionReason: null,
       // "m"-suffixed month fields must parse so the row matches its trade (prevents PARSE_ERROR).
       tenorMonths: 6,
       observationFrequencyMonths: 1,

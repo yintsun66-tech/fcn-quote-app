@@ -230,10 +230,13 @@ function targetRaw(row: readonly string[], strike: number, koBarrier: number, co
   };
 }
 
-function rejection(comment: string | null, rawTargets: ParsedIssuerRow["rawTargetValues"]): string | null {
+function rejection(comment: string | null, rawTargets: ParsedIssuerRow["rawTargetValues"], barrierType: string | null): string | null {
   if (comment && REJECTION_TEXT.test(comment)) return comment.slice(0, 1_000);
-  const targetValues = Object.values(rawTargets);
-  const invalid = targetValues.find(value => INVALID_VALUES.test(value));
+  // KI barrier is legitimately "NA"/"-" when there is no knock-in (barrier type NONE); scanning it
+  // there made normal NONE-barrier quotes (e.g. MS) look ISSUER_REJECTED. Only scan it when a KI applies.
+  const scan = [rawTargets.strike, rawTargets.koBarrier, rawTargets.coupon, rawTargets.price];
+  if (barrierType !== "NONE") scan.push(rawTargets.kiBarrier);
+  const invalid = scan.find(value => INVALID_VALUES.test(value));
   return invalid ? invalid : null;
 }
 
@@ -282,7 +285,7 @@ function standardRow(profile: StandardProfile, row: string[], tableIndex: number
     effectiveDateOffsetCalendarDays: integer(text(row, columns.effectiveOffset)),
     quoteReference: optionalText(row, columns.reference),
     issuerComment: comment,
-    rejectionReason: rejection(comment, rawTargets),
+    rejectionReason: rejection(comment, rawTargets, barrierType),
     warnings: [],
     rawTargetValues: rawTargets
   };
@@ -310,7 +313,7 @@ function msRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssue
     rawPriceLabel: "Note Price", priceSemantics: "NOTE_PRICE", comparablePricePct: rawPriceValue,
     barrierType, kiBarrierPct: barrierType === "NONE" ? null : percentage(rawTargets.kiBarrier, "DECIMAL_FRACTION"),
     observationFrequencyMonths: months(text(row, 11)), otc: "Note", effectiveDateOffsetCalendarDays: null,
-    quoteReference: optionalText(row, 0), issuerComment: "MS（OBU不得承做）", rejectionReason: rejection(null, rawTargets),
+    quoteReference: optionalText(row, 0), issuerComment: "MS（OBU不得承做）", rejectionReason: rejection(null, rawTargets, barrierType),
     warnings: ["MS_OBU_RESTRICTION_REQUIRES_USER_ATTRIBUTE"], rawTargetValues: rawTargets
   };
 }
@@ -336,7 +339,7 @@ function sgRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssue
     barrierType, kiBarrierPct: barrierType === "NONE" ? null : percentage(rawTargets.kiBarrier, "DECIMAL_FRACTION"),
     observationFrequencyMonths: /^MONTHLY$/iu.test(text(row, 10)) ? 1 : months(text(row, 10)),
     otc: "Note", effectiveDateOffsetCalendarDays: null, quoteReference: null, issuerComment: comment,
-    rejectionReason: rejection(comment, rawTargets), warnings: ["SG_SOURCE_HEADERS_ARE_POSITIONAL"], rawTargetValues: rawTargets
+    rejectionReason: rejection(comment, rawTargets, barrierType), warnings: ["SG_SOURCE_HEADERS_ARE_POSITIONAL"], rawTargetValues: rawTargets
   };
 }
 
@@ -363,7 +366,7 @@ function citiRow(row: string[], tableIndex: number, rowIndex: number): ParsedIss
     rawPriceValue, rawPriceLabel: "Upfront (%)", priceSemantics: "UPFRONT", comparablePricePct: comparablePrice(rawPriceValue, "UPFRONT"),
     barrierType, kiBarrierPct: barrierType === "NONE" ? null : percentage(rawTargets.kiBarrier, "WHOLE_PERCENT"),
     observationFrequencyMonths: integer(text(row, 13)), otc: "Note", effectiveDateOffsetCalendarDays: integer(text(row, 4)),
-    quoteReference: optionalText(row, 30), issuerComment: comment, rejectionReason: rejection(comment, rawTargets),
+    quoteReference: optionalText(row, 30), issuerComment: comment, rejectionReason: rejection(comment, rawTargets, barrierType),
     warnings: ["CITI_UPFRONT_CONVERTED_TO_NOTE_PRICE"], rawTargetValues: rawTargets
   };
 }

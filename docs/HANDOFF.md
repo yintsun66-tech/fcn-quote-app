@@ -177,6 +177,20 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
   to `main`). Deployed on 2026-07-23 — Worker version `df57226e-69d3-4d0f-b05a-896749df216f`;
   `GET /api/v1/health` → `{"status":"ok"}`. Re-test with a real MS reply to confirm it now parses.
 
+## MS ISSUER_REJECTED fix (follow-up; deploy pending)
+
+- After the parse fix, MS then showed `ISSUER_REJECTED`. **Root cause:** `rejection()` scanned all
+  five pricing cells for invalid values, and MS's NONE-barrier products correctly report **KI Barrier
+  = "NA"** (no knock-in). That legitimate "NA" was misread as a rejection, so every MS row →
+  `ISSUER_REJECTED`.
+- **Fix:** `backend/src/issuer-profiles.ts` `rejection()` no longer scans the KI Barrier cell when
+  the barrier type is NONE (KI is legitimately absent there). Real rejections (a "reject"/"limit"/
+  "無法報價" comment, or an invalid value in an applicable cell) are still detected.
+- Regression: the MS test now asserts `rejectionReason: null`; the GS rejection test (triggered by a
+  real "reject" comment) still passes.
+- No migration / schema / API change. **Verified:** `pnpm run typecheck`; `pnpm test` (14 files, 64).
+- **Status:** committed (see log). deployed? **pending** (code-only).
+
 ## Latest SG outgoing-email table update
 
 The SG table update is committed on both branches:

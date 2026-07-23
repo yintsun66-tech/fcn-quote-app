@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `00d1a1f feat(artifacts): one quote image per trade with per-trade result links`
+Latest relevant commit: `ed4e684 fix(parser): MS non-call periods "1m" broke trade matching`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `93a4f2d2-0603-4d41-916f-0233dca2e23c`
+- Latest verified Cloudflare Worker version: `df57226e-69d3-4d0f-b05a-896749df216f`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -173,7 +173,9 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
 - Regression: `backend/test/issuer-profiles.test.ts` MS case now asserts `guaranteedPeriodsMonths`
   and the other `m`-suffixed month fields.
 - No migration / schema / API change. **Verified:** `pnpm run typecheck`; `pnpm test` (14 files, 64).
-- **Status:** committed (see log). deployed? **pending** (code-only; no migration needed).
+- **Status:** committed `ed4e684`, pushed to `origin/feature/subject-branch-correlation` (not merged
+  to `main`). Deployed on 2026-07-23 — Worker version `df57226e-69d3-4d0f-b05a-896749df216f`;
+  `GET /api/v1/health` → `{"status":"ok"}`. Re-test with a real MS reply to confirm it now parses.
 
 ## Latest SG outgoing-email table update
 

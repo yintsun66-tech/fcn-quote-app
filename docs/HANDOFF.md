@@ -8,7 +8,7 @@ Latest implementation commit: `31100ce feat(results): add top-five quote image c
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `149c8fd9-c50f-48fc-9c33-d7435609b499`
+- Latest verified Cloudflare Worker version: `f2e4ea60-5cd0-4bb0-979e-28f1b86e9a5f`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -25,7 +25,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
 
-### Top-five ranking and selectable issuer images (committed locally; not deployed)
+### Top-five ranking and selectable issuer images (committed, pushed, and deployed)
 
 - Ranking now retains the first five economic ranks and every quote tied at rank five.
 - Finalization creates and queues only the deterministic rank-one image for each trade.
@@ -40,8 +40,13 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   ranking/artifact tests passed (3 files / 9 tests); full suite passed (16 files / 71 tests);
   Cloudflare dry-run build passed outside the managed filesystem sandbox. The sandboxed build
   attempt failed only because Wrangler could not traverse the parent profile directory.
-- Deploy order is mandatory: apply D1 migration 0009 first, then deploy the matching Worker/assets
-  immediately. Neither operation has been performed for this change.
+- Migration 0009 was applied to remote D1 before the matching Worker/assets deployment. Remote
+  verification reports no pending migrations, `ranking_results` permits ranks 1–5, and all 32
+  preserved `generated_artifacts` / `image_render_jobs` rows have a non-null `quote_id`.
+- Production verification: API health returned HTTP 200 with `{"status":"ok"}` and the
+  cache-bypassed application asset contains `allTradesHaveFiveValidQuotes`,
+  `data-artifact-quote`, and the quote-specific artifact route. Deployed Worker version:
+  `f2e4ea60-5cd0-4bb0-979e-28f1b86e9a5f`.
 
 ### Phase A–E acceleration work (committed, pushed, and deployed)
 

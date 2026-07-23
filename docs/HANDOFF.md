@@ -2,13 +2,13 @@
 
 Updated: 2026-07-22 (Asia/Taipei)  
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `ed4e684 fix(parser): MS non-call periods "1m" broke trade matching`
+Latest relevant commit: `a66ea8c fix(parser): NONE-barrier KI "NA" misread as ISSUER_REJECTED`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `df57226e-69d3-4d0f-b05a-896749df216f`
+- Latest verified Cloudflare Worker version: `2c2e3f57-aa7c-4d8c-9cc3-39eca663eb0a`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -189,7 +189,10 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
 - Regression: the MS test now asserts `rejectionReason: null`; the GS rejection test (triggered by a
   real "reject" comment) still passes.
 - No migration / schema / API change. **Verified:** `pnpm run typecheck`; `pnpm test` (14 files, 64).
-- **Status:** committed (see log). deployed? **pending** (code-only).
+- **Status:** committed `a66ea8c`, pushed to `origin/feature/subject-branch-correlation` (not merged
+  to `main`). Deployed on 2026-07-23 — Worker version `2c2e3f57-aa7c-4d8c-9cc3-39eca663eb0a`;
+  `GET /api/v1/health` → `{"status":"ok"}`. Re-test with a real MS reply: NONE-barrier rows should
+  now be `VALID` (or `NO_QUOTE` when genuinely unquoted), not `ISSUER_REJECTED`.
 
 ## Latest SG outgoing-email table update
 

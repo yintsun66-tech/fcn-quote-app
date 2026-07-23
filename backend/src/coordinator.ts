@@ -167,13 +167,22 @@ export async function scheduledWorkflowRecovery(env: AppEnv): Promise<void> {
   }
 
   const renderJobs = await env.DB.prepare(
-    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer FROM image_render_jobs
+    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer FROM image_render_jobs
       WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 50`
-  ).bind(now).all<{ id: string; artifact_id: string; rfq_id: string; ranking_run_id: string; trade_code: string; issuer: string }>();
+  ).bind(now).all<{
+    id: string;
+    artifact_id: string;
+    rfq_id: string;
+    ranking_run_id: string;
+    trade_code: string;
+    quote_id: string;
+    issuer: string;
+  }>();
   for (const row of renderJobs.results) {
     await env.IMAGE_RENDER_QUEUE.send({
       jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
-      rankingRunId: row.ranking_run_id, tradeCode: row.trade_code, issuer: row.issuer
+      rankingRunId: row.ranking_run_id, tradeCode: row.trade_code,
+      quoteId: row.quote_id, issuer: row.issuer
     });
   }
 }

@@ -66,13 +66,14 @@ Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and 
 
 The server returns `404` for resources not owned by the current user, avoiding cross-user existence disclosure.
 
-Artifacts are **one image per trade** (ADR 0005): each `artifacts[]` entry carries `tradeCode`
-and the winning `issuer`, plus `status`, `downloadUrl`, and `previewUrl` (`?preview=1` renders
-inline). `GET /status` also returns `tradeCode` on its artifact entries. The results UI links each
-trade's image from that trade's rank-1 issuer name.
+Artifacts are keyed to an exact persisted ranking quote (ADR 0007): each `artifacts[]` entry
+carries `tradeCode`, `quoteId`, `issuer`, `rank`, `isDefault`, `status`, `downloadUrl`, and
+`previewUrl` (`?preview=1` renders inline). `GET /status` also returns `tradeCode` and `quoteId`.
+The deterministic rank-one artifact is queued at finalization; other top-five rows are optional.
 
 While an RFQ is `WAITING`, `PARTIAL`, or `FINALIZING`, `GET /results` returns
-`rfq.isProvisional: true`, `allTradesHaveThreeValidQuotes`, and per-trade
+`rfq.isProvisional: true`, `allTradesHaveFiveValidQuotes`, the compatibility field
+`allTradesHaveThreeValidQuotes`, and per-trade
 `validQuoteCount`/`lastUpdatedAt`. These ranks use the final ranking algorithm but are not written
 to `ranking_runs` or `ranking_results`.
 
@@ -82,6 +83,7 @@ to `ranking_runs` or `ranking_results`.
 - `POST /api/v1/rfqs/:rfqId/finalize`
 - `POST /api/v1/rfqs/:rfqId/recalculate`
 - `POST /api/v1/rfqs/:rfqId/trades/:tradeCode/artifact`
+- `POST /api/v1/rfqs/:rfqId/trades/:tradeCode/quotes/:quoteId/artifact`
 - `POST /api/v1/admin/quotes/:quoteId/manual-review`
 
 Recalculation creates a new ranking version and never overwrites the previously finalized snapshot.
@@ -308,18 +310,19 @@ Every finalized result records:
 - ranking version
 - normalized target and direction
 - eligible/excluded quote IDs and reasons
-- top three economic ranks
+- top five economic ranks, including all ties at rank five
 - deterministic image winner
 - finalized time and trigger (`ALL_TERMINAL` or `DEADLINE`)
 
 ## Artifact contract
 
-Generated quote images are based only on a finalized ranking snapshot. The owner requests one
-image for a selected trade; the deterministic `is_image_winner = 1` quote supplies its issuer and
-data. Rejected, invalid, unmatched, late and timed-out quotes remain unavailable. Each artifact is
-rendered as a mobile-portrait PNG using that issuer's theme. An artifact response exposes
-`tradeCode`, authenticated preview/download endpoints and metadata, never the private R2 object
-key or a permanent public URL.
+Generated quote images are based only on a finalized ranking snapshot. The deterministic
+`is_image_winner = 1` quote is queued automatically for each trade. The owner may request an
+additional image by exact `quoteId` only when that quote belongs to the trade and current
+persisted top-five snapshot. Rejected, invalid, unmatched, late, timed-out and outside-top-five
+quotes remain unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's
+theme. An artifact response exposes `tradeCode`, `quoteId`, authenticated preview/download
+endpoints and metadata, never the private R2 object key or a permanent public URL.
 
 The quote-card footer displays the complete outbound subject reference as `[RFQ:<10-character-code>]`, derived with the same server-side correlation helper used by outbound email. It is a display/reference value only; ownership continues to be enforced by the authenticated RFQ/artifact join.
 

@@ -25,6 +25,24 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
 
+### Top-five ranking and selectable issuer images (implemented locally; not committed/deployed)
+
+- Ranking now retains the first five economic ranks and every quote tied at rank five.
+- Finalization creates and queues only the deterministic rank-one image for each trade.
+- Every other persisted top-five row has an owner-scoped action to create that exact quote's
+  issuer-themed image. The previous per-trade endpoint remains a rank-one compatibility shortcut.
+- Migration `0009_top_five_quote_artifacts.sql` expands the ranking constraint from 1–3 to 1–5
+  and keys artifacts/jobs by `ranking_run_id + trade_code + quote_id`. Existing migration-0008
+  artifacts are mapped to their persisted rank-one quote and retained.
+- The artifact list adds `quoteId`, `rank`, and `isDefault`; R2 object keys include `quoteId` so
+  images for two issuers on one trade cannot overwrite each other.
+- Local verification: root JavaScript syntax check passed; backend typecheck passed; focused
+  ranking/artifact tests passed (3 files / 9 tests); full suite passed (16 files / 71 tests);
+  Cloudflare dry-run build passed outside the managed filesystem sandbox. The sandboxed build
+  attempt failed only because Wrangler could not traverse the parent profile directory.
+- Deploy order is mandatory: apply D1 migration 0009 first, then deploy the matching Worker/assets
+  immediately. Neither operation has been performed for this change.
+
 ### Phase A–E acceleration work (committed, pushed, and deployed)
 
 - SG parser maps current reply tables by normalized headers and variable Underlying columns.

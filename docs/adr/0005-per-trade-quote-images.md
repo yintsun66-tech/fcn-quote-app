@@ -1,6 +1,6 @@
 # ADR 0005: One quote image per trade
 
-Status: Accepted
+Status: Superseded in part by ADR 0007
 Date: 2026-07-23
 
 ## Context

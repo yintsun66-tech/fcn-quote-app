@@ -1,7 +1,11 @@
 import { newId, nowIso } from "./db";
-import type { AppEnv, QuoteRankJob, TargetField } from "./types";
+import {
+  quoteArtifactIdempotencyKey,
+  RENDER_PROFILE_VERSION
+} from "./artifacts";
+import type { AppEnv, ImageRenderJob, QuoteRankJob, TargetField } from "./types";
 
-const RULES_VERSION = "ranking-v1";
+const RULES_VERSION = "ranking-v2-top-five";
 const LEASE_MILLISECONDS = 2 * 60 * 1000;
 
 interface RankJobRow {
@@ -67,7 +71,7 @@ export function rankValidQuotes(quotes: QuoteRankRow[], field: TargetField): Ran
   return sortable.flatMap((entry, index) => {
     if (previous === null || Math.abs(entry.value - previous) > 1e-9) economicRank += 1;
     previous = entry.value;
-    if (economicRank > 3) return [];
+    if (economicRank > 5) return [];
     return [{
       quote: entry.quote,
       economicRank,
@@ -136,6 +140,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
   const statements: D1PreparedStatement[] = [];
+  const imageJobs: ImageRenderJob[] = [];
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
@@ -155,9 +160,86 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
         result.quote.id === imageWinnerId ? 1 : 0, result.tieGroup, startedAt
       ));
     }
+    const imageWinner = ranked.find(result => result.quote.id === imageWinnerId);
+    if (imageWinner) {
+      const artifactId = newId("art");
+      const imageJobId = newId("imgjob");
+      const imageIdempotencyKey = quoteArtifactIdempotencyKey(
+        job.rfq_id,
+        job.requested_version,
+        trade.trade_code,
+        imageWinner.quote.id
+      );
+      const expiresAt = new Date(Date.parse(startedAt) + 90 * 24 * 60 * 60 * 1000).toISOString();
+      statements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO generated_artifacts
+            (id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, status,
+             render_profile_version, idempotency_key, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
+        ).bind(
+          artifactId,
+          job.rfq_id,
+          run.id,
+          trade.trade_code,
+          imageWinner.quote.id,
+          imageWinner.quote.issuer,
+          RENDER_PROFILE_VERSION,
+          imageIdempotencyKey,
+          startedAt,
+          expiresAt
+        ),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO image_render_jobs
+            (id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer,
+             idempotency_key, status, available_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
+        ).bind(
+          imageJobId,
+          artifactId,
+          job.rfq_id,
+          run.id,
+          trade.trade_code,
+          imageWinner.quote.id,
+          imageWinner.quote.issuer,
+          imageIdempotencyKey,
+          startedAt,
+          startedAt,
+          startedAt
+        ),
+        env.DB.prepare(
+          `INSERT INTO audit_events
+            (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+           VALUES (?, NULL, 'QUOTE_IMAGE_AUTO_QUEUED', 'ARTIFACT', ?, ?, ?, ?)`
+        ).bind(
+          newId("aud"),
+          artifactId,
+          `queue:${job.id}`,
+          JSON.stringify({
+            tradeCode: trade.trade_code,
+            quoteId: imageWinner.quote.id,
+            issuer: imageWinner.quote.issuer
+          }),
+          startedAt
+        )
+      );
+      imageJobs.push({
+        jobId: imageJobId,
+        artifactId,
+        rfqId: job.rfq_id,
+        rankingRunId: run.id,
+        tradeCode: trade.trade_code,
+        quoteId: imageWinner.quote.id,
+        issuer: imageWinner.quote.issuer
+      });
+    }
     for (const quote of tradeQuotes.filter(candidate => !ranked.some(result => result.quote.id === candidate.id))) {
       const value = quoteTargetValue(quote, trade.target_field);
-      const reason = quote.status !== "VALID" ? quote.status : value === null || !Number.isFinite(value) ? "INVALID_TARGET_VALUE" : "OUTSIDE_TOP_THREE";
+      const reason = quote.status !== "VALID"
+        ? quote.status
+        : value === null || !Number.isFinite(value)
+          ? "INVALID_TARGET_VALUE"
+          : "OUTSIDE_TOP_FIVE";
       statements.push(env.DB.prepare(
         `INSERT INTO ranking_exclusions
           (id, ranking_run_id, rfq_id, trade_id, quote_id, issuer, reason_code, created_at)
@@ -186,6 +268,17 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
     ).bind(newId("aud"), job.rfq_id, `queue:${job.id}`, JSON.stringify({ version: job.requested_version, resultStatus, validResultCount }), completedAt)
   );
   await env.DB.batch(statements);
+  for (const imageJob of imageJobs) {
+    try {
+      await env.IMAGE_RENDER_QUEUE.send(imageJob);
+    } catch (error) {
+      console.error("rank_one_image_enqueue_failed", {
+        rfqId: job.rfq_id,
+        tradeCode: imageJob.tradeCode,
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
+    }
+  }
 }
 
 async function markFailure(env: AppEnv, job: QuoteRankJob, terminal: boolean, code: string): Promise<void> {

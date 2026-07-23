@@ -237,7 +237,7 @@ Unique constraint: `(rfq_id, version)`.
 
 ### `ranking_results`
 
-Purpose: top-three snapshot per trade.
+Purpose: top-five economic-rank snapshot per trade, including all ties at rank five.
 
 Key fields:
 
@@ -266,6 +266,8 @@ Key fields:
 - `id`
 - `rfq_id`
 - `ranking_run_id`
+- `trade_code`
+- `quote_id`
 - `issuer`
 - `r2_object_key`
 - `content_type`
@@ -276,6 +278,10 @@ Key fields:
 - `idempotency_key` (unique)
 - `created_at`
 - `expires_at`
+
+Artifacts are unique by `(ranking_run_id, trade_code, quote_id)`. The deterministic rank-one
+artifact is queued automatically; another persisted top-five quote is created only after an
+owner-scoped request.
 
 ### `jobs`
 

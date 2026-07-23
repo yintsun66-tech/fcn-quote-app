@@ -39,5 +39,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0004: User-initiated early finalization of an RFQ](0004-user-early-finalize.md)
 - [ADR 0005: One quote image per trade](0005-per-trade-quote-images.md)
 - [ADR 0006: Live provisional ranking, two-stage deadline, and on-demand images](0006-live-results-and-on-demand-images.md)
+- [ADR 0007: Top-five ranking and ranked-quote images](0007-top-five-and-ranked-quote-images.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

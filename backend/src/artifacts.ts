@@ -7,7 +7,16 @@ import { renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
 import type { AppEnv, ImageRenderJob, SessionContext } from "./types";
 
 const LEASE_MILLISECONDS = 3 * 60 * 1000;
-const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
+export const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
+
+export function quoteArtifactIdempotencyKey(
+  rfqId: string,
+  rankingVersion: number,
+  tradeCode: string,
+  quoteId: string
+): string {
+  return `image:${rfqId}:v${rankingVersion}:${tradeCode}:${quoteId}`;
+}
 
 interface ArtifactJobRow {
   id: string;
@@ -15,6 +24,7 @@ interface ArtifactJobRow {
   rfq_id: string;
   ranking_run_id: string;
   trade_code: string;
+  quote_id: string;
   issuer: string;
   status: string;
 }
@@ -39,9 +49,10 @@ interface QuoteCardRow {
   comparable_price_pct: number | null;
 }
 
-interface ArtifactRequestWinner {
+interface ArtifactRequestQuote {
   ranking_run_id: string;
   ranking_version: number;
+  quote_id: string;
   issuer: string;
 }
 
@@ -49,6 +60,7 @@ interface RequestedArtifact {
   id: string;
   ranking_run_id: string;
   trade_code: string;
+  quote_id: string;
   issuer: string;
   status: "QUEUED" | "RENDERING" | "READY" | "FAILED";
   completed_at: string | null;
@@ -59,6 +71,7 @@ function artifactResponse(artifact: RequestedArtifact): Record<string, unknown> 
   return {
     id: artifact.id,
     tradeCode: artifact.trade_code,
+    quoteId: artifact.quote_id,
     issuer: artifact.issuer,
     status: artifact.status,
     completedAt: artifact.completed_at,
@@ -73,7 +86,8 @@ export async function requestTradeArtifact(
   env: AppEnv,
   session: SessionContext,
   rfqId: string,
-  tradeCode: string
+  tradeCode: string,
+  quoteId?: string
 ): Promise<Response> {
   requireSameOrigin(request);
   await requireCsrf(request, session);
@@ -84,22 +98,42 @@ export async function requestTradeArtifact(
   if (rfq.workflow_status !== "COMPLETED" || rfq.current_ranking_version < 1) {
     throw new AppError(409, "RFQ_NOT_FINALIZED", "詢價完成且有有效第一名後，才能產出報價圖。 ");
   }
-  const winner = await env.DB.prepare(
-    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.issuer
+  const rankedQuote = quoteId ? await env.DB.prepare(
+    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
+       FROM ranking_runs run
+       JOIN ranking_results result ON result.ranking_run_id = run.id
+       JOIN rfq_trades trade ON trade.id = result.trade_id
+       JOIN issuer_quotes q ON q.id = result.quote_id
+      WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ? AND q.id = ?
+      LIMIT 1`
+  ).bind(rfqId, rfq.current_ranking_version, tradeCode, quoteId).first<ArtifactRequestQuote>() : await env.DB.prepare(
+    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
        FROM ranking_runs run
        JOIN ranking_results result ON result.ranking_run_id = run.id AND result.is_image_winner = 1
        JOIN rfq_trades trade ON trade.id = result.trade_id
        JOIN issuer_quotes q ON q.id = result.quote_id
       WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
       LIMIT 1`
-  ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestWinner>();
-  if (!winner) throw new AppError(404, "RANK_ONE_QUOTE_NOT_FOUND", "此筆交易沒有可產圖的第一名報價。 ");
+  ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestQuote>();
+  if (!rankedQuote) {
+    throw new AppError(
+      404,
+      quoteId ? "RANKED_QUOTE_NOT_FOUND" : "RANK_ONE_QUOTE_NOT_FOUND",
+      quoteId ? "此報價不在這筆交易目前的前五名結果中。" : "此筆交易沒有可產圖的第一名報價。"
+    );
+  }
 
-  const idempotencyKey = `image:${rfqId}:v${winner.ranking_version}:${tradeCode}`;
+  const idempotencyKey = quoteArtifactIdempotencyKey(
+    rfqId,
+    rankedQuote.ranking_version,
+    tradeCode,
+    rankedQuote.quote_id
+  );
   let artifact = await env.DB.prepare(
-    `SELECT id, ranking_run_id, trade_code, issuer, status, completed_at, expires_at
-       FROM generated_artifacts WHERE idempotency_key = ?`
-  ).bind(idempotencyKey).first<RequestedArtifact>();
+    `SELECT id, ranking_run_id, trade_code, quote_id, issuer, status, completed_at, expires_at
+       FROM generated_artifacts
+      WHERE ranking_run_id = ? AND trade_code = ? AND quote_id = ?`
+  ).bind(rankedQuote.ranking_run_id, tradeCode, rankedQuote.quote_id).first<RequestedArtifact>();
   let shouldEnqueue = false;
   const now = nowIso();
   if (!artifact) {
@@ -107,17 +141,18 @@ export async function requestTradeArtifact(
     const expiresAt = new Date(Date.parse(now) + 90 * 24 * 60 * 60 * 1000).toISOString();
     const inserted = await env.DB.prepare(
       `INSERT OR IGNORE INTO generated_artifacts
-        (id, rfq_id, ranking_run_id, trade_code, issuer, status, render_profile_version,
+        (id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, status, render_profile_version,
          idempotency_key, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)`
     ).bind(
-      artifactId, rfqId, winner.ranking_run_id, tradeCode, winner.issuer,
+      artifactId, rfqId, rankedQuote.ranking_run_id, tradeCode, rankedQuote.quote_id, rankedQuote.issuer,
       RENDER_PROFILE_VERSION, idempotencyKey, now, expiresAt
     ).run();
     artifact = await env.DB.prepare(
-      `SELECT id, ranking_run_id, trade_code, issuer, status, completed_at, expires_at
-         FROM generated_artifacts WHERE idempotency_key = ?`
-    ).bind(idempotencyKey).first<RequestedArtifact>();
+      `SELECT id, ranking_run_id, trade_code, quote_id, issuer, status, completed_at, expires_at
+         FROM generated_artifacts
+        WHERE ranking_run_id = ? AND trade_code = ? AND quote_id = ?`
+    ).bind(rankedQuote.ranking_run_id, tradeCode, rankedQuote.quote_id).first<RequestedArtifact>();
     shouldEnqueue = inserted.meta.changes > 0;
   } else if (artifact.status === "FAILED") {
     const reset = await env.DB.prepare(
@@ -130,25 +165,25 @@ export async function requestTradeArtifact(
   if (!artifact) throw new AppError(500, "ARTIFACT_CREATE_FAILED", "無法建立報價圖工作。 ");
 
   let job = await env.DB.prepare(
-    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status
-       FROM image_render_jobs WHERE idempotency_key = ?`
-  ).bind(idempotencyKey).first<ArtifactJobRow>();
+    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, status
+       FROM image_render_jobs WHERE artifact_id = ?`
+  ).bind(artifact.id).first<ArtifactJobRow>();
   if (!job) {
     const jobId = newId("imgjob");
     const inserted = await env.DB.prepare(
       `INSERT OR IGNORE INTO image_render_jobs
-        (id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, idempotency_key,
+        (id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, idempotency_key,
          status, available_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?)`
     ).bind(
-      jobId, artifact.id, rfqId, winner.ranking_run_id, tradeCode, winner.issuer,
+      jobId, artifact.id, rfqId, rankedQuote.ranking_run_id, tradeCode, rankedQuote.quote_id, rankedQuote.issuer,
       idempotencyKey, now, now, now
     ).run();
     shouldEnqueue = shouldEnqueue || inserted.meta.changes > 0;
     job = await env.DB.prepare(
-      `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status
-         FROM image_render_jobs WHERE idempotency_key = ?`
-    ).bind(idempotencyKey).first<ArtifactJobRow>();
+      `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, status
+         FROM image_render_jobs WHERE artifact_id = ?`
+    ).bind(artifact.id).first<ArtifactJobRow>();
   } else if (shouldEnqueue && job.status === "FAILED") {
     await env.DB.prepare(
       `UPDATE image_render_jobs SET status = 'QUEUED', last_error_code = NULL,
@@ -163,15 +198,17 @@ export async function requestTradeArtifact(
       jobId: job.id,
       artifactId: artifact.id,
       rfqId,
-      rankingRunId: winner.ranking_run_id,
+      rankingRunId: rankedQuote.ranking_run_id,
       tradeCode,
-      issuer: winner.issuer
+      quoteId: rankedQuote.quote_id,
+      issuer: rankedQuote.issuer
     });
   }
   await insertAudit(env, "QUOTE_IMAGE_REQUESTED", "ARTIFACT", artifact.id, session.user.id, requestId(request), {
     rfqId,
     tradeCode,
-    issuer: winner.issuer,
+    quoteId: rankedQuote.quote_id,
+    issuer: rankedQuote.issuer,
     enqueued: shouldEnqueue
   });
   return jsonResponse({ artifact: artifactResponse(artifact) }, artifact.status === "READY" ? 200 : 202);
@@ -191,9 +228,16 @@ async function hashBytes(bytes: ArrayBuffer): Promise<string> {
 
 async function claimJob(env: AppEnv, requested: ImageRenderJob): Promise<ArtifactJobRow | null> {
   const row = await env.DB.prepare(
-    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, issuer, status FROM image_render_jobs
-      WHERE id = ? AND artifact_id = ? AND rfq_id = ? AND ranking_run_id = ?`
-  ).bind(requested.jobId, requested.artifactId, requested.rfqId, requested.rankingRunId).first<ArtifactJobRow>();
+    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer, status
+       FROM image_render_jobs
+      WHERE id = ? AND artifact_id = ? AND rfq_id = ? AND ranking_run_id = ? AND quote_id = ?`
+  ).bind(
+    requested.jobId,
+    requested.artifactId,
+    requested.rfqId,
+    requested.rankingRunId,
+    requested.quoteId
+  ).first<ArtifactJobRow>();
   if (!row) throw new Error("IMAGE_RENDER_JOB_NOT_FOUND");
   if (row.status === "COMPLETED") return null;
   const now = nowIso();
@@ -221,9 +265,9 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
        FROM ranking_results r
        JOIN rfq_trades t ON t.id = r.trade_id
        JOIN issuer_quotes q ON q.id = r.quote_id
-      WHERE r.ranking_run_id = ? AND t.trade_code = ? AND r.is_image_winner = 1
+      WHERE r.ranking_run_id = ? AND t.trade_code = ? AND r.quote_id = ?
       ORDER BY t.sequence`
-  ).bind(job.ranking_run_id, job.trade_code).all<QuoteCardRow>();
+  ).bind(job.ranking_run_id, job.trade_code, job.quote_id).all<QuoteCardRow>();
   if (!rows.results.length) throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
   const trades: QuoteCardTrade[] = rows.results.map(row => ({
     sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,
@@ -247,10 +291,16 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   });
   if (!response.ok) throw new Error("BROWSER_RENDER_FAILED");
   const bytes = await response.arrayBuffer();
-  const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.trade_code}.png`;
+  const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.trade_code}/${job.quote_id}.png`;
   await env.RAW_MAIL_BUCKET.put(objectKey, bytes, {
     httpMetadata: { contentType: "image/png", cacheControl: "private, max-age=0, no-store" },
-    customMetadata: { rfqId: job.rfq_id, rankingRunId: job.ranking_run_id, tradeCode: job.trade_code, issuer: job.issuer }
+    customMetadata: {
+      rfqId: job.rfq_id,
+      rankingRunId: job.ranking_run_id,
+      tradeCode: job.trade_code,
+      quoteId: job.quote_id,
+      issuer: job.issuer
+    }
   });
   const completedAt = nowIso();
   await env.DB.batch([
@@ -266,7 +316,13 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
       `INSERT INTO audit_events
         (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
        VALUES (?, NULL, 'QUOTE_IMAGE_READY', 'ARTIFACT', ?, ?, ?, ?)`
-    ).bind(newId("aud"), job.artifact_id, `queue:${job.id}`, JSON.stringify({ tradeCode: job.trade_code, issuer: job.issuer, byteSize: bytes.byteLength }), completedAt)
+    ).bind(
+      newId("aud"),
+      job.artifact_id,
+      `queue:${job.id}`,
+      JSON.stringify({ tradeCode: job.trade_code, quoteId: job.quote_id, issuer: job.issuer, byteSize: bytes.byteLength }),
+      completedAt
+    )
   ]);
 }
 
@@ -286,7 +342,15 @@ async function markFailure(env: AppEnv, job: ImageRenderJob, terminal: boolean, 
 function isJob(value: unknown): value is ImageRenderJob {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return [candidate.jobId, candidate.artifactId, candidate.rfqId, candidate.rankingRunId, candidate.tradeCode, candidate.issuer]
+  return [
+    candidate.jobId,
+    candidate.artifactId,
+    candidate.rfqId,
+    candidate.rankingRunId,
+    candidate.tradeCode,
+    candidate.quoteId,
+    candidate.issuer
+  ]
     .every(part => typeof part === "string" && part.length > 0);
 }
 

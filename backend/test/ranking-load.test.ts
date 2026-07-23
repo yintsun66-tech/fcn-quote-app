@@ -15,11 +15,11 @@ describe("ranking capacity baseline", () => {
           ki_barrier_pct: 60 + issuer / 10
         }));
         const ranked = rankValidQuotes(quotes, trade % 2 ? "COUPON" : "PRICE");
-        expect(ranked).toHaveLength(3);
+        expect(ranked).toHaveLength(5);
         resultCount += ranked.length;
       }
     }
-    expect(resultCount).toBe(3_000);
+    expect(resultCount).toBe(5_000);
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 });

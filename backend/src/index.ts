@@ -88,6 +88,17 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && resultsMatch?.[1]) return getRfqResults(env, session, resultsMatch[1]);
   const artifactsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/artifacts$/.exec(path);
   if (method === "GET" && artifactsMatch?.[1]) return listRfqArtifacts(env, session, artifactsMatch[1]);
+  const quoteArtifactMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/quotes\/([^/]+)\/artifact$/.exec(path);
+  if (method === "POST" && quoteArtifactMatch?.[1] && quoteArtifactMatch[2] && quoteArtifactMatch[3]) {
+    return requestTradeArtifact(
+      request,
+      env,
+      session,
+      quoteArtifactMatch[1],
+      quoteArtifactMatch[2],
+      quoteArtifactMatch[3]
+    );
+  }
   const tradeArtifactMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/artifact$/.exec(path);
   if (method === "POST" && tradeArtifactMatch?.[1] && tradeArtifactMatch[2]) {
     return requestTradeArtifact(request, env, session, tradeArtifactMatch[1], tradeArtifactMatch[2]);

@@ -1,6 +1,6 @@
 # ADR 0006: Live provisional ranking, two-stage deadline, and on-demand images
 
-Status: Accepted
+Status: Superseded in part by ADR 0007
 Date: 2026-07-23
 
 ## Context

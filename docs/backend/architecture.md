@@ -27,7 +27,7 @@ The existing root-level static site remains unchanged during the backend build. 
 | Test fixtures | Anonymous fixtures are allowed in a private repository |
 | Correlation token | Allowed, but never use `##` |
 | Generated subject prefixes | Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes |
-| Quote images | One image per trade — the trade's rank-1 winner; linked from the winning issuer name in results (ADR 0005, supersedes the earlier per-issuer grouping) |
+| Quote images | Rank 1 is queued automatically per trade; the owner may request another persisted top-five quote image (ADR 0007) |
 
 Mail systems may add reply or forwarding prefixes to inbound messages. The inbound parser must normalize such prefixes for matching while retaining the raw subject. The application itself must never add them to an outbound subject.
 
@@ -52,7 +52,7 @@ flowchart LR
     O --> Q3[Ranking queue]
     O -->|15-minute hard alarm| Q3
     Q3 --> D
-    U -->|request one trade image| A
+    U -->|request another ranked quote image| A
     A --> Q4[Image render queue]
     Q4 --> BR[Browser Rendering]
     BR --> B
@@ -141,8 +141,9 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 
 - Renders an internal deterministic quote-card route from a finalized ranking snapshot.
 - Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
-- Creates a mobile-portrait image only after the owner requests that trade's rank-1 winner
-  (ADR 0006). A trade with no valid quote produces no image.
+- Creates a mobile-portrait image for the deterministic rank-one winner immediately after
+  finalization. The owner can request another persisted top-five quote image (ADR 0007).
+  A trade with no valid quote produces no image.
 - Uses the same issuer-specific color palette as the compatibility frontend, themed by each trade's winning issuer.
 - Uses the request trade date and displays the same complete `[RFQ:<10-character-code>]` reference carried by the outbound email subject. The displayed code is informational and is never accepted as authorization evidence.
 - Stores PNG output in private R2.
@@ -185,16 +186,20 @@ Finalization begins at the earlier of:
 - all expected issuers reaching a terminal state; or
 - the fifteen-minute hard deadline.
 
-Ranking occurs independently for every trade. Only valid, comparable quotes are considered. The first three economic ranks are persisted as a versioned snapshot. Late replies are stored as `LATE_REPLY` and do not overwrite a finalized result without an explicit recalculation.
+Ranking occurs independently for every trade. Only valid, comparable quotes are considered. The
+first five economic ranks are persisted as a versioned snapshot; all quotes tied at rank five are
+retained. Late replies are stored as `LATE_REPLY` and do not overwrite a finalized result without
+an explicit recalculation.
 
 ### 5. Results and images
 
 - The user result page loads only RFQs owned by that authenticated user. During
-  `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top three with the
+  `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top five with the
   exact production ranking function.
-- It shows issuer status, top three quotes, invalid/no-quote reasons, countdown/final status, and artifacts.
-- Each trade's winning issuer offers an explicit **產出報價圖** action. The action creates or
-  reuses one idempotent, owner-scoped image job for that trade.
+- It shows issuer status, top-five quotes, invalid/no-quote reasons, countdown/final status, and artifacts.
+- Each trade's deterministic rank-one image is queued automatically. Every other persisted
+  top-five quote offers an explicit **產出此發行機構報價圖** action that creates or reuses one
+  idempotent, owner-scoped image job for that exact quote.
 - Server-rendered quote cards use a fixed portrait viewport so browser zoom and scroll do not affect the PNG.
 - Ties retain the same economic rank; the earliest valid receipt is selected only where a single deterministic image winner is required.
 

@@ -43,6 +43,7 @@ export interface ImageRenderJob {
   rfqId: string;
   rankingRunId: string;
   tradeCode: string;
+  quoteId: string;
   issuer: string;
 }
 

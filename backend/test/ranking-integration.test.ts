@@ -14,7 +14,7 @@ const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 describe("versioned ranking persistence", () => {
   beforeAll(async () => applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS));
 
-  it("shows provisional ranks, persists final ranks, and creates images only when requested", async () => {
+  it("shows five ranks, auto-creates rank one, and creates another ranked quote image on request", async () => {
     const suffix = crypto.randomUUID();
     const userId = `usr_${suffix}`;
     const rfqId = `rfq_${crypto.randomUUID()}`;
@@ -59,8 +59,9 @@ describe("versioned ranking persistence", () => {
          VALUES (?, ?, 'ALL_TERMINAL', 1, ?, 'QUEUED', ?, ?, ?)`
       ).bind(jobId, rfqId, `rank:${rfqId}:v1`, now, now, now)
     ]);
-    const coupons = [14, 14, 12, 10, 8];
-    const issuers = ["BNP", "JPM", "UBS", "CA", "SG"];
+    const coupons = [14, 14, 12, 10, 8, 6, 4];
+    const issuers = ["BNP", "JPM", "UBS", "CA", "SG", "CITI", "DBS"];
+    const quoteIds = coupons.map(() => `quo_${crypto.randomUUID()}`);
     for (let index = 0; index < coupons.length; index += 1) {
       const receivedAt = new Date(Date.parse(now) + index * 1000).toISOString();
       await testEnv.DB.prepare(
@@ -74,7 +75,7 @@ describe("versioned ranking persistence", () => {
          VALUES (?, ?, ?, ?, ?, ?, 'FCN', 'USD', 6, 1, '["AAA UW"]', 80,
                  'Daily Memory', 100, ?, 98, 'NotePrice', 'NOTE_PRICE', 98, 'NONE',
                  1, 'Note', ?, 'TEST', 'v1', 0, ?, '[]', 'VALID', ?)`
-      ).bind(`quo_${crypto.randomUUID()}`, rfqId, tradeId, inboundId, issuers[index], issuers[index], coupons[index], receivedAt, index, now).run();
+      ).bind(quoteIds[index], rfqId, tradeId, inboundId, issuers[index], issuers[index], coupons[index], receivedAt, index, now).run();
     }
     const imageJobs: ImageRenderJob[] = [];
     const appEnv = {
@@ -96,12 +97,27 @@ describe("versioned ranking persistence", () => {
       }
     } as SessionContext;
     const provisional = await (await getRfqResults(testEnv, session, rfqId)).json<{
-      rfq: { isProvisional: boolean; allTradesHaveThreeValidQuotes: boolean };
+      rfq: {
+        isProvisional: boolean;
+        allTradesHaveThreeValidQuotes: boolean;
+        allTradesHaveFiveValidQuotes: boolean;
+      };
       trades: Array<{ validQuoteCount: number; rankings: Array<{ rank: number; value: number }> }>;
     }>();
-    expect(provisional.rfq).toMatchObject({ isProvisional: true, allTradesHaveThreeValidQuotes: true });
-    expect(provisional.trades[0]?.validQuoteCount).toBe(5);
-    expect(provisional.trades[0]?.rankings.map(item => [item.rank, item.value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
+    expect(provisional.rfq).toMatchObject({
+      isProvisional: true,
+      allTradesHaveThreeValidQuotes: true,
+      allTradesHaveFiveValidQuotes: true
+    });
+    expect(provisional.trades[0]?.validQuoteCount).toBe(7);
+    expect(provisional.trades[0]?.rankings.map(item => [item.rank, item.value])).toEqual([
+      [1, 14],
+      [1, 14],
+      [2, 12],
+      [3, 10],
+      [4, 8],
+      [5, 6]
+    ]);
     expect(await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM ranking_runs WHERE rfq_id = ?").bind(rfqId).first<{ count: number }>()).toEqual({ count: 0 });
 
     const job: QuoteRankJob = { jobId, rfqId, trigger: "ALL_TERMINAL", requestedVersion: 1 };
@@ -111,13 +127,27 @@ describe("versioned ranking persistence", () => {
     const results = await testEnv.DB.prepare(
       "SELECT economic_rank, is_image_winner, normalized_value FROM ranking_results WHERE rfq_id = ? ORDER BY display_order"
     ).bind(rfqId).all<{ economic_rank: number; is_image_winner: number; normalized_value: number }>();
-    expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([[1, 14], [1, 14], [2, 12], [3, 10]]);
+    expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([
+      [1, 14],
+      [1, 14],
+      [2, 12],
+      [3, 10],
+      [4, 8],
+      [5, 6]
+    ]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
-    expect(imageJobs).toHaveLength(0);
+    expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.quoteId, imageJob.issuer])).toEqual([
+      ["T01", quoteIds[0], "BNP"]
+    ]);
     const artifacts = await testEnv.DB.prepare(
-      "SELECT trade_code, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
-    ).bind(rfqId).all<{ trade_code: string; issuer: string; render_profile_version: string }>();
-    expect(artifacts.results).toEqual([]);
+      "SELECT trade_code, quote_id, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
+    ).bind(rfqId).all<{ trade_code: string; quote_id: string; issuer: string; render_profile_version: string }>();
+    expect(artifacts.results).toEqual([{
+      trade_code: "T01",
+      quote_id: quoteIds[0],
+      issuer: "BNP",
+      render_profile_version: "quote-card-reference-v3"
+    }]);
 
     const artifactRequest = new Request(`${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/artifact`, {
       method: "POST",
@@ -146,17 +176,75 @@ describe("versioned ranking persistence", () => {
     )).rejects.toMatchObject({ code: "CSRF_VALIDATION_FAILED" });
     expect((await requestTradeArtifact(artifactRequest, appEnv, session, rfqId, "T01")).status).toBe(202);
     expect((await requestTradeArtifact(artifactRequest.clone(), appEnv, session, rfqId, "T01")).status).toBe(202);
-    expect(imageJobs.map(job => [job.tradeCode, job.issuer])).toEqual([["T01", "BNP"]]);
+    expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.issuer])).toEqual([["T01", "BNP"]]);
+
+    const alternateRequest = new Request(
+      `${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/quotes/${quoteIds[3]}/artifact`,
+      {
+        method: "POST",
+        headers: {
+          origin: BASE_URL,
+          cookie: `__Host-fcn_csrf=${csrfToken}`,
+          "x-csrf-token": csrfToken
+        }
+      }
+    );
+    expect((await requestTradeArtifact(
+      alternateRequest,
+      appEnv,
+      session,
+      rfqId,
+      "T01",
+      quoteIds[3]
+    )).status).toBe(202);
+    expect((await requestTradeArtifact(
+      alternateRequest.clone(),
+      appEnv,
+      session,
+      rfqId,
+      "T01",
+      quoteIds[3]
+    )).status).toBe(202);
+    await expect(requestTradeArtifact(
+      alternateRequest.clone(),
+      appEnv,
+      session,
+      rfqId,
+      "T01",
+      quoteIds[6]
+    )).rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
+    expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.quoteId, imageJob.issuer])).toEqual([
+      ["T01", quoteIds[0], "BNP"],
+      ["T01", quoteIds[3], "CA"]
+    ]);
     const storedArtifacts = await testEnv.DB.prepare(
-      "SELECT trade_code, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
-    ).bind(rfqId).all<{ trade_code: string; issuer: string; render_profile_version: string }>();
+      "SELECT trade_code, quote_id, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY created_at, issuer"
+    ).bind(rfqId).all<{ trade_code: string; quote_id: string; issuer: string; render_profile_version: string }>();
     expect(storedArtifacts.results).toEqual([
-      { trade_code: "T01", issuer: "BNP", render_profile_version: "quote-card-reference-v3" }
+      { trade_code: "T01", quote_id: quoteIds[0], issuer: "BNP", render_profile_version: "quote-card-reference-v3" },
+      { trade_code: "T01", quote_id: quoteIds[3], issuer: "CA", render_profile_version: "quote-card-reference-v3" }
     ]);
     const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
-      artifacts: Array<{ id: string; tradeCode: string; issuer: string; previewUrl: string | null }>;
+      artifacts: Array<{
+        id: string;
+        tradeCode: string;
+        quoteId: string;
+        issuer: string;
+        rank: number;
+        isDefault: boolean;
+        previewUrl: string | null;
+      }>;
     }>();
-    expect(artifactList.artifacts.map(item => [item.tradeCode, item.issuer])).toEqual([["T01", "BNP"]]);
+    expect(artifactList.artifacts.map(item => [
+      item.tradeCode,
+      item.quoteId,
+      item.issuer,
+      item.rank,
+      item.isDefault
+    ])).toEqual([
+      ["T01", quoteIds[0], "BNP", 1, true],
+      ["T01", quoteIds[3], "CA", 3, false]
+    ]);
 
     let renderedHtml = "";
     const renderEnv = {

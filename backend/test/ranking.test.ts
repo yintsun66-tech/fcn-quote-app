@@ -40,4 +40,24 @@ describe("quote ranking", () => {
     expect(ranked.map(item => item.quote.id)).toEqual(["valid"]);
     expect(quoteTargetValue(quote("x", 12, "2026-07-21T00:00:00Z"), "PRICE")).toBe(12);
   });
+
+  it("keeps the first five economic ranks, including every quote tied at rank five", () => {
+    const ranked = rankValidQuotes([
+      quote("a", 15, "2026-07-21T00:00:01Z"),
+      quote("b", 14, "2026-07-21T00:00:02Z"),
+      quote("c", 13, "2026-07-21T00:00:03Z"),
+      quote("d", 12, "2026-07-21T00:00:04Z"),
+      quote("e", 11, "2026-07-21T00:00:05Z"),
+      quote("f", 11, "2026-07-21T00:00:06Z"),
+      quote("g", 10, "2026-07-21T00:00:07Z")
+    ], "COUPON");
+    expect(ranked.map(item => [item.quote.id, item.economicRank])).toEqual([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3],
+      ["d", 4],
+      ["e", 5],
+      ["f", 5]
+    ]);
+  });
 });

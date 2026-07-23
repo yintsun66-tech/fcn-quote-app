@@ -40,10 +40,10 @@ export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: 
       WHERE rfq_id = ? ORDER BY issuer`
   ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>();
   const artifacts = await env.DB.prepare(
-    `SELECT id, trade_code, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
+    `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
       WHERE rfq_id = ? AND ranking_run_id = (
         SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
-      ) ORDER BY trade_code`
+      ) ORDER BY trade_code, created_at`
   ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
   return jsonResponse({
     rfq: {
@@ -54,7 +54,8 @@ export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: 
     },
     issuers: issuers.results.map(row => ({ issuer: row.issuer, status: row.status, terminalAt: row.terminal_at, reason: row.terminal_reason })),
     artifacts: artifacts.results.map(row => ({
-      id: row.id, tradeCode: row.trade_code, issuer: row.issuer, status: row.status, byteSize: row.byte_size,
+      id: row.id, tradeCode: row.trade_code, quoteId: row.quote_id, issuer: row.issuer,
+      status: row.status, byteSize: row.byte_size,
       completedAt: row.completed_at, expiresAt: row.expires_at
     }))
   });
@@ -155,6 +156,9 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
       isProvisional,
       allTradesHaveThreeValidQuotes: isProvisional && tradePayloads.length > 0
         ? tradePayloads.every(trade => trade.validQuoteCount >= 3)
+        : false,
+      allTradesHaveFiveValidQuotes: isProvisional && tradePayloads.length > 0
+        ? tradePayloads.every(trade => trade.validQuoteCount >= 5)
         : false
     },
     trades: tradePayloads
@@ -164,12 +168,20 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
 export async function listRfqArtifacts(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
   const artifacts = await env.DB.prepare(
-    `SELECT a.id, a.trade_code, a.issuer, a.content_type, a.byte_size, a.status, a.completed_at, a.expires_at
-       FROM generated_artifacts a JOIN ranking_runs r ON r.id = a.ranking_run_id
-      WHERE a.rfq_id = ? AND r.version = ? ORDER BY a.trade_code`
+    `SELECT a.id, a.trade_code, a.quote_id, a.issuer, a.content_type, a.byte_size,
+            a.status, a.completed_at, a.expires_at, result.economic_rank,
+            result.is_image_winner
+       FROM generated_artifacts a
+       JOIN ranking_runs r ON r.id = a.ranking_run_id
+       JOIN ranking_results result
+         ON result.ranking_run_id = a.ranking_run_id AND result.quote_id = a.quote_id
+      WHERE a.rfq_id = ? AND r.version = ?
+      ORDER BY a.trade_code, result.economic_rank, result.display_order`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
   return jsonResponse({ artifacts: artifacts.results.map(row => ({
-    id: row.id, tradeCode: row.trade_code, issuer: row.issuer, contentType: row.content_type, byteSize: row.byte_size,
+    id: row.id, tradeCode: row.trade_code, quoteId: row.quote_id, issuer: row.issuer,
+    rank: row.economic_rank, isDefault: row.is_image_winner === 1,
+    contentType: row.content_type, byteSize: row.byte_size,
     status: row.status, completedAt: row.completed_at, expiresAt: row.expires_at,
     downloadUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download` : null,
     previewUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download?preview=1` : null

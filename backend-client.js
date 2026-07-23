@@ -375,7 +375,7 @@
     const softDeadline = payload.rfq.softDeadlineAt ? Date.parse(payload.rfq.softDeadlineAt) : null;
     const remaining = deadline ? Math.max(0, deadline - Date.now()) : 0;
     const softReminder = softDeadline && Date.now() >= softDeadline && remaining > 0
-      ? "｜已達 7 分鐘，可查看暫定前三名或提早結束"
+      ? "｜已達 7 分鐘，可查看暫定前五名或提早結束"
       : "";
     document.querySelector("#backendCountdown").textContent = ["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
@@ -385,31 +385,39 @@
     finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
   }
 
-  function artifactLinkHtml(artifact, tradeCode, provisional) {
+  function artifactLinkHtml(artifact, tradeCode, quoteId, isImageWinner, provisional) {
     if (provisional) return "";
     if (!artifact) {
-      return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}">產出報價圖</button>`;
+      const label = isImageWinner ? "產出第一名報價圖" : "產出此發行機構報價圖";
+      return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}" data-artifact-quote="${escapeHtml(quoteId)}">${label}</button>`;
     }
     if (artifact.status === "READY") {
       const href = artifact.previewUrl || artifact.downloadUrl;
-      return ` <a class="artifact-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">報價圖</a>`;
+      return ` <a class="artifact-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">查看報價圖</a>`;
     }
     return ` <span class="artifact-pending">（報價圖${escapeHtml(artifact.status)}）</span>`;
   }
 
-  function renderResults(payload, artifactByTrade = {}) {
+  function renderResults(payload, artifactByQuote = {}) {
     state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
     const provisional = Boolean(payload.rfq.isProvisional);
-    finalizeButton.classList.toggle("attention", Boolean(payload.rfq.allTradesHaveThreeValidQuotes));
+    finalizeButton.classList.toggle("attention", Boolean(payload.rfq.allTradesHaveFiveValidQuotes));
     const banner = provisional
-      ? `<p class="backend-provisional">${payload.rfq.allTradesHaveThreeValidQuotes ? "每筆交易均已有至少三家有效報價，可提早結束並產生正式結果。" : "以下為暫定報價，回覆期間內仍可能變動，不會建立正式排名或報價圖。"}</p>`
+      ? `<p class="backend-provisional">${payload.rfq.allTradesHaveFiveValidQuotes ? "每筆交易均已有至少五家有效報價，可提早結束並產生正式結果。" : "以下為暫定前五名，回覆期間內仍可能變動，不會建立正式排名或報價圖。"}</p>`
       : "";
     document.querySelector("#backendRankings").innerHTML = banner + payload.trades.map(trade => {
-      // One image per trade: link the trade's rank-1 (winning) issuer name to that trade's image.
-      const link = artifactLinkHtml(artifactByTrade[trade.tradeCode], trade.tradeCode, provisional);
       return `
       <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}｜${provisional ? `有效 ${trade.validQuoteCount} 家${trade.lastUpdatedAt ? `｜更新 ${escapeHtml(formatDateTime(trade.lastUpdatedAt))}` : ""}` : "正式結果"}</small></h3>
-      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${item.isImageWinner ? link : ""}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
+      ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => {
+        const link = artifactLinkHtml(
+          artifactByQuote[item.quoteId],
+          trade.tradeCode,
+          item.quoteId,
+          item.isImageWinner,
+          provisional
+        );
+        return `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${link}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`;
+      }).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
     </section>`;
     }).join("");
   }
@@ -417,13 +425,13 @@
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">請在各筆交易的第一名旁按「產出報價圖」，系統才會建立該張圖片。</p>"
+        ? "<p class=\"artifact-pending\">第一名會自動產圖；其他前五名可在發行機構旁另行產圖。</p>"
         : "";
       return;
     }
     artifactContainer.innerHTML = `<section class="backend-artifact-list">
-      <h3>各交易報價圖（一筆交易一張）</h3>
-      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜${escapeHtml(item.issuer)}：${item.status === "READY"
+      <h3>各交易報價圖</h3>
+      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜第 ${escapeHtml(item.rank)} 名｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名自動產圖）" : ""}：${item.status === "READY"
         ? `<a class="artifact-link" href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noopener">預覽</a> · <a class="artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 PNG</a>`
         : `<span class="artifact-pending">${escapeHtml(item.status)}</span>`}</li>`).join("")}</ul>
     </section>`;
@@ -443,7 +451,7 @@
         const artifacts = ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)
           ? (await request(`/rfqs/${state.rfqId}/artifacts`)).artifacts
           : [];
-        renderResults(results, Object.fromEntries(artifacts.map(item => [item.tradeCode, item])));
+        renderResults(results, Object.fromEntries(artifacts.map(item => [item.quoteId, item])));
         if (!results.rfq.isProvisional) renderArtifactSummary(artifacts);
         if (artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")) {
           state.timer = setTimeout(refreshResults, 2000);
@@ -466,11 +474,11 @@
   }, true);
   document.querySelector("#backendRankings").addEventListener("click", async event => {
     const target = event.target.closest("[data-artifact-trade]");
-    if (!target || !state.rfqId) return;
+    if (!target || !state.rfqId || !target.dataset.artifactQuote) return;
     target.disabled = true;
     target.textContent = "建立中…";
     try {
-      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(target.dataset.artifactTrade)}/artifact`, {
+      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(target.dataset.artifactTrade)}/quotes/${encodeURIComponent(target.dataset.artifactQuote)}/artifact`, {
         method: "POST",
         body: "{}"
       });

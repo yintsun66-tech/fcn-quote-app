@@ -73,7 +73,11 @@ describe("issuer parser profiles", () => {
       comparablePricePct: 98,
       barrierType: "NONE",
       kiBarrierPct: null,
-      koType: "Daily Memory"
+      koType: "Daily Memory",
+      // "m"-suffixed month fields must parse so the row matches its trade (prevents PARSE_ERROR).
+      tenorMonths: 6,
+      observationFrequencyMonths: 1,
+      guaranteedPeriodsMonths: 1
     });
   });
 

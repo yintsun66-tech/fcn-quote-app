@@ -157,6 +157,24 @@ Five changes to reduce time-to-quote and per-request cost — see [ADR 0003](adr
 - Not yet exercised end-to-end: a real RFQ producing per-trade images and the inline links.
   Confirm with an authorized test RFQ (this sends real bank email).
 
+## MS inbound parse fix (implemented; deploy pending)
+
+- **Symptom:** MS replies almost always showed `PARSE_ERROR`. **Root cause:** MS's "Non-Call (m)"
+  column (guaranteed periods) arrives as e.g. `"1m"`, but `msRow` parsed it with `integer()`, which
+  rejects the `m` suffix → `guaranteedPeriodsMonths = null` → every MS row failed `matchesTrade` →
+  all rows `AMBIGUOUS_TRADE_MATCH` → the whole issuer became `PARSE_ERROR`. The other MS columns
+  matched the real layout (verified against a user-supplied MS `.msg`; not committed).
+- **Fix:** `backend/src/issuer-profiles.ts` `msRow` now parses the guaranteed column with `months()`
+  (accepts `"1m"`, `"1"`, `"1 months"`), like tenor/observation. One line.
+- Partial extraction already works by design: bad rows are skipped and any `VALID` row →
+  `VALID_REPLY`. So once MS rows match, valid quotes are captured, and rows that genuinely cannot
+  quote (`NA`) are recorded as `NO_QUOTE` without failing the reply — this covers the
+  "capture the rows that do have quotes" requirement (not MS-specific).
+- Regression: `backend/test/issuer-profiles.test.ts` MS case now asserts `guaranteedPeriodsMonths`
+  and the other `m`-suffixed month fields.
+- No migration / schema / API change. **Verified:** `pnpm run typecheck`; `pnpm test` (14 files, 64).
+- **Status:** committed (see log). deployed? **pending** (code-only; no migration needed).
+
 ## Latest SG outgoing-email table update
 
 The SG table update is committed on both branches:

@@ -300,7 +300,9 @@ function msRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssue
     issuer: "MS", issuerDisplayName: "MS（OBU不得承做）", parserProfile: "MS_FCN_V1",
     sourceTableIndex: tableIndex, sourceRowIndex: rowIndex, rawValues: row,
     product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, 10)),
-    guaranteedPeriodsMonths: integer(text(row, 18)), underlyings,
+    // MS puts the non-call periods as e.g. "1m"; months() accepts the "m" suffix (integer() rejected
+    // it, leaving guaranteedPeriodsMonths null so every row failed trade matching → PARSE_ERROR).
+    guaranteedPeriodsMonths: months(text(row, 18)), underlyings,
     strikePct: percentage(rawTargets.strike, "DECIMAL_FRACTION"),
     koType: koType(text(row, 17), text(row, 19)),
     koBarrierPct: percentage(rawTargets.koBarrier, "DECIMAL_FRACTION"),

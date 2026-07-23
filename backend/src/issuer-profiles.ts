@@ -202,7 +202,9 @@ function integer(value: string): number | null {
 function product(value: string): CanonicalProduct | null {
   const normalized = value.normalize("NFKC").trim().toUpperCase();
   if (normalized === "FCN" || normalized === "FCA") return "FCN";
-  if (normalized === "DAC") return "DAC";
+  // DAC family aliases: DAC (BNP/MS request), DRA (Nomura/DBS/SG/GS/CA/Citi), WRA (UBS),
+  // and "Range Accrual" (MS reply). All normalize to canonical DAC so DAC replies match DAC trades.
+  if (normalized === "DAC" || normalized === "DRA" || normalized === "WRA" || normalized === "RANGE ACCRUAL") return "DAC";
   return null;
 }
 
@@ -364,28 +366,62 @@ function standardRow(profile: StandardProfile, row: string[], tableIndex: number
   };
 }
 
+interface MsColumns {
+  currency: number;
+  underlyings: number[];
+  tenor: number;
+  observation: number;
+  coupon: number;
+  strike: number;
+  barrierType: number;
+  kiBarrier: number;
+  koBarrier: number;
+  koType: number;
+  koMemory: number;
+  guaranteed: number;
+  price: number;
+}
+
+// MS FCN and DRA (Range Accrual) reply layouts differ: DRA inserts "Accrual Barrier" (after
+// Coupon) and "Fixed Coupon (m)" (after KO Type), shifting Put Strike/KI/KO/Non-Call/Note Price.
+// Columns per the reference workbook (資料來源MS(23) for FCN, 資料來源MS(DRA) for DRA).
+const MS_FCN_COLUMNS: MsColumns = {
+  currency: 9, underlyings: [3, 4, 5, 6, 7, 8], tenor: 10, observation: 11, coupon: 12,
+  strike: 13, barrierType: 14, kiBarrier: 15, koBarrier: 16, koType: 17, koMemory: 19,
+  guaranteed: 18, price: 22
+};
+const MS_DRA_COLUMNS: MsColumns = {
+  currency: 9, underlyings: [3, 4, 5, 6, 7, 8], tenor: 10, observation: 11, coupon: 12,
+  strike: 14, barrierType: 15, kiBarrier: 16, koBarrier: 17, koType: 18, koMemory: 21,
+  guaranteed: 20, price: 24
+};
+
 function msRow(row: string[], tableIndex: number, rowIndex: number): ParsedIssuerRow | null {
   const parsedProduct = product(text(row, 1));
-  const parsedCurrency = currency(text(row, 9));
-  const underlyings = [3, 4, 5, 6, 7, 8].map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
-  if (!parsedProduct || !parsedCurrency || underlyings.length === 0) return null;
-  const rawTargets = targetRaw(row, 13, 16, 12, 22, 15);
+  if (!parsedProduct) return null;
+  // DAC (MS "Range Accrual") uses the shifted DRA layout; FCN uses the base layout.
+  const columns = parsedProduct === "DAC" ? MS_DRA_COLUMNS : MS_FCN_COLUMNS;
+  const parsedCurrency = currency(text(row, columns.currency));
+  const underlyings = columns.underlyings.map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
+  if (!parsedCurrency || underlyings.length === 0) return null;
+  const rawTargets = targetRaw(row, columns.strike, columns.koBarrier, columns.coupon, columns.price, columns.kiBarrier);
   const rawPriceValue = percentage(rawTargets.price, "DECIMAL_FRACTION");
-  const barrierType = barrier(text(row, 14));
+  const barrierType = barrier(text(row, columns.barrierType));
   return {
-    issuer: "MS", issuerDisplayName: "MS（OBU不得承做）", parserProfile: "MS_FCN_V1",
+    issuer: "MS", issuerDisplayName: "MS（OBU不得承做）",
+    parserProfile: parsedProduct === "DAC" ? "MS_DRA_V1" : "MS_FCN_V1",
     sourceTableIndex: tableIndex, sourceRowIndex: rowIndex, rawValues: row,
-    product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, 10)),
+    product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, columns.tenor)),
     // MS puts the non-call periods as e.g. "1m"; months() accepts the "m" suffix (integer() rejected
     // it, leaving guaranteedPeriodsMonths null so every row failed trade matching → PARSE_ERROR).
-    guaranteedPeriodsMonths: months(text(row, 18)), underlyings,
+    guaranteedPeriodsMonths: months(text(row, columns.guaranteed)), underlyings,
     strikePct: percentage(rawTargets.strike, "DECIMAL_FRACTION"),
-    koType: koType(text(row, 17), text(row, 19)),
+    koType: koType(text(row, columns.koType), text(row, columns.koMemory)),
     koBarrierPct: percentage(rawTargets.koBarrier, "DECIMAL_FRACTION"),
     couponPaPct: percentage(rawTargets.coupon, "DECIMAL_FRACTION"), rawPriceValue,
     rawPriceLabel: "Note Price", priceSemantics: "NOTE_PRICE", comparablePricePct: rawPriceValue,
     barrierType, kiBarrierPct: barrierType === "NONE" ? null : percentage(rawTargets.kiBarrier, "DECIMAL_FRACTION"),
-    observationFrequencyMonths: months(text(row, 11)), otc: "Note", effectiveDateOffsetCalendarDays: null,
+    observationFrequencyMonths: months(text(row, columns.observation)), otc: "Note", effectiveDateOffsetCalendarDays: null,
     quoteReference: optionalText(row, 0), issuerComment: "MS（OBU不得承做）", rejectionReason: rejection(null, rawTargets, barrierType),
     warnings: ["MS_OBU_RESTRICTION_REQUIRES_USER_ATTRIBUTE"], rawTargetValues: rawTargets
   };

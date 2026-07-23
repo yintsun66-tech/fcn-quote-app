@@ -169,6 +169,16 @@ the deployment. Treat that as the smallest remaining UI verification task.
    versioned recalculation; do not overwrite historical R2 objects.
 10. `main` does not contain the current backend feature branch. Do not merge or copy changes
     between branches without an explicit user request and a clean diff review.
+11. **DAC-architecture parsing (fixed 2026-07-24, except SG).** Issuers label the DAC product
+    differently — `DRA` (Nomura/DBS/SG/GS/CA/Citi), `WRA` (UBS), `Range Accrual` (MS) — and the
+    parser previously recognized only `DAC`, so every non-BNP DAC reply parsed to zero rows. Fixed:
+    `product()` now maps DRA/WRA/Range Accrual → canonical DAC, and MS uses a separate DRA column
+    map (its Range Accrual reply inserts "Accrual Barrier" and "Fixed Coupon (m)" columns, shifting
+    Put Strike/KI/KO/Non-Call/Note Price — MS FCN and DRA genuinely differ per the reference
+    workbook). Every other issuer's DAC uses the same columns as FCN (verified via identical reply
+    headers in the spec; the spec's shifted data rows are display-compacted, not a real layout
+    change). **Still open: SG DAC** — SG derives the product from its "Fixed Coupons = All Periods"
+    cell (FCN only) and the spec has no SG DRA layout; it needs a real SG DRA reply sample to map.
 
 ## User-owned/untracked work to preserve
 

@@ -83,6 +83,39 @@ describe("issuer parser profiles", () => {
     });
   });
 
+  it("maps MS Range Accrual (DRA) with its shifted column layout", () => {
+    // DRA inserts Accrual Barrier[13] and Fixed Coupon[19]; Put Strike/KI/KO/Non-Call/Note Price shift.
+    const row = cells(25, {
+      0: "MS-DRA-1", 1: "Range Accrual", 3: "AAA UW", 9: "USD", 10: "9m", 11: "1m",
+      12: 0.125, 13: 0.8, 14: 0.8, 15: "EUROPEAN", 16: 0.5, 17: 1, 18: "DAILY",
+      19: "1m", 20: "1m", 21: "No", 24: 0.98
+    });
+    const parsed = parseIssuerTables("MS", { tables: [{ index: 0, rows: [row] }] });
+    expect(parsed[0]).toMatchObject({
+      product: "DAC",
+      parserProfile: "MS_DRA_V1",
+      currency: "USD",
+      tenorMonths: 9,
+      guaranteedPeriodsMonths: 1,
+      observationFrequencyMonths: 1,
+      couponPaPct: 12.5,
+      strikePct: 80,
+      koBarrierPct: 100,
+      kiBarrierPct: 50,
+      barrierType: "EKI",
+      koType: "Daily",
+      comparablePricePct: 98
+    });
+  });
+
+  it("recognizes DAC-family product aliases (DRA / WRA / Range Accrual) as canonical DAC", () => {
+    // UBS labels the DAC architecture WRA; Nomura/DBS/SG/GS/CA/Citi use DRA — same columns as FCN.
+    const ubs = cells(19, { 0: "WRA", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily", 10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note" });
+    expect(parseIssuerTables("UBS", { tables: [{ index: 0, rows: [ubs] }] })[0]?.product).toBe("DAC");
+    const gs = cells(21, { 0: "DRA", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily", 10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1 });
+    expect(parseIssuerTables("GS", { tables: [{ index: 0, rows: [gs] }] })[0]?.product).toBe("DAC");
+  });
+
   it("maps current SG headers dynamically when the reply contains fewer than five underlyings", () => {
     const headers = [
       "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",

@@ -41,5 +41,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0006: Live provisional ranking, two-stage deadline, and on-demand images](0006-live-results-and-on-demand-images.md)
 - [ADR 0007: Top-five ranking and ranked-quote images](0007-top-five-and-ranked-quote-images.md)
 - [ADR 0008: Recoverable user RFQ workspace](0008-recoverable-rfq-workspace.md)
+- [ADR 0009: Selective issuer send](0009-selective-issuer-send.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

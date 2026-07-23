@@ -139,6 +139,21 @@ Results:
 An authenticated browser walkthrough of every new workspace interaction was not performed after
 the deployment. Treat that as the smallest remaining UI verification task.
 
+## UI and selective-send changes (2026-07-24)
+
+- AUTOMATED RFQ countdown label: 「硬截止剩餘」 → 「詢價流程剩餘時間」.
+- Toolbar button 「確認所有詢價條件」 → 「手動貼郵件詢價」 with a blue-green gradient
+  (`.manual-email-button`). It still runs the static mailto/clipboard flow.
+- Both quote buttons enforce the Barrier Type / KI Barrier rule before acting: NONE requires a blank
+  KI Barrier, and a filled KI Barrier requires EKI/AKI. The static button already did this via
+  `validateRow`; the backend send now checks it in `backend-client.js` before creating the RFQ.
+- **Selective issuer send (ADR 0009).** 「發送詢價條件」 now opens an issuer checklist (eleven issuers
+  + an "all" toggle); only the selected issuers are queried and ranked. `POST /send` accepts an
+  optional `{ issuers: [...] }` (absent → all eleven). BMJB is a shared email, so selecting any of
+  BNP/MS/JPM/BARCLAYS sends the BMJB batch but ranks only the selected ones.
+- Verified: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test` (16 files, 75);
+  `pnpm run build` (dry run). Committed; deploy status recorded at the Worker-version line above.
+
 ## Production gaps and cautions
 
 1. A batch marked `SENT` means Cloudflare accepted it; it is not proof of delivery to the bank

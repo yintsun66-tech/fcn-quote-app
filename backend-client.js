@@ -103,12 +103,32 @@
         <p id="backendRfqTimelinesError" class="backend-error" role="alert"></p>
         <div id="backendRfqTimelinesList" class="backend-timeline-list"></div>
       </section>
+    </dialog>
+    <dialog id="backendIssuerPicker" class="backend-dialog">
+      <form id="backendIssuerPickerForm" class="backend-panel">
+        <div class="backend-results-heading"><div><p class="eyebrow">SELECT ISSUERS</p><h2>選擇詢價與比價的發行機構</h2></div></div>
+        <p class="backend-archive-note">只有勾選的機構會列入本次詢價與比價。BNP／MS／JPM／BARCLAYS 共用一封詢價信，勾選其中任一家就會寄出該封，但只有勾選者列入比價。</p>
+        <label class="issuer-pick-all" style="display:block;margin:6px 0"><input type="checkbox" id="issuerPickAll" checked> <b>全部發行機構</b></label>
+        <div class="issuer-pick-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:10px 0">
+          ${[["BNP", "BNP"], ["MS", "MS（OBU不得承做）"], ["JPM", "JPM"], ["BARCLAYS", "BARCLAYS"], ["NOMURA", "Nomura"], ["UBS", "UBS"], ["DBS", "DBS"], ["SG", "SG"], ["CITI", "CITI"], ["GS", "GS"], ["CA", "CA"]].map(([value, label]) => `<label class="issuer-pick"><input type="checkbox" class="issuer-pick-item" value="${value}" checked> ${label}</label>`).join("")}
+        </div>
+        <p id="backendIssuerPickerError" class="backend-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cancelIssuerPicker" class="secondary">取消</button>
+          <button type="submit" class="primary">送出詢價</button>
+        </div>
+      </form>
     </dialog>`;
   document.body.append(shell);
 
   const authDialog = document.querySelector("#backendAuth");
   const progressDialog = document.querySelector("#backendProgress");
   const finalizeButton = document.querySelector("#backendFinalizeNow");
+  const issuerPickerDialog = document.querySelector("#backendIssuerPicker");
+  const issuerPickerForm = document.querySelector("#backendIssuerPickerForm");
+  const issuerPickAll = document.querySelector("#issuerPickAll");
+  const issuerPickItems = [...document.querySelectorAll(".issuer-pick-item")];
+  const issuerPickerError = document.querySelector("#backendIssuerPickerError");
   const newRfqButton = document.querySelector("#backendNewRfq");
   const myRfqsButton = document.querySelector("#backendMyRfqs");
   const rfqBadge = document.querySelector("#backendRfqBadge");
@@ -529,8 +549,23 @@
     }));
   }
 
-  async function submitRfq() {
+  // Barrier Type / KI Barrier consistency (checked before the backend RFQ is created, mirroring the
+  // static validateRow): NONE must have a blank KI Barrier, and a filled KI Barrier requires EKI/AKI.
+  function kiBarrierIssue() {
+    const rows = [...document.querySelectorAll("#quoteTable tbody tr")];
+    for (let index = 0; index < rows.length; index += 1) {
+      const barrierType = field(rows[index], "barrierType");
+      const ki = field(rows[index], "kiBarrier");
+      if (barrierType === "NONE" && ki) return `第 ${index + 1} 筆：Barrier Type 為 NONE 時，KI Barrier 必須留白。`;
+      if (ki && barrierType !== "EKI" && barrierType !== "AKI") return `第 ${index + 1} 筆：填寫 KI Barrier 時，Barrier Type 必須為 EKI 或 AKI。`;
+    }
+    return null;
+  }
+
+  async function submitRfq(issuers) {
     if (!state.user) { showAuth(); return; }
+    const kiIssue = kiBarrierIssue();
+    if (kiIssue) { statusElement.textContent = kiIssue; statusElement.classList.remove("success"); return; }
     const sendButton = document.querySelector("#sendQuotes");
     sendButton.disabled = true;
     sendButton.textContent = "建立詢價中…";
@@ -549,7 +584,8 @@
       const rfqId = created.rfq.id;
       await request(`/rfqs/${rfqId}/validate`, { method: "POST", body: "{}" });
       await request(`/rfqs/${rfqId}/send`, {
-        method: "POST", headers: { "idempotency-key": idempotency("send") }, body: "{}"
+        method: "POST", headers: { "idempotency-key": idempotency("send") },
+        body: JSON.stringify({ issuers: Array.isArray(issuers) ? issuers : [] })
       });
       state.rfqId = rfqId;
       state.hasRankings = false;
@@ -577,7 +613,7 @@
       : "";
     document.querySelector("#backendCountdown").textContent = ["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
-      : `狀態：${payload.rfq.workflowStatus}｜硬截止剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}${softReminder}`;
+      : `狀態：${payload.rfq.workflowStatus}｜詢價流程剩餘時間 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}${softReminder}`;
     document.querySelector("#backendIssuerStates").innerHTML = payload.issuers.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${item.issuer}</b>${item.status}</span>`).join("");
     // Offer early close only while the reply window is still open.
     finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
@@ -669,11 +705,29 @@
     }
   }
 
+  function openIssuerPicker() {
+    if (!state.user) { showAuth(); return; }
+    const kiIssue = kiBarrierIssue();
+    if (kiIssue) { statusElement.textContent = kiIssue; statusElement.classList.remove("success"); return; }
+    issuerPickerError.textContent = "";
+    if (!issuerPickerDialog.open) issuerPickerDialog.showModal();
+  }
+
   document.addEventListener("click", event => {
     if (event.target.closest("#sendQuotes")) {
-      event.preventDefault(); event.stopImmediatePropagation(); submitRfq();
+      event.preventDefault(); event.stopImmediatePropagation(); openIssuerPicker();
     }
   }, true);
+  issuerPickAll.addEventListener("change", () => { issuerPickItems.forEach(item => { item.checked = issuerPickAll.checked; }); });
+  issuerPickItems.forEach(item => item.addEventListener("change", () => { issuerPickAll.checked = issuerPickItems.every(entry => entry.checked); }));
+  document.querySelector("#cancelIssuerPicker").addEventListener("click", () => issuerPickerDialog.close());
+  issuerPickerForm.addEventListener("submit", event => {
+    event.preventDefault();
+    const selected = issuerPickItems.filter(item => item.checked).map(item => item.value);
+    if (selected.length === 0) { issuerPickerError.textContent = "請至少選擇一家發行機構。"; return; }
+    issuerPickerDialog.close();
+    submitRfq(selected);
+  });
   document.querySelector("#backendRankings").addEventListener("click", async event => {
     const target = event.target.closest("[data-artifact-trade]");
     if (!target || !state.rfqId || !target.dataset.artifactQuote) return;

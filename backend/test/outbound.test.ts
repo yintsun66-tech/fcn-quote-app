@@ -172,4 +172,43 @@ describe("outbound RFQ email workflow", () => {
     await processOutboundEmailJob(appEnv, firstJob);
     expect(sent).toHaveLength(8);
   });
+
+  it("sends only the batches for the selected issuers (ADR 0009)", async () => {
+    const rfqId = "rfq_10000000-0000-4000-8000-00000000000a";
+    const now = new Date().toISOString();
+    await testEnv.DB.prepare(
+      "INSERT INTO rfqs (id, user_id, status, trade_count, created_at, validated_at, version) VALUES (?, ?, 'VALIDATED', 1, ?, ?, 2)"
+    ).bind(rfqId, USER_ID, now, now).run();
+    await testEnv.DB.prepare(
+      `INSERT INTO rfq_trades
+        (id, rfq_id, sequence, trade_code, product, currency, trade_date,
+         effective_date_offset_calendar_days, tenor_months, guaranteed_periods_months,
+         underlyings_json, strike_pct, ko_type, ko_barrier_pct, coupon_pa_pct,
+         upfront_or_note_price_pct, barrier_type, ki_barrier_pct,
+         observation_frequency_months, otc, target_field, matching_key_hash, created_at, frozen_at)
+       VALUES (?, ?, 1, 'T01', 'FCN', 'USD', '21-Jul-26', 7, 6, 1, '["AAPL UW"]', 85,
+               'Daily Memory', 100, NULL, 98, 'NONE', NULL, 1, 'Note', 'COUPON', 'matching-key-2', ?, ?)`
+    ).bind("trd_10000000-0000-4000-8000-00000000000b", rfqId, now, now).run();
+
+    // BNP is in the shared BMJB batch; selecting BNP + SG → the BMJB and SG batches, and BNP + SG expected.
+    const response = await sendRfq(new Request(`${BASE_URL}/api/v1/rfqs/${rfqId}/send`, {
+      method: "POST",
+      headers: {
+        origin: BASE_URL, cookie: `__Host-fcn_csrf=${RAW_CSRF}`, "x-csrf-token": RAW_CSRF,
+        "idempotency-key": "selective-send-key", "content-type": "application/json"
+      },
+      body: JSON.stringify({ issuers: ["SG", "BNP"] })
+    }), appEnv, session, rfqId);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ rfq: { expectedIssuerCount: 2, outboundBatchCount: 2 } });
+
+    const issuers = await testEnv.DB.prepare(
+      "SELECT issuer FROM rfq_expected_issuers WHERE rfq_id = ? ORDER BY issuer"
+    ).bind(rfqId).all<{ issuer: string }>();
+    expect(issuers.results.map(row => row.issuer)).toEqual(["BNP", "SG"]);
+    const batches = await testEnv.DB.prepare(
+      "SELECT batch_code FROM outbound_email_batches WHERE rfq_id = ? ORDER BY batch_code"
+    ).bind(rfqId).all<{ batch_code: string }>();
+    expect(batches.results.map(row => row.batch_code)).toEqual(["BMJB", "SG"]);
+  });
 });

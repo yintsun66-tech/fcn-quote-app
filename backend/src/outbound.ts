@@ -11,7 +11,7 @@ import { rfqCorrelationCode, sha256Text, stableStringify } from "./crypto";
 import { newId, nowIso } from "./db";
 import { AppError } from "./errors";
 import { startRfqCoordinator } from "./coordinator";
-import { jsonResponse, requestId, requireIdempotencyKey, requireSameOrigin } from "./http";
+import { jsonResponse, readJson, requestId, requireIdempotencyKey, requireSameOrigin } from "./http";
 import { fetchOwnedRfq, type TradeRow } from "./rfqs";
 import { rfqHardDeadlineSeconds } from "./rfq-timing";
 import type { AppEnv, MailBatchCode, OutboundEmailJob, SessionContext } from "./types";
@@ -126,7 +126,21 @@ export async function sendRfq(
   await requireCsrf(request, session);
   assertFixedAddresses(env);
   const idempotencyKey = requireIdempotencyKey(request);
-  const requestHash = await sha256Text(stableStringify({ action: "SEND_RFQ", rfqId }));
+  // Optional issuer selection (ADR 0009): body { issuers: [...] } limits which issuers are queried
+  // and compared. Absent/empty → all eleven. Selecting any BMJB-group issuer (BNP/MS/JPM/BARCLAYS)
+  // sends the shared BMJB batch to all four, but only the selected ones are snapshotted/ranked.
+  const body = (await readJson(request).catch(() => ({}))) as { issuers?: unknown };
+  const requestedIssuers = Array.isArray(body?.issuers)
+    ? body.issuers.filter((value): value is string => typeof value === "string")
+    : null;
+  const validIssuers = new Set(EXPECTED_ISSUERS.map(item => item.issuer));
+  const selectedNames = requestedIssuers && requestedIssuers.length > 0
+    ? [...new Set(requestedIssuers)].filter(name => validIssuers.has(name))
+    : EXPECTED_ISSUERS.map(item => item.issuer);
+  if (selectedNames.length === 0) throw new AppError(422, "NO_VALID_ISSUERS", "請至少選擇一家有效的發行機構。 ");
+  const selectedIssuers = EXPECTED_ISSUERS.filter(item => selectedNames.includes(item.issuer));
+  const batchesToSend = BATCH_CODES.filter(code => selectedIssuers.some(item => item.batchCode === code));
+  const requestHash = await sha256Text(stableStringify({ action: "SEND_RFQ", rfqId, issuers: [...selectedNames].sort() }));
   const existing = await env.DB.prepare(
     `SELECT request_hash, response_status, response_json FROM idempotency_keys
       WHERE user_id = ? AND scope = 'SEND_RFQ' AND idempotency_key = ?`
@@ -161,17 +175,17 @@ export async function sendRfq(
               expected_issuer_count = ?, outbound_batch_count = ?, version = version + 1,
               workflow_status = 'QUEUED'
         WHERE id = ? AND user_id = ? AND status = 'VALIDATED' AND dispatch_status = 'NOT_SENT'`
-    ).bind(tokenHash, queuedAt, EXPECTED_ISSUERS.length, BATCH_CODES.length, rfqId, session.user.id)
+    ).bind(tokenHash, queuedAt, selectedIssuers.length, batchesToSend.length, rfqId, session.user.id)
   ];
 
-  for (const expected of EXPECTED_ISSUERS) {
+  for (const expected of selectedIssuers) {
     statements.push(env.DB.prepare(
       `INSERT INTO rfq_expected_issuers
         (id, rfq_id, issuer, outbound_batch_code, status, snapshot_at)
        VALUES (?, ?, ?, ?, 'PENDING', ?)`
     ).bind(newId("exp"), rfqId, expected.issuer, expected.batchCode, queuedAt));
   }
-  for (const batchCode of BATCH_CODES) {
+  for (const batchCode of batchesToSend) {
     const profile = EMAIL_INSTITUTIONS[batchCode];
     if (!profile) throw new AppError(500, "MISSING_EMAIL_PROFILE", "找不到寄信格式設定。 ");
     const batchId = newId("obm");
@@ -197,8 +211,8 @@ export async function sendRfq(
       outboundQueuedAt: queuedAt,
       sentAt: null,
       deadlineAt: null,
-      expectedIssuerCount: EXPECTED_ISSUERS.length,
-      outboundBatchCount: BATCH_CODES.length
+      expectedIssuerCount: selectedIssuers.length,
+      outboundBatchCount: batchesToSend.length
     }
   };
   statements.push(env.DB.prepare(
@@ -215,7 +229,7 @@ export async function sendRfq(
      VALUES (?, ?, 'RFQ_EMAILS_QUEUED', 'RFQ', ?, ?, ?, ?)`
   ).bind(
     newId("aud"), session.user.id, rfqId, requestId(request),
-    JSON.stringify({ batchCount: BATCH_CODES.length, expectedIssuerCount: EXPECTED_ISSUERS.length }), queuedAt
+    JSON.stringify({ batchCount: batchesToSend.length, expectedIssuerCount: selectedIssuers.length, issuers: selectedNames }), queuedAt
   ));
 
   try {
@@ -359,7 +373,7 @@ export async function processOutboundEmailJob(env: AppEnv, job: OutboundEmailJob
             SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END) AS sent_count
        FROM outbound_email_batches WHERE rfq_id = ?`
   ).bind(batch.rfq_id).first<{ total_count: number; sent_count: number }>();
-  if (summary && summary.total_count === BATCH_CODES.length && summary.sent_count === BATCH_CODES.length) {
+  if (summary && summary.total_count > 0 && summary.total_count === summary.sent_count) {
     const deadlineAt = new Date(Date.parse(sentAt) + rfqHardDeadlineSeconds(env) * 1000).toISOString();
     await env.DB.prepare(
       `UPDATE rfqs SET dispatch_status = 'WAITING', sent_at = COALESCE(sent_at, ?),

@@ -21,7 +21,8 @@ untracked `.claude/settings.local.json` remains user-owned and must stay out of 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `49fbfd94-552b-4130-a562-0aba54e9345c`
+  `899a108e-e7f5-4dbd-8832-9405488f1bcc` (DAC-alias + MS-DRA parser fix, deployed 2026-07-24;
+  `GET /api/v1/health` → `{"status":"ok"}`).
 - D1 database: `fcn-quote`; migrations in the repository currently run through
   `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
   top-five deployment; verify remote migration state again before any future migration.

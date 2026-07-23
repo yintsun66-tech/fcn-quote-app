@@ -2,13 +2,13 @@
 
 Updated: 2026-07-23 (Asia/Taipei)
 Branch: `feature/subject-branch-correlation`  
-Latest relevant commit: `a66ea8c fix(parser): NONE-barrier KI "NA" misread as ISSUER_REJECTED`
+Latest implementation commit: `83209d4 feat: accelerate live RFQ workflow`
 
 ## What is live
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version: `2c2e3f57-aa7c-4d8c-9cc3-39eca663eb0a`
+- Latest verified Cloudflare Worker version: `149c8fd9-c50f-48fc-9c33-d7435609b499`
 - Current deployment includes the ADMIN user-registration review dialog and the private-R2 outbound-email archive viewer.
 - The public API health endpoint returned `{ "status": "ok" }` after the latest deployment. The deployed frontend asset contains the registration-review feature markers.
 
@@ -25,7 +25,7 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
   - **使用者申請審核**: lists pending registrations and approves/rejects them with server-side ADMIN/CSRF checks and audit events.
   - **管理者寄件紀錄**: reads archived outbound subject/HTML/plain text from private R2 using authenticated admin endpoints.
 
-### Local Phase A–E acceleration work (implemented and verified; not committed/deployed)
+### Phase A–E acceleration work (committed, pushed, and deployed)
 
 - SG parser maps current reply tables by normalized headers and variable Underlying columns.
 - Inbound correlation may recover one RFQ tag from sanitized body content when the subject lost
@@ -39,6 +39,10 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 - No migration, dependency, lockfile, secret, or mailbox-address change.
 - Local verification: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test`
   (16 files / 70 tests); `pnpm run build` (Wrangler dry-run) all passed.
+- Production verification: `GET https://api.yintsun66.com/api/v1/health` returned HTTP 200 with
+  `{"status":"ok"}`; cache-bypassed `backend-client.js` contains the ADMIN timeline, provisional
+  ranking, and on-demand artifact markers. Deployed from `83209d4` as Worker version
+  `149c8fd9-c50f-48fc-9c33-d7435609b499`.
 
 ## Important current limitations / known gaps
 
@@ -47,9 +51,9 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 3. MS remains display-warning only (`MS（OBU不得承做）`). There is no approved account-level OBU attribute or enforcement rule.
 4. The true Cloudflare Browser Rendering capacity and email-product limits need observation under real traffic. Queue retries protect workflow progress but do not prove capacity.
 5. Several older design documents contain historical language such as “Phase 1 draft” or “no deployment.” Use current code, `wrangler.jsonc`, Git history, this handoff, and live verification for current state; update stale documents only in a scoped documentation task.
-6. **Issuer reply timing (observed 2026-07-23).** Many issuer replies arrive ~11–14 minutes after send. The current local Phase A–E change raises the hard deadline from 600s to 900s and adds a 420s soft reminder; this remains uncommitted and undeployed until the user requests release.
+6. **Issuer reply timing (observed 2026-07-23).** Many issuer replies arrive ~11–14 minutes after send. The deployed Phase A–E change raises the hard deadline from 600s to 900s and adds a 420s soft reminder. Existing RFQs retain their previously snapshotted deadline; the new timing applies to RFQs sent after deployment.
 7. **Issuer-specific reply gaps (observed 2026-07-23).** Triage method: `inbound_messages.status` = `PARSED` (on time), `LATE_REPLY` (after deadline), or absent (no reply); `normalized_quote_count = 0` means the reply was received but parsed to zero rows (format mismatch).
-   - **SG** replies use variable Underlying columns. The current local Phase A–E change maps SG by normalized headers and includes a two-underlying regression fixture; it remains uncommitted and undeployed.
+   - **SG** replies use variable Underlying columns. The deployed parser maps SG by normalized headers and includes a two-underlying regression fixture; confirm it against the next real forwarded SG reply.
    - **GS** has never appeared in `inbound_messages` — no GS reply ever reached the inbound address. Upstream matter (GS not quoting via this forward chain, or the bank mailbox not forwarding GS), not a parser bug.
    - **CA** replies rarely and has never succeeded (late or `UNMATCHED_RFQ`); effectively the same upstream/forwarding gap as GS.
    - A notable share of otherwise-valid replies land as `UNMATCHED_RFQ` (correlation failed); worth a separate look at whether the subject correlation code survives the bank forward chain.
@@ -62,10 +66,10 @@ The Cloudflare deployment and Git remote are separate facts. This branch was com
 
 ## Recent verification evidence
 
-For the current backend branch through commit `ff12ef5`:
+For the current backend branch through implementation commit `83209d4`:
 
 - `node --check backend-client.js` passed.
-- `pnpm test` passed: 14 test files, 57 tests.
+- `pnpm test` passed: 16 test files, 70 tests.
 - `pnpm run typecheck` passed.
 - `pnpm run build` passed (Worker deploy dry run).
 - Production deployment succeeded and uploaded the SG email-format assets (`app.js` and `backend/shared/email-formats.js`).

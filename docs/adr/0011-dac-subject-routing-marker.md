@@ -1,6 +1,6 @@
 # ADR 0011: DAC-family subject routing marker
 
-Status: Accepted  
+Status: Accepted
 Date: 2026-07-24
 
 ## Context
@@ -48,4 +48,3 @@ snapshotted according to ADR 0002. The new product marker must not change either
 - `backend/shared/email-formats.js` — `buildProductAwareSubject`, `buildInstitutionEmail`
 - `backend/src/outbound.ts` — product-aware `base_subject` snapshot
 - Tests: `backend/test/email-formats.test.ts`, `backend/test/outbound.test.ts`
-

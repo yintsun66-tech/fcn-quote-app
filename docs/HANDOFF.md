@@ -5,15 +5,15 @@ Updated: 2026-07-24 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`ae0c0e2 fix(parser): handle DAC replies and Barclays rejections`
+`23c084e fix(outbound): route DAC requests by subject`
 
 Production deployment record:
-Worker `4ca06f90-3bec-43eb-8d03-141c83d454ed` deployed 2026-07-24 from `ae0c0e2`;
+Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` deployed 2026-07-24 from `23c084e`;
 recorded in this handoff update.
 
-Branch remote state when this handoff was updated: `origin/feature/subject-branch-correlation`
-contains commits through `9c1442a`; the DAC subject-routing work described below remains
-uncommitted and undeployed. The branch is not merged to `main`.
+Branch remote state when this handoff was updated: the deployment-record push includes
+implementation commit `23c084e` and this handoff update on
+`origin/feature/subject-branch-correlation`. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -22,9 +22,10 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `4ca06f90-3bec-43eb-8d03-141c83d454ed` (SG/UBS DAC parsing and BARCLAYS Comet rejection
-  handling plus all earlier behavior, deployed 2026-07-24; `GET /api/v1/health` returned
-  HTTP 200 with `{"status":"ok"}`).
+  `2de5b070-6feb-4f1f-bf28-e710a0589793` (DAC-family outbound subject routing plus all
+  earlier behavior, deployed 2026-07-24; `GET /api/v1/health` returned HTTP 200 with
+  `{"status":"ok"}`, and the live shared email asset contains the product-aware helper and
+  `DAC/DRA` marker).
 - D1 database: `fcn-quote`; migrations in the repository currently run through
   `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
   top-five deployment; verify remote migration state again before any future migration.
@@ -206,7 +207,7 @@ the deployment. Treat that as the smallest remaining UI verification task.
   automatically reparsed or reranked; use a new RFQ to verify the correction unless a separately
   reviewed, versioned reprocessing workflow is implemented.
 
-## DAC subject-routing marker (local, verified, not committed or deployed)
+## DAC subject-routing marker (committed, pushed, and deployed)
 
 - DAC-family outbound requests now insert the literal `DAC/DRA` immediately after
   `FCN(T+7)` and before the branch label and correlation tags. FCN-only subjects remain
@@ -221,9 +222,11 @@ the deployment. Treat that as the smallest remaining UI verification task.
   marks the email as DAC rather than silently omitting the DAC routing signal. A separate
   product-batch design requires explicit approval.
 - Verification: shared-module syntax check, TypeScript source/test checks, the full test suite
-  (16 files / 84 tests), and the Cloudflare dry-run build passed. No real email was sent.
-- Implementation and ADR 0011 are local working-tree changes only. Commit, push, and deploy
-  still require an explicit user request.
+  (16 files / 84 tests), and the Cloudflare dry-run build passed. Post-deploy health and live
+  asset checks returned HTTP 200. No real email was sent.
+- Implementation commit `23c084e` is deployed as Worker
+  `2de5b070-6feb-4f1f-bf28-e710a0589793` and pushed to
+  `origin/feature/subject-branch-correlation`.
 
 ## Production gaps and cautions
 

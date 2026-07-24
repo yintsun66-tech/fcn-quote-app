@@ -11,8 +11,9 @@ Production deployment record:
 Worker `4ca06f90-3bec-43eb-8d03-141c83d454ed` deployed 2026-07-24 from `ae0c0e2`;
 recorded in this handoff update.
 
-Branch remote state when this handoff was updated: local commits are not pushed to
-`origin/feature/subject-branch-correlation`; not merged to `main`.
+Branch remote state when this handoff was updated: `origin/feature/subject-branch-correlation`
+contains commits through `9c1442a`; the DAC subject-routing work described below remains
+uncommitted and undeployed. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -201,9 +202,28 @@ the deployment. Treat that as the smallest remaining UI verification task.
 - Verification completed locally: source/test TypeScript checks passed, the full suite passed
   (16 files / 79 tests), and the Cloudflare Worker dry-run build passed.
 - Implementation commit `ae0c0e2` is deployed as Worker
-  `4ca06f90-3bec-43eb-8d03-141c83d454ed` but is not pushed. Existing finalized RFQs are not
+  `4ca06f90-3bec-43eb-8d03-141c83d454ed` and is pushed. Existing finalized RFQs are not
   automatically reparsed or reranked; use a new RFQ to verify the correction unless a separately
   reviewed, versioned reprocessing workflow is implemented.
+
+## DAC subject-routing marker (local, verified, not committed or deployed)
+
+- DAC-family outbound requests now insert the literal `DAC/DRA` immediately after
+  `FCN(T+7)` and before the branch label and correlation tags. FCN-only subjects remain
+  unchanged.
+- The rule recognizes canonical `DAC` plus the issuer aliases `DRA`, `WRA`, and
+  `Range Accrual`. The shared browser/Worker email module owns the rule, while the Worker
+  snapshots the product-aware subject into `outbound_email_batches.base_subject`.
+- Marker insertion is idempotent, so Queue retries do not duplicate `DAC/DRA`; recipients,
+  HTML tables, sender settings, correlation tokens, and inbound parser rules are unchanged.
+- The current model still permits mixed FCN/DAC trades in one RFQ. Because an issuer chooses
+  one pricing module from one email subject, any mixed request is ambiguous; current behavior
+  marks the email as DAC rather than silently omitting the DAC routing signal. A separate
+  product-batch design requires explicit approval.
+- Verification: shared-module syntax check, TypeScript source/test checks, the full test suite
+  (16 files / 84 tests), and the Cloudflare dry-run build passed. No real email was sent.
+- Implementation and ADR 0011 are local working-tree changes only. Commit, push, and deploy
+  still require an explicit user request.
 
 ## Production gaps and cautions
 

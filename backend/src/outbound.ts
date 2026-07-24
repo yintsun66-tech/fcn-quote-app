@@ -3,6 +3,7 @@ import {
   MAIL_INSTITUTION_ORDER,
   branchSubjectLabel,
   buildInstitutionEmail,
+  buildProductAwareSubject,
   type MailTradeRecord
 } from "../shared/email-formats.js";
 import { archiveOutboundEmail } from "./admin-outbound";
@@ -167,6 +168,7 @@ export async function sendRfq(
   // Snapshot the requester's branch label into the per-send base subject (see ADR 0002).
   const branchLabel = branchSubjectLabel(session.user.branchName);
   const branchSuffix = branchLabel ? ` ${branchLabel}` : "";
+  const mailRecords = current.trades.map(tradeRecord);
   const jobs: OutboundEmailJob[] = [];
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
@@ -195,7 +197,16 @@ export async function sendRfq(
       `INSERT INTO outbound_email_batches
         (id, rfq_id, batch_code, sender, recipient, base_subject, correlation_token_hash, status, queued_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?)`
-    ).bind(batchId, rfqId, batchCode, env.OUTBOUND_FROM, env.OUTBOUND_TO, `${profile.subject}${branchSuffix}`, tokenHash, queuedAt));
+    ).bind(
+      batchId,
+      rfqId,
+      batchCode,
+      env.OUTBOUND_FROM,
+      env.OUTBOUND_TO,
+      `${buildProductAwareSubject(profile.subject, mailRecords)}${branchSuffix}`,
+      tokenHash,
+      queuedAt
+    ));
     statements.push(env.DB.prepare(
       `INSERT INTO jobs
         (id, job_type, rfq_id, related_entity_id, idempotency_key, status, available_at, created_at, updated_at)

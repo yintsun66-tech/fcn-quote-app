@@ -164,17 +164,27 @@ export function buildCorrelatedSubject(baseSubject, rfqToken, batchCode) {
   return `${baseSubject} [RFQ:${rfqToken}][BATCH:${batchCode}]`;
 }
 
+export function buildProductAwareSubject(baseSubject, records) {
+  const hasDacProduct = records.some(record => {
+    const product = recordValue(record, "product").normalize("NFKC").replace(/\s+/g, " ").toUpperCase();
+    return ["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(product);
+  });
+  if (!hasDacProduct || /(?:^|\s)DAC\/DRA(?:\s|$)/i.test(baseSubject)) return baseSubject;
+  if (!baseSubject.includes("FCN(T+7)")) throw new Error("Missing FCN(T+7) subject anchor.");
+  return baseSubject.replace("FCN(T+7)", "FCN(T+7) DAC/DRA");
+}
+
 export function buildInstitutionEmail(key, records, correlation) {
   const institution = EMAIL_INSTITUTIONS[key];
   if (!institution) throw new Error("Unknown email institution.");
   const dataRows = records.map(record => institution.columns.map(column => String(column.value(record) ?? "")));
-  const subjectBase = correlation?.subjectBase ?? institution.subject;
+  const subjectBase = buildProductAwareSubject(correlation?.subjectBase ?? institution.subject, records);
   return {
     key,
     label: institution.label,
     subject: correlation
       ? buildCorrelatedSubject(subjectBase, correlation.rfqToken, correlation.batchCode ?? key)
-      : institution.subject,
+      : subjectBase,
     html: buildEmailHtml(institution.columns, dataRows),
     plainText: buildEmailBody(institution.columns, dataRows),
   };

@@ -5,6 +5,7 @@ import { sha256Text } from "../src/crypto";
 import { outboundArchiveKey } from "../src/admin-outbound";
 import { processOutboundEmailJob, sendRfq } from "../src/outbound";
 import type { AppEnv, OutboundEmailJob, SessionContext } from "../src/types";
+import { EMAIL_INSTITUTIONS, branchSubjectLabel } from "../shared/email-formats.js";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
 const BASE_URL = "https://api.yintsun66.com";
@@ -186,7 +187,7 @@ describe("outbound RFQ email workflow", () => {
          underlyings_json, strike_pct, ko_type, ko_barrier_pct, coupon_pa_pct,
          upfront_or_note_price_pct, barrier_type, ki_barrier_pct,
          observation_frequency_months, otc, target_field, matching_key_hash, created_at, frozen_at)
-       VALUES (?, ?, 1, 'T01', 'FCN', 'USD', '21-Jul-26', 7, 6, 1, '["AAPL UW"]', 85,
+       VALUES (?, ?, 1, 'T01', 'DAC', 'USD', '21-Jul-26', 7, 6, 1, '["AAPL UW"]', 85,
                'Daily Memory', 100, NULL, 98, 'NONE', NULL, 1, 'Note', 'COUPON', 'matching-key-2', ?, ?)`
     ).bind("trd_10000000-0000-4000-8000-00000000000b", rfqId, now, now).run();
 
@@ -207,8 +208,12 @@ describe("outbound RFQ email workflow", () => {
     ).bind(rfqId).all<{ issuer: string }>();
     expect(issuers.results.map(row => row.issuer)).toEqual(["BNP", "SG"]);
     const batches = await testEnv.DB.prepare(
-      "SELECT batch_code FROM outbound_email_batches WHERE rfq_id = ? ORDER BY batch_code"
-    ).bind(rfqId).all<{ batch_code: string }>();
-    expect(batches.results.map(row => row.batch_code)).toEqual(["BMJB", "SG"]);
+      "SELECT batch_code, base_subject FROM outbound_email_batches WHERE rfq_id = ? ORDER BY batch_code"
+    ).bind(rfqId).all<{ batch_code: string; base_subject: string }>();
+    const branch = branchSubjectLabel(session.user.branchName);
+    expect(batches.results).toEqual([
+      { batch_code: "BMJB", base_subject: `${EMAIL_INSTITUTIONS.BMJB?.subject} DAC/DRA ${branch}` },
+      { batch_code: "SG", base_subject: `${EMAIL_INSTITUTIONS.SG?.subject} DAC/DRA ${branch}` }
+    ]);
   });
 });

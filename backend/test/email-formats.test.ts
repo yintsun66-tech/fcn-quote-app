@@ -5,6 +5,7 @@ import {
   branchSubjectLabel,
   buildCorrelatedSubject,
   buildInstitutionEmail,
+  buildProductAwareSubject,
   type MailTradeRecord
 } from "../shared/email-formats.js";
 
@@ -109,6 +110,30 @@ describe("shared issuer email formats", () => {
     expect(branchSubjectLabel(null)).toBe("");
     expect(branchSubjectLabel("台".repeat(30)).length).toBeLessThanOrEqual(20 + 2);
   });
+
+  it("places the DAC/DRA routing marker after FCN(T+7) and before branch/correlation data", () => {
+    const code = "K7P2R9QTBM";
+    const branch = branchSubjectLabel("002");
+    const institutionSubject = EMAIL_INSTITUTIONS.SG?.subject ?? "";
+    const subjectBase = `${institutionSubject} ${branch}`;
+    const dacTrade = { ...trade, product: "DAC" };
+
+    expect(buildInstitutionEmail("SG", [dacTrade]).subject)
+      .toBe(`${institutionSubject} DAC/DRA`);
+    expect(buildInstitutionEmail("SG", [dacTrade], { rfqToken: code, batchCode: "SG", subjectBase }).subject)
+      .toBe(`${institutionSubject} DAC/DRA ${branch} [RFQ:${code}][BATCH:SG]`);
+    expect(buildProductAwareSubject(`${institutionSubject} DAC/DRA ${branch}`, [dacTrade]))
+      .toBe(`${institutionSubject} DAC/DRA ${branch}`);
+  });
+
+  it.each(["DAC", "DRA", "WRA", "Range Accrual"])(
+    "recognizes %s as a DAC-family subject-routing alias",
+    product => {
+      const baseSubject = EMAIL_INSTITUTIONS.UBS?.subject ?? "";
+      expect(buildProductAwareSubject(baseSubject, [{ ...trade, product }]))
+        .toBe(`${baseSubject} DAC/DRA`);
+    }
+  );
 
   it("places the branch label before the correlation tags via subjectBase", () => {
     const code = "K7P2R9QTBM";

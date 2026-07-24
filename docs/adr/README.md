@@ -43,5 +43,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0008: Recoverable user RFQ workspace](0008-recoverable-rfq-workspace.md)
 - [ADR 0009: Selective issuer send](0009-selective-issuer-send.md)
 - [ADR 0010: Efficient RFQ polling and versioned snapshots](0010-efficient-rfq-polling.md)
+- [ADR 0011: DAC-family subject routing marker](0011-dac-subject-routing-marker.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

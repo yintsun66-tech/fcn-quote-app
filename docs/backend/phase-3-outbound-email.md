@@ -9,8 +9,11 @@ Status: implemented and locally verified on 2026-07-21. Cloudflare D1 migrations
 - Sending snapshots eleven expected issuers; `BMJB` represents BNP, MS, JPM, and BARCLAYS as four separate expected replies.
 - `POST /api/v1/rfqs/:rfqId/send` requires an authenticated owner, same-origin request, CSRF token, validated RFQ, and `Idempotency-Key`.
 - The sender and recipient are fixed server-side to `rfq@yintsun66.com` and `i14053@firstbank.com.tw`.
-- Subjects retain the approved base subject and append `[RFQ:<opaque-token>][BATCH:<code>]`.
-- The opaque token is deterministically derived with the server HMAC secret. Only its SHA-256 hash is stored as a dedicated correlation value; the original token is reconstructed only while composing the outbound message.
+- FCN subjects retain the approved base subject. DAC-family requests insert `DAC/DRA`
+  immediately after `FCN(T+7)` and before the branch label.
+- Subjects append the deterministic short code `[RFQ:<code>][BATCH:<code>]`. Only its SHA-256
+  hash is stored as a dedicated correlation value; the code is reconstructed while composing
+  the outbound message.
 - The HTML-only trailing empty-cell workaround remains in place for UBS, CITI, and CA.
 - Each email batch has an observable D1 job and is sent through `fcn-outbound-email` with `fcn-outbound-email-dlq` as its dead-letter queue.
 - After all eight batches are marked sent, the RFQ enters `WAITING` and receives a deadline ten minutes after `sent_at`.

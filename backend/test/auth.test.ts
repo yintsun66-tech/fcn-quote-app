@@ -263,6 +263,36 @@ describe("registration and authentication", () => {
     expect(demotedFlag?.is_privileged_support).toBe(0);
   });
 
+  it("surfaces blocked duplicate registrations to reviewers without creating a user", async () => {
+    // First registration creates a pending user.
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase1", "41001")) }, "203.0.113.41");
+    // Same login account, different employee number -> UNIQUE collision on username_normalized.
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase1", "41002")) }, "203.0.113.42");
+    // Same employee number, different login account -> UNIQUE collision on employee_number_lookup_hash.
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase9", "41001")) }, "203.0.113.43");
+
+    // No extra user rows were created for the two duplicates.
+    const dupbase1Count = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username_normalized = 'dupbase1'").first<{ n: number }>();
+    expect(dupbase1Count?.n).toBe(1);
+    const dupbase9 = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username_normalized = 'dupbase9'").first<{ n: number }>();
+    expect(dupbase9?.n).toBe(0);
+
+    const adminLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+    }, "203.0.113.44");
+    const adminAuth = authentication(adminLogin);
+    const listResponse = await api("/api/v1/admin/registrations", { headers: { cookie: adminAuth.cookie } });
+    expect(listResponse.status).toBe(200);
+    const body = await listResponse.json<{
+      duplicates: { windowDays: number; count: number; latestAt: string | null; byField: { employeeNumber: number; username: number; unknown: number } };
+    }>();
+    expect(body.duplicates.count).toBeGreaterThanOrEqual(2);
+    expect(body.duplicates.byField.username).toBeGreaterThanOrEqual(1);
+    expect(body.duplicates.byField.employeeNumber).toBeGreaterThanOrEqual(1);
+    expect(body.duplicates.latestAt).toBeTruthy();
+  });
+
   it("rate-limits repeated failed logins without counting successful logins", async () => {
     const ip = "198.51.100.19";
     for (let attempt = 0; attempt < 5; attempt += 1) {

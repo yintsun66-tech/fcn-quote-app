@@ -46,6 +46,8 @@ Returns the minimum current-user profile needed by the UI. It never returns pass
 
 Registration review requires the protected administration boundary and an effective role of `ADMIN` or `PS`. Approval/rejection records actor, time, and reason.
 
+`GET /api/v1/admin/registrations` also returns a `duplicates` summary of recently blocked duplicate registrations (`{ windowDays, count, latestAt, byField: { employeeNumber, username, unknown } }`). A duplicate registration (re-used login account or employee number) is intentionally answered with the same generic `202` as a new one to preserve anti-enumeration and creates no user row; this summary lets a reviewer see how many were blocked and which unique field collided, without ever exposing the attempted value.
+
 ### Account management endpoints (ADR 0012)
 
 - `GET /api/v1/admin/accounts` — all accounts with `id`, `username`, `displayName`, `branchName`, effective `role`, `status`, `createdAt`, and `lastSeenAt` (approximate last-online = `MAX(user_sessions.last_seen_at)`). Employee numbers are intentionally excluded. Requires `ADMIN` or `PS`.

@@ -82,7 +82,15 @@ export async function register(request: Request, env: AppEnv): Promise<Response>
     await insertAudit(env, "REGISTRATION_SUBMITTED", "USER", userId, null, requestId(request));
   } catch (error) {
     if (!(error instanceof Error) || !/UNIQUE constraint failed/i.test(error.message)) throw error;
-    await insertAudit(env, "REGISTRATION_DUPLICATE", "USER", null, null, requestId(request));
+    // Record which unique field collided (never the value) so administrators can see whether a
+    // blocked duplicate was a re-used employee number or login account. The public response below
+    // stays identical for new and duplicate registrations to preserve anti-enumeration.
+    const field = /employee_number_lookup_hash/i.test(error.message)
+      ? "employeeNumber"
+      : /username_normalized/i.test(error.message)
+        ? "username"
+        : "unknown";
+    await insertAudit(env, "REGISTRATION_DUPLICATE", "USER", null, null, requestId(request), { field });
   }
   return genericRegistrationResponse();
 }
@@ -218,7 +226,43 @@ export async function listRegistrations(env: AppEnv, session: SessionContext): P
     employeeNumber: await decryptEmployeeNumber(env.EMPLOYEE_DATA_KEY, user.employee_number_ciphertext, user.employee_number_iv),
     createdAt: user.created_at
   })));
-  return jsonResponse({ registrations });
+  const duplicates = await recentDuplicateRegistrations(env);
+  return jsonResponse({ registrations, duplicates });
+}
+
+// Summarizes recently blocked duplicate registrations (no account was created) so the review
+// screen can explain why a fresh "registration" never reached the pending list. Only counts,
+// which unique field collided, and timestamps are exposed — never the attempted value.
+async function recentDuplicateRegistrations(env: AppEnv): Promise<{
+  windowDays: number;
+  count: number;
+  latestAt: string | null;
+  byField: { employeeNumber: number; username: number; unknown: number };
+}> {
+  const windowDays = 7;
+  const sinceIso = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+  const rows = await env.DB.prepare(
+    `SELECT created_at, safe_metadata_json FROM audit_events
+      WHERE action = 'REGISTRATION_DUPLICATE' AND created_at >= ?
+      ORDER BY created_at DESC LIMIT 200`
+  ).bind(sinceIso).all<{ created_at: string; safe_metadata_json: string }>();
+  const byField = { employeeNumber: 0, username: 0, unknown: 0 };
+  for (const row of rows.results) {
+    let field = "unknown";
+    try {
+      const parsed = JSON.parse(row.safe_metadata_json || "{}") as { field?: unknown };
+      if (parsed.field === "employeeNumber" || parsed.field === "username") field = parsed.field;
+    } catch {
+      // treat unparseable metadata as unknown
+    }
+    byField[field as keyof typeof byField] += 1;
+  }
+  return {
+    windowDays,
+    count: rows.results.length,
+    latestAt: rows.results[0]?.created_at ?? null,
+    byField
+  };
 }
 
 export async function approveRegistration(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {

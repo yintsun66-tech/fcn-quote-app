@@ -94,9 +94,10 @@
     <dialog id="backendRegistrationReview" class="backend-dialog backend-registration-dialog">
       <section class="backend-panel">
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>使用者申請審核</h2></div><button id="closeBackendRegistrationReview" type="button" class="secondary">關閉</button></div>
-        <p class="backend-archive-note">僅管理者可檢視待審核的申請資料。核准或拒絕都會留下稽核紀錄。</p>
+        <p class="backend-archive-note">僅管理者或 PS 可檢視待審核的申請資料。核准或拒絕都會留下稽核紀錄。</p>
         <p id="backendRegistrationReviewError" class="backend-error" role="alert"></p>
         <p id="backendRegistrationReviewStatus" class="backend-admin-status" role="status"></p>
+        <p id="backendRegistrationDuplicateNote" class="backend-dup-note" role="status" hidden></p>
         <div id="backendRegistrationReviewList" class="backend-registration-list"></div>
       </section>
     </dialog>
@@ -157,6 +158,7 @@
   const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
   const adminRegistrationReviewError = document.querySelector("#backendRegistrationReviewError");
   const adminRegistrationReviewStatus = document.querySelector("#backendRegistrationReviewStatus");
+  const adminRegistrationDuplicateNote = document.querySelector("#backendRegistrationDuplicateNote");
   const adminAccountsButton = document.querySelector("#backendAdminAccounts");
   const adminAccountsDialog = document.querySelector("#backendAccounts");
   const adminAccountsList = document.querySelector("#backendAccountsList");
@@ -422,12 +424,30 @@
     </tr>`).join("")}</tbody></table>`;
   }
 
+  function renderDuplicateNote(duplicates) {
+    if (!duplicates || !duplicates.count) {
+      adminRegistrationDuplicateNote.hidden = true;
+      adminRegistrationDuplicateNote.textContent = "";
+      return;
+    }
+    const bits = [];
+    if (duplicates.byField?.employeeNumber) bits.push(`${duplicates.byField.employeeNumber} 筆行編已存在`);
+    if (duplicates.byField?.username) bits.push(`${duplicates.byField.username} 筆登入帳號已存在`);
+    if (duplicates.byField?.unknown) bits.push(`${duplicates.byField.unknown} 筆無法判別`);
+    const breakdown = bits.length ? `（${bits.join("、")}）` : "";
+    const latest = duplicates.latestAt ? `，最近一次 ${formatDateTime(duplicates.latestAt)}` : "";
+    adminRegistrationDuplicateNote.textContent = `⚠ 近 ${duplicates.windowDays} 天有 ${duplicates.count} 筆重複申請被系統擋下${breakdown}${latest}。這些申請的行編或登入帳號已存在，因此未建立帳號、也不會出現在下方名單。`;
+    adminRegistrationDuplicateNote.hidden = false;
+  }
+
   async function loadAdminRegistrations(statusMessage = "") {
     adminRegistrationReviewError.textContent = "";
     adminRegistrationReviewStatus.textContent = statusMessage;
     adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">正在載入待審核申請…</p>";
     try {
-      renderAdminRegistrationList((await request("/admin/registrations")).registrations);
+      const data = await request("/admin/registrations");
+      renderAdminRegistrationList(data.registrations);
+      renderDuplicateNote(data.duplicates);
     } catch (error) {
       adminRegistrationReviewError.textContent = error.message;
       adminRegistrationReviewList.innerHTML = "";

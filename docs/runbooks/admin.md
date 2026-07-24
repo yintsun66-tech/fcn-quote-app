@@ -54,6 +54,22 @@ sessions end immediately.
 
 Do not capture screenshots or copy employee numbers outside the approved administrative purpose.
 
+### When a new registration never appears in the pending list
+
+The review screen shows a note like「近 7 天有 N 筆重複申請被系統擋下（… 行編已存在 / 登入帳號已存在 …）」when
+recent duplicate registrations were blocked. A registration whose **login account or employee
+number already exists** is intentionally answered with the same「已受理」message as a new one (to
+avoid revealing which accounts exist) but **creates no account**, so it never reaches the pending
+list. If someone reports a "new" account that is missing:
+
+1. Check the duplicate note for a matching time and which field collided.
+2. If the **employee number (行編)** already exists, that person already has an account — have
+   them log in with it (or use the recovery process); the same 行編 cannot be registered twice.
+3. If the **login account (登入帳號)** already exists, ask them to re-register with a different,
+   unused login account.
+
+The note reports only counts, the colliding field, and timestamps — never the attempted value.
+
 ## View outbound email records
 
 1. Log in as an ADMIN.

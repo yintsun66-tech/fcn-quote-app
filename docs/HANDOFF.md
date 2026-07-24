@@ -12,11 +12,10 @@ Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` deployed 2026-07-25 from `0913f16`
 applying migration `0010_ps_privilege.sql` to remote D1 `fcn-quote`.
 Previous: Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
 
-Branch state when this handoff was written: local `feature/subject-branch-correlation` is at
-`0913f16` (PS tier + the previously-uncommitted 2026-07-25 doc alignment, committed together).
-**This commit is NOT yet pushed to `origin`** — production runs code that is ahead of the
-remote branch. The branch is not merged to `main`. Push is the remaining VCS step and needs
-explicit authorization.
+Branch state when this handoff was written: `feature/subject-branch-correlation` is at `482ccdd`
+locally and on `origin` (they match). `0913f16` = PS tier + the previously-uncommitted
+2026-07-25 doc alignment (committed together); `482ccdd` = this deployment record. The branch is
+not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -59,7 +58,7 @@ See [ADR 0012](adr/0012-ps-tier-and-account-management.md).
 - **UI (`backend-client.js`, `styles.css`):** new **所有帳號列表** button + dialog, visible to ADMIN/PS; registration-review button now visible to PS; per-row 升級為PS / 降級為一般 / 剔除 actions with confirmation. Server remains the source of truth.
 - **Tests:** `backend/test/auth.test.ts` adds a PS lifecycle test (list, promote, PS approve, PS disable, ADMIN/PS-protection 409s, USER 403s, demote). Suite is **16 files / 85 tests** passing.
 - **Verification:** local — `node --check backend-client.js`, `pnpm run typecheck`, `pnpm test` (16 files / 85), `pnpm run build` (dry run) all passed; `worker-configuration.d.ts` no diff. Post-deploy — API health 200; live `backend-client.js` carries all four Chinese action markers plus `/admin/accounts`; unauth `/api/v1/admin/accounts` returns 401.
-- **Still owed:** `git push` of `0913f16` to `origin` (pending authorization — production is ahead of the remote branch); an authenticated browser walkthrough (promote a test USER to PS, confirm PS can approve/剔除 but cannot touch ADMIN/PS rows, and that a disabled user is logged out). No merge to `main`.
+- **Still owed:** an authenticated browser walkthrough (promote a test USER to PS, confirm PS can approve/剔除 but cannot touch ADMIN/PS rows, and that a disabled user is logged out). Commit/migrate/deploy/push are all complete; no merge to `main`.
 
 ## Implemented system
 

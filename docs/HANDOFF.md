@@ -5,18 +5,18 @@ Updated: 2026-07-25 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`fd7a380 feat(admin): surface blocked duplicate registrations to reviewers`
+`0bbe159 feat(admin): look up an account by employee number (行編)`
 
 Production deployment record:
-Worker `364a345e-1910-4ec3-a370-337acdebc483` deployed 2026-07-25 from `fd7a380`
-(no D1 migration; reads existing `audit_events`).
-Previous: Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` from `0913f16` (PS tier + migration 0010);
-before that `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
+Worker `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5` deployed 2026-07-25 from `0bbe159`
+(no D1 migration; new ADMIN-only employee-number lookup).
+Previous: `364a345e-...` from `fd7a380` (duplicate-registration visibility);
+`25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
-Branch state when this handoff was written: `feature/subject-branch-correlation` is at `fd7a380`
-locally and on `origin` (they match). `0913f16` = PS tier + the previously-uncommitted
-2026-07-25 doc alignment; `482ccdd` = PS deployment record; `fd7a380` = duplicate-registration
-visibility. The branch is not merged to `main`.
+Branch state when this handoff was written: `feature/subject-branch-correlation` is at `0bbe159`
+locally and on `origin` (they match). Recent commits: `0913f16` PS tier (+2026-07-25 doc
+alignment) → `482ccdd` PS deploy record → `fd7a380` duplicate-registration visibility → `0bbe159`
+employee-number lookup. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -25,13 +25,14 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `364a345e-1910-4ec3-a370-337acdebc483` (duplicate-registration visibility on the review
-  screen, plus PS tier / all-accounts management and all earlier behavior, deployed 2026-07-25;
-  `GET /api/v1/health` returned HTTP 200 with `{"status":"ok"}`; the live `backend-client.js`
-  carries `renderDuplicateNote` / `backendRegistrationDuplicateNote` / 「筆重複申請被系統擋下」 and,
-  from the prior deploy, 所有帳號列表 / 升級為PS / 降級為一般 / 剔除 + `/admin/accounts`;
-  `styles.css` carries `backend-dup-note`). Previous verified versions:
-  `25d32525-71ab-4aa7-9e90-5fefcea00a05` from `0913f16`; `2de5b070-...` from `23c084e`.
+  `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5` (ADMIN-only employee-number lookup, plus
+  duplicate-registration visibility, PS tier / all-accounts management and all earlier behavior,
+  deployed 2026-07-25; `GET /api/v1/health` returned HTTP 200; unauthenticated
+  `POST /api/v1/admin/accounts/lookup` returns 401; the live `backend-client.js` carries
+  `lookupAccountByEmployee` / 「以行編查詢帳號」 / `/admin/accounts/lookup` plus the prior
+  `renderDuplicateNote` and 所有帳號列表 markers; `styles.css` carries `backend-account-lookup`).
+  Previous verified versions: `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
+  `2de5b070-...` from `23c084e`.
 - D1 database: `fcn-quote`; migrations applied to remote D1 now run through
   `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
   applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
@@ -79,9 +80,11 @@ answered with the same generic `202` as a new one (anti-enumeration, [auth.ts](.
 - **Diagnosed case:** account `99999` — login `99999` does not exist and pending count is 0, so
   its blocked duplicate was an **employee-number (行編) collision**: 行編 `99999` already belongs to
   an existing ACTIVE account under a different login name. Remedy: that person logs in with the
-  existing account (or password recovery); the same 行編 cannot be registered twice. Identifying
-  *which* existing account owns 行編 99999 would require decrypting employee numbers with the
-  Worker key (not done; available on request).
+  existing account (or password recovery); the same 行編 cannot be registered twice.
+- **Identifying the account (`0bbe159`):** an ADMIN-only 「以行編查詢帳號」 lookup was added to the
+  所有帳號列表 dialog (`POST /api/v1/admin/accounts/lookup`, matched by keyed hash, audited without
+  the queried value). To find who owns 行編 99999, an ADMIN opens 所有帳號列表, enters `99999`, and
+  chooses 查詢.
 
 ## Implemented system
 

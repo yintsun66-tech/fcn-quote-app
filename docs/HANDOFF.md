@@ -5,13 +5,13 @@ Updated: 2026-07-24 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`65a233a perf(rfq): reduce unchanged polling load`
+`ae0c0e2 fix(parser): handle DAC replies and Barclays rejections`
 
 Production deployment record:
-Worker `66384b5b-42fe-4032-a9c0-79a033b6eb96` deployed 2026-07-24 from `65a233a`;
+Worker `4ca06f90-3bec-43eb-8d03-141c83d454ed` deployed 2026-07-24 from `ae0c0e2`;
 recorded in this handoff update.
 
-Branch remote state when this handoff was updated: synchronized with
+Branch remote state when this handoff was updated: local commits are not pushed to
 `origin/feature/subject-branch-correlation`; not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
@@ -21,10 +21,9 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `66384b5b-42fe-4032-a9c0-79a033b6eb96` (efficient polling + all earlier selective-send and
-  DAC/DRA behavior, deployed 2026-07-24; `GET /api/v1/health` → `{"status":"ok"}`; the deployed
-  `backend-client.js` carries the summary/snapshot routes, hidden-document pause and adaptive
-  polling).
+  `4ca06f90-3bec-43eb-8d03-141c83d454ed` (SG/UBS DAC parsing and BARCLAYS Comet rejection
+  handling plus all earlier behavior, deployed 2026-07-24; `GET /api/v1/health` returned
+  HTTP 200 with `{"status":"ok"}`).
 - D1 database: `fcn-quote`; migrations in the repository currently run through
   `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
   top-five deployment; verify remote migration state again before any future migration.
@@ -184,7 +183,7 @@ the deployment. Treat that as the smallest remaining UI verification task.
   client contains `/rfqs/summary`, `/snapshot`, `document.hidden`, and adaptive-polling markers.
 - Not yet verified: an authenticated browser walkthrough and a live 50-user read-path load test.
 
-## Local issuer-parser corrections awaiting commit/deployment
+## Issuer-parser corrections committed and deployed
 
 - A production RFQ diagnostic proved that mail delivery, correlation and Queue processing
   completed, but valid DAC replies from SG and UBS were discarded by product recognition.
@@ -201,9 +200,10 @@ the deployment. Treat that as the smallest remaining UI verification task.
   D1 migration, binding, dependency, lockfile or outbound-email format change.
 - Verification completed locally: source/test TypeScript checks passed, the full suite passed
   (16 files / 79 tests), and the Cloudflare Worker dry-run build passed.
-- These changes are not committed, pushed or deployed. Existing finalized RFQs are not
-  automatically reparsed or reranked; use a new RFQ after deployment unless a separately reviewed,
-  versioned reprocessing workflow is implemented.
+- Implementation commit `ae0c0e2` is deployed as Worker
+  `4ca06f90-3bec-43eb-8d03-141c83d454ed` but is not pushed. Existing finalized RFQs are not
+  automatically reparsed or reranked; use a new RFQ to verify the correction unless a separately
+  reviewed, versioned reprocessing workflow is implemented.
 
 ## Production gaps and cautions
 
@@ -236,16 +236,12 @@ the deployment. Treat that as the smallest remaining UI verification task.
    versioned recalculation; do not overwrite historical R2 objects.
 10. `main` does not contain the current backend feature branch. Do not merge or copy changes
     between branches without an explicit user request and a clean diff review.
-11. **DAC-architecture parsing (fixed 2026-07-24, except SG).** Issuers label the DAC product
-    differently — `DRA` (Nomura/DBS/SG/GS/CA/Citi), `WRA` (UBS), `Range Accrual` (MS) — and the
-    parser previously recognized only `DAC`, so every non-BNP DAC reply parsed to zero rows. Fixed:
-    `product()` now maps DRA/WRA/Range Accrual → canonical DAC, and MS uses a separate DRA column
-    map (its Range Accrual reply inserts "Accrual Barrier" and "Fixed Coupon (m)" columns, shifting
-    Put Strike/KI/KO/Non-Call/Note Price — MS FCN and DRA genuinely differ per the reference
-    workbook). Every other issuer's DAC uses the same columns as FCN (verified via identical reply
-    headers in the spec; the spec's shifted data rows are display-compacted, not a real layout
-    change). **Still open: SG DAC** — SG derives the product from its "Fixed Coupons = All Periods"
-    cell (FCN only) and the spec has no SG DRA layout; it needs a real SG DRA reply sample to map.
+11. **DAC-architecture parsing (updated 2026-07-24).** DRA/WRA/Range Accrual aliases normalize
+    to canonical DAC, MS uses its separate shifted DRA layout, UBS reply-only `VMRAN` is recognized,
+    and SG derives DAC from validated 1-24 fixed-coupon period values while retaining
+    `All Periods` as FCN. These corrections are deployed, but a new authorized live RFQ is still
+    required to prove SG/UBS end to end. The accepted BARCLAYS DAC outbound product code remains
+    unknown; do not guess or change the shared BMJB format without issuer/bank confirmation.
 
 ## User-owned/untracked work to preserve
 
@@ -275,9 +271,9 @@ the deployment. Treat that as the smallest remaining UI verification task.
    each occurred.
 7. End-to-end checks still owed for the 2026-07-24 deploy (need an authorized real RFQ): the issuer
    picker on 「發送詢價條件」 and per-issuer sending (BMJB grouping, ADR 0009); the DAC/DRA
-   floating-income note on the quote image; and the DAC-alias / MS-DRA parser fix against real
-   DAC/DRA replies. Known open items: SG DAC layout needs a real sample (gap 11); CA reply
-   latency (gap 5).
+   floating-income note on the quote image; and the SG DAC / UBS VMRAN parser corrections against
+   a new live reply. Known open items: BARCLAYS DAC product code (gap 11) and CA reply latency
+   (gap 5).
 
 ## Deployment reminder
 

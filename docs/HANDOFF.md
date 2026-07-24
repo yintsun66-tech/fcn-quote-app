@@ -5,16 +5,18 @@ Updated: 2026-07-25 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`23c084e fix(outbound): route DAC requests by subject`
+`0913f16 feat(admin): add PS support tier and all-accounts management`
 
 Production deployment record:
-Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` deployed 2026-07-24 from `23c084e`;
-the deployment record was committed as `3e684e0`.
+Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` deployed 2026-07-25 from `0913f16`, after
+applying migration `0010_ps_privilege.sql` to remote D1 `fcn-quote`.
+Previous: Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
 
-Branch remote state when this handoff was reviewed: `origin/feature/subject-branch-correlation`
-ends at `3e684e0` and includes implementation commit `23c084e`. The branch is not merged to
-`main`. The 2026-07-25 documentation alignment is local and uncommitted; it changes no runtime,
-Cloudflare resource or deployed asset.
+Branch state when this handoff was written: local `feature/subject-branch-correlation` is at
+`0913f16` (PS tier + the previously-uncommitted 2026-07-25 doc alignment, committed together).
+**This commit is NOT yet pushed to `origin`** — production runs code that is ahead of the
+remote branch. The branch is not merged to `main`. Push is the remaining VCS step and needs
+explicit authorization.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -23,15 +25,15 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `2de5b070-6feb-4f1f-bf28-e710a0589793` (DAC-family outbound subject routing plus all
-  earlier behavior, deployed 2026-07-24; `GET /api/v1/health` returned HTTP 200 with
-  `{"status":"ok"}`, and the live shared email asset contains the product-aware helper and
-  `DAC/DRA` marker).
-- D1 database: `fcn-quote`; migrations applied to remote D1 run through
-  `0009_top_five_quote_artifacts.sql`. The repository now also contains
-  `0010_ps_privilege.sql` (PS tier), which is **local only and NOT yet applied to remote D1**.
-  Migration 0009 was applied and verified during the top-five deployment; verify remote
-  migration state again before applying 0010.
+  `25d32525-71ab-4aa7-9e90-5fefcea00a05` (PS support tier + all-accounts management plus all
+  earlier behavior, deployed 2026-07-25; `GET /api/v1/health` returned HTTP 200 with
+  `{"status":"ok"}`; the live `backend-client.js` carries 所有帳號列表 / 升級為PS / 降級為一般 /
+  剔除 and the `/admin/accounts` routing; unauthenticated `GET /api/v1/admin/accounts` returns
+  401). Previous verified version: `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
+- D1 database: `fcn-quote`; migrations applied to remote D1 now run through
+  `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
+  applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
+  `wrangler d1 migrations list fcn-quote --remote` reports no pending migrations.
 - Private R2 bucket: `fcn-quote-private`
 - Outbound sender and inbound Email Worker address: `rfq@yintsun66.com`
 - Fixed outbound recipient: `i14053@firstbank.com.tw`
@@ -42,10 +44,12 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 A successful Worker deployment does not prove that GitHub, the bank mailbox, forwarding rules,
 or issuer replies are healthy. Verify each boundary separately.
 
-## Local uncommitted work: PS tier + account management (NOT committed/migrated/deployed)
+## Deployed feature: PS tier + account management (committed `0913f16`, migrated, deployed)
 
 Implements the operator request for an ADMIN **所有帳號列表** with last-online times, a `PS`
-support tier, and delegated moderation. See [ADR 0012](adr/0012-ps-tier-and-account-management.md).
+support tier, and delegated moderation. Committed as `0913f16`, migration `0010` applied to
+remote D1, and deployed as Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` (2026-07-25).
+See [ADR 0012](adr/0012-ps-tier-and-account-management.md).
 
 - **Schema:** new migration `backend/migrations/0010_ps_privilege.sql` adds
   `users.is_privileged_support` (a safe `ALTER TABLE ADD COLUMN`; no table rebuild). The stored
@@ -54,8 +58,8 @@ support tier, and delegated moderation. See [ADR 0012](adr/0012-ps-tier-and-acco
 - **API (`auth.ts`, `index.ts`):** `GET /api/v1/admin/accounts`; `POST /api/v1/admin/accounts/:id/{promote,demote,disable}`; `requireAdminOrPs` now gates registration review and account listing. Promote/demote are ADMIN-only; disable and registration approve/reject are ADMIN or PS. Guards keep ADMIN/PS accounts un-removable and block self-removal; removal is a soft `status='DISABLED'` + session revoke (RFQ ownership is `ON DELETE RESTRICT`).
 - **UI (`backend-client.js`, `styles.css`):** new **所有帳號列表** button + dialog, visible to ADMIN/PS; registration-review button now visible to PS; per-row 升級為PS / 降級為一般 / 剔除 actions with confirmation. Server remains the source of truth.
 - **Tests:** `backend/test/auth.test.ts` adds a PS lifecycle test (list, promote, PS approve, PS disable, ADMIN/PS-protection 409s, USER 403s, demote). Suite is **16 files / 85 tests** passing.
-- **Verification run locally:** `node --check backend-client.js`, `pnpm run typecheck`, `pnpm test` (85), `pnpm run build` (dry run) all passed. `worker-configuration.d.ts` regenerated with no diff.
-- **Gated / still owed:** not committed, not pushed; migration `0010` **not applied to remote D1**; Worker **not deployed**; no authenticated browser walkthrough yet. Apply the migration before deploying the Worker that reads `is_privileged_support`. Each of commit/push, remote migration, and deploy needs explicit user authorization.
+- **Verification:** local — `node --check backend-client.js`, `pnpm run typecheck`, `pnpm test` (16 files / 85), `pnpm run build` (dry run) all passed; `worker-configuration.d.ts` no diff. Post-deploy — API health 200; live `backend-client.js` carries all four Chinese action markers plus `/admin/accounts`; unauth `/api/v1/admin/accounts` returns 401.
+- **Still owed:** `git push` of `0913f16` to `origin` (pending authorization — production is ahead of the remote branch); an authenticated browser walkthrough (promote a test USER to PS, confirm PS can approve/剔除 but cannot touch ADMIN/PS rows, and that a disabled user is logged out). No merge to `main`.
 
 ## Implemented system
 

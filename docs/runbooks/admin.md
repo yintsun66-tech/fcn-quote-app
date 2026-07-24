@@ -2,13 +2,49 @@
 
 ## Required authority
 
-Only an application account with role `ADMIN` can use the following features. The browser UI and the Worker both enforce this; a hidden button or a direct URL is not authorization.
+Most features below require an application account with effective role `ADMIN`. A limited
+subset — registration review and removing regular accounts — is also available to the `PS`
+(privileged support) tier. The browser UI and the Worker both enforce this; a hidden button or
+a direct URL is not authorization.
 
-If the ADMIN controls are not visible after login, the account is not an application ADMIN. Do not manually update D1 to bypass approval/audit behavior.
+If the ADMIN/PS controls are not visible after login, the account does not hold that role. Do
+not manually update D1 to bypass approval/audit behavior.
+
+## Roles: ADMIN and PS
+
+`PS` is a support tier between `USER` and `ADMIN`, introduced in ADR 0012. It is stored as the
+`users.is_privileged_support` flag (migration 0010) and surfaced as an effective role.
+
+| Capability | ADMIN | PS |
+| --- | --- | --- |
+| 所有帳號列表 (view all accounts + last online) | yes | yes |
+| 升級 USER→PS / 降級 PS→USER | yes | no |
+| 核准／拒絕 registrations (使用者申請審核) | yes | yes |
+| 剔除 (soft-disable) a regular USER | yes | yes |
+| 剔除 an ADMIN or PS account | no | no |
+| 管理者寄件紀錄 / RFQ 處理時間軸 | yes | no |
+
+Removal is a soft disable (`status='DISABLED'` plus session revocation), never a hard delete,
+because RFQ ownership is `ON DELETE RESTRICT`. A disabled account cannot log in and its active
+sessions end immediately.
+
+## View all accounts, promote PS, or remove a regular account
+
+1. Log in as an `ADMIN` (full controls) or `PS` (removal + registration review only).
+2. In the fixed bottom user bar, choose **所有帳號列表**.
+3. The list shows each account's create time, user/login name, branch, role, status, and last
+   online time (`MAX` session activity; approximate to ~1 minute). Employee numbers are not
+   shown here — use registration review for a pending applicant's employee number.
+4. Actions per row:
+   - **升級為PS** (ADMIN only, active regular users): confirm the prompt to grant the PS tier.
+   - **降級為一般** (ADMIN only, PS rows): return the account to a regular user.
+   - **剔除** (ADMIN or PS, regular users only): confirm to disable the account. It becomes
+     `已剔除` and cannot log in. ADMIN and PS rows have no 剔除 control.
+5. Each change is recorded as an audit event. The list reloads after a successful action.
 
 ## Approve or reject a user registration
 
-1. Open `https://app.yintsun66.com` and log in as an ADMIN.
+1. Open `https://app.yintsun66.com` and log in as an ADMIN or PS.
 2. In the fixed bottom user bar, choose **使用者申請審核**.
 3. Review the pending application’s time, five-digit employee number, branch, user name, and login account.
 4. Choose one action:
@@ -31,12 +67,27 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
 1. Check the RFQ status and issuer status in the application.
 2. Confirm the bank mailbox received the outbound request.
 3. Confirm issuer replies were forwarded to `rfq@yintsun66.com`.
-4. Understand what an issuer `TIMEOUT` means — it has three distinct causes, which are treated the same for ranking but need different follow-up:
-   - **No reply** reached the inbound address before finalization.
-   - **Late reply** — the issuer replied, but after the 10-minute deadline (`LATE_REPLY`); the quote was valid but not counted. Frequent, because some issuers reply ~11–14 minutes after send. See `docs/HANDOFF.md` known gap 6 (`RFQ_DEADLINE_SECONDS`).
-   - **Unrecognized format** — the reply arrived and correlated, but parsed to zero rows because the issuer's template no longer matches its parser profile. See `docs/HANDOFF.md` known gap 7 (currently SG).
-5. Treat missing, malformed, rejected, mismatched, or late replies as excluded from ranking; do not directly edit quotes or rankings in D1.
-6. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not copy raw mail into public chat or Git.
+4. Interpret the issuer status precisely:
+   - **`TIMEOUT`**: no terminal reply reached that expected issuer before the fifteen-minute hard
+     deadline. It does not prove that the issuer or bank never received the request.
+   - **`LATE_REPLY`**: a correlated reply arrived after the hard deadline. It is preserved but does
+     not overwrite finalized results automatically.
+   - **`PARSE_ERROR` / `INVALID_VALUE`**: a reply arrived, but its table, unit or values could not
+     be safely normalized. This is not a timeout.
+   - **`ISSUER_REJECTED` / `NO_QUOTE`**: the issuer replied and declined or returned an explicit
+     non-quote. This is not missing mail.
+5. For BARCLAYS DAC requests, a COMET product-name error means BARCLAYS replied but rejected the
+   request's Product value. Do not report it as missing mail, guess that `DRA` is accepted, or
+   change the shared BMJB body globally; obtain the issuer's exact accepted value first.
+6. Treat missing, malformed, rejected, mismatched, or late replies as excluded from ranking; do not
+   directly edit quotes or rankings in D1.
+7. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not
+   copy raw mail, full subjects, correlation codes, employee numbers or quote data into public chat
+   or Git.
+
+Completed RFQs move out of the active waiting list. Use the completed filter and open the
+owner-authorized result view; the ADMIN outbound archive shows what was prepared for sending but is
+not a substitute for the RFQ result page.
 
 ## Emergency boundary
 

@@ -1,8 +1,12 @@
 import {
   approveRegistration,
+  demoteAccount,
+  disableAccount,
+  listAccounts,
   listRegistrations,
   login,
   logout,
+  promoteAccount,
   register,
   rejectRegistration,
   requireSession,
@@ -68,6 +72,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && path === "/api/v1/auth/logout") return logout(request, env, session);
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
   if (method === "GET" && path === "/api/v1/admin/registrations") return listRegistrations(env, session);
+  if (method === "GET" && path === "/api/v1/admin/accounts") return listAccounts(env, session);
   if (method === "GET" && path === "/api/v1/admin/outbound-emails") return listAdminOutboundEmails(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/rfq-timelines") return listAdminRfqTimelines(request, env, session);
   const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);
@@ -77,6 +82,13 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && approveMatch?.[1]) return approveRegistration(request, env, session, approveMatch[1]);
   const rejectMatch = /^\/api\/v1\/admin\/registrations\/([^/]+)\/reject$/.exec(path);
   if (method === "POST" && rejectMatch?.[1]) return rejectRegistration(request, env, session, rejectMatch[1]);
+
+  const promoteMatch = /^\/api\/v1\/admin\/accounts\/([^/]+)\/promote$/.exec(path);
+  if (method === "POST" && promoteMatch?.[1]) return promoteAccount(request, env, session, promoteMatch[1]);
+  const demoteMatch = /^\/api\/v1\/admin\/accounts\/([^/]+)\/demote$/.exec(path);
+  if (method === "POST" && demoteMatch?.[1]) return demoteAccount(request, env, session, demoteMatch[1]);
+  const disableMatch = /^\/api\/v1\/admin\/accounts\/([^/]+)\/disable$/.exec(path);
+  if (method === "POST" && disableMatch?.[1]) return disableAccount(request, env, session, disableMatch[1]);
 
   if (method === "GET" && path === "/api/v1/rfqs/summary") return getRfqListSummary(env, session);
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);

@@ -1,6 +1,6 @@
 # Security and Deployment Prerequisites
 
-Status: Phase 1 design draft. No Cloudflare resource or environment has been changed.
+Status: Current security and deployment baseline (2026-07-25).
 
 ## Trust boundaries
 
@@ -29,14 +29,17 @@ Registration is permit-based. The user supplies:
 
 Server-side validation and normalization are mandatory. A new account is `PENDING_APPROVAL` and cannot log in until an authorized administrator approves it.
 
-The initial administrator identity and recovery process remain a deployment blocker. There must be no public endpoint that promotes the first caller to administrator.
+The initial administrator bootstrap has been completed. The formal administrator recovery process
+remains an operational gap. There must be no public endpoint that promotes the first caller to
+administrator.
 
 ### Password handling
 
 - Never log, return, email, or store plaintext passwords.
 - Use a reviewed password hashing construction supported safely in Workers, with a unique cryptographic salt and stored algorithm parameters.
 - Free-tier deployment decision (2026-07-21): use 10,000 PBKDF2-HMAC-SHA256 iterations followed by a domain-separated HMAC-SHA256 pepper held in the existing employee-lookup Cloudflare Secret. This is a deliberate reduction from the originally approved 600,000 iterations to fit the Workers Free 10 ms CPU ceiling. Upgrade the work factor and rehash credentials after login if the account moves to Workers Paid.
-- Select and benchmark exact parameters during Phase 2; do not hard-code obsolete values in the design phase.
+- Preserve the deployed work factor in configuration and benchmark an upgrade before increasing it
+  or moving to a paid Workers CPU tier.
 - Support credential-version upgrades and forced session revocation after reset.
 - Password reset must use a short-lived, single-use server-side token and an approved identity-verification channel.
 - Compare authentication material without revealing timing or account-existence details where practical.
@@ -51,7 +54,7 @@ Any new password/MIME/security dependency requires a separate production-depende
 - Rotate the session on login and privilege change.
 - Revoke sessions on logout, password reset, suspension, and credential-version change.
 - Apply CSRF protection to state-changing requests in addition to SameSite cookies.
-- Enforce idle and absolute expiry after the exact values are approved.
+- Enforce the deployed 1,800-second idle and 28,800-second absolute expiry values server-side.
 
 ### Login protection
 
@@ -81,7 +84,10 @@ Because end users require application-managed usernames and passwords, Cloudflar
 - Sender: `rfq@yintsun66.com`
 - Fixed recipient: `i14053@firstbank.com.tw`
 - Preserve existing eight base subjects and HTML column formats.
-- Append an opaque `[RFQ:...][BATCH:...]` token.
+- Append the deterministic 10-character `[RFQ:...][BATCH:...]` correlation code; store its
+  dedicated correlation value as a hash and never embed personal data.
+- For DAC-family requests, preserve the ADR 0011 subject order:
+  `FCN(T+7) DAC/DRA <branch?> [RFQ:...][BATCH:...]`.
 - Never use `##`.
 - Never generate reply/forward prefixes such as `Re:`, `RE:`, `Fw:`, `FW:`, or `Fwd:`.
 - Enforce recipient allowlisting server-side; never accept an arbitrary recipient from the browser.
@@ -99,9 +105,16 @@ Because end users require application-managed usernames and passwords, Cloudflar
 - Sanitize HTML before any preview or parser-debug display.
 - Use message ID and content hash to prevent duplicate quotes.
 
-### Forwarding verification test
+### Forwarding verification evidence and remaining checks
 
-Before allowing parsed replies into production ranking, send one controlled issuer-style test through the actual bank forwarding rule and capture what reaches the Email Worker. Confirm preservation or discover rewriting of:
+Production evidence from one authorized DAC RFQ includes eight issuer replies forwarded through the
+bank mailbox and correlated by the Email Worker. Seven produced valid normalized quotes; BARCLAYS
+was safely classified as issuer-rejected because its response rejected Product=`DAC`. This proves
+the observed route preserved enough sender/correlation/table evidence for those messages, but it
+does not prove every optional header or every issuer template.
+
+For new or changed issuer templates, capture a controlled message through the actual forwarding
+rule and confirm preservation or rewriting of:
 
 - original `From`
 - Return-Path
@@ -114,7 +127,9 @@ Before allowing parsed replies into production ranking, send one controlled issu
 - plain-text alternative
 - attachments
 
-Parser trust rules must be based on this evidence, not on the original `.msg` samples alone.
+Parser trust rules must be based on production forwarding evidence and anonymous regression
+fixtures, not on the original `.msg` samples alone. BARCLAYS' accepted DAC-family Product value is
+still unknown and must not be guessed or applied globally to the shared BMJB body.
 
 ## RFQ and ranking integrity
 
@@ -139,19 +154,21 @@ Parser trust rules must be based on this evidence, not on the original `.msg` sa
 
 ## Secrets and configuration
 
-Expected configuration names are documentation placeholders, not yet approved bindings:
+Current non-secret configuration and bindings are declared in `backend/wrangler.jsonc`:
 
 - `APP_DOMAIN=yintsun66.com`
+- `SESSION_IDLE_SECONDS=1800`
+- `SESSION_ABSOLUTE_SECONDS=28800`
+- `PASSWORD_PBKDF2_ITERATIONS=10000`
 - `OUTBOUND_FROM=rfq@yintsun66.com`
 - `OUTBOUND_TO=i14053@firstbank.com.tw`
 - `INBOUND_ADDRESS=rfq@yintsun66.com`
-- D1 binding
-- private R2 binding
-- Queue producer/consumer bindings
-- Durable Object binding
-- Browser Rendering binding
-- employee-number encryption/HMAC secrets
-- session/password security configuration
+- D1 binding `DB`
+- private R2 binding `RAW_MAIL_BUCKET`
+- five Queue producer/consumer bindings
+- Durable Object binding `RFQ_COORDINATOR`
+- Browser Rendering binding `BROWSER`
+- required Cloudflare Secrets `EMPLOYEE_DATA_KEY` and `EMPLOYEE_LOOKUP_KEY`
 
 Secrets must be created through Cloudflare secret management and never committed, printed, placed in client JavaScript, or copied into example files.
 
@@ -163,25 +180,24 @@ Approved initial retention:
 - generated images: 90 days
 - structured RFQ/quote/ranking records: 365 days
 
-Phase 2 must define session and audit retention. Scheduled deletion must be scoped, idempotent, observable, and tested against non-expired data. Production deletion is not authorized by this Phase 1 document.
+Session expiry is enforced by the deployed configuration. Audit retention and automated deletion
+of structured records still require an explicit, reviewed policy and implementation. Any deletion
+job must be scoped, idempotent, observable, and tested against non-expired data.
 
-## Deployment prerequisites
+## Current deployment controls and remaining verification
 
-The following must be completed or verified before production deployment:
+The domain, Email Routing address, verified sender/destination, D1, private R2, Queues with DLQs,
+Durable Object, cron recovery and Browser Rendering binding are deployed. The bank forwarding path
+has produced correlated issuer replies. Remaining operational work is:
 
-1. `yintsun66.com` is active in the intended Cloudflare account.
-2. DNS and Email Routing can receive `rfq@yintsun66.com`.
-3. The bank forwarding rule is tested end to end.
-4. `rfq@yintsun66.com` and `i14053@firstbank.com.tw` satisfy Cloudflare email verification/product requirements.
-5. Initial application administrators and approval authority are named.
-6. Username/password/reset/session policies are approved.
-7. Cloudflare Access policy for `/admin` and diagnostics is defined.
-8. D1/R2/Queues/Durable Objects/Browser Rendering plans and limits are checked for the expected load.
-9. Anonymous parser fixtures are stored only in a private repository or protected test storage.
-10. CITI normalization and ranking fixtures pass.
-11. A load test covers 50 concurrent users, 20 trades per RFQ, eleven expected issuers, the
-    seven-minute reminder, and the fifteen-minute hard deadline.
-12. Monitoring, dead-letter handling, incident response, backup/export, and rollback procedures are documented.
+1. Define and test administrator recovery and end-user password reset.
+2. Confirm and document the Cloudflare Access policy for infrastructure diagnostics and any
+   separately protected administration boundary.
+3. Load-test 50 concurrent users, 20 trades per RFQ, eleven expected issuers, the seven-minute
+   reminder and the fifteen-minute hard deadline.
+4. Continue observing Queue/Browser Rendering capacity and DLQs under real completion bursts.
+5. Complete the structured-record/audit retention and deletion policy.
+6. Keep incident response, backup/export and rollback procedures current as resources change.
 
 ## Threats requiring explicit tests
 
@@ -201,6 +217,9 @@ The following must be completed or verified before production deployment:
 - Guessable or permanent artifact URLs
 - Sensitive-data leakage in logs and errors
 
-## Phase 1 deployment status
+## Deployment status
 
-No deployment is authorized or performed. These documents are design inputs for the next approval boundary only.
+The backend is deployed on Cloudflare with the resources documented in
+`docs/backend/phase-5-7-production.md`. Deployment status and the current Worker version are
+recorded in `docs/HANDOFF.md`; this document does not itself authorize a new deployment or secret
+change.

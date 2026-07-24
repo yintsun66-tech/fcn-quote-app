@@ -1,6 +1,6 @@
 # Backend Contracts
 
-Status: Phase 1 design draft. These contracts are not implemented and do not constitute a public API until a later phase is approved.
+Status: Current implemented HTTP/domain contract baseline (2026-07-25).
 
 ## Contract principles
 
@@ -10,9 +10,9 @@ Status: Phase 1 design draft. These contracts are not implemented and do not con
 - Mutating endpoints use an idempotency key.
 - Stored numbers and display strings are separate.
 - Invalid or unknown values remain `null` plus status/reason; they are never coerced to zero.
-- Existing frontend email layouts remain the source for outbound column order until extracted into an approved shared module.
+- The approved shared email-format module is the source for browser/Worker outbound column order.
 
-## Authentication API draft
+## Authentication API
 
 ### `POST /api/v1/auth/register`
 
@@ -44,9 +44,18 @@ Returns the minimum current-user profile needed by the UI. It never returns pass
 - `POST /api/v1/admin/registrations/:id/approve`
 - `POST /api/v1/admin/registrations/:id/reject`
 
-Administration requires both the protected administration boundary and an application `ADMIN` role. Approval/rejection records actor, time, and reason.
+Registration review requires the protected administration boundary and an effective role of `ADMIN` or `PS`. Approval/rejection records actor, time, and reason.
 
-## RFQ API draft
+### Account management endpoints (ADR 0012)
+
+- `GET /api/v1/admin/accounts` — all accounts with `id`, `username`, `displayName`, `branchName`, effective `role`, `status`, `createdAt`, and `lastSeenAt` (approximate last-online = `MAX(user_sessions.last_seen_at)`). Employee numbers are intentionally excluded. Requires `ADMIN` or `PS`.
+- `POST /api/v1/admin/accounts/:id/promote` — upgrade an ACTIVE regular `USER` to `PS`. `ADMIN` only.
+- `POST /api/v1/admin/accounts/:id/demote` — return a `PS` account to `USER`. `ADMIN` only.
+- `POST /api/v1/admin/accounts/:id/disable` — remove (soft-disable) a regular `USER`: set `status='DISABLED'` and revoke sessions. `ADMIN` or `PS`.
+
+The `PS` tier is an effective role derived server-side from `users.is_privileged_support` (migration 0010); the stored `role` column stays `USER`/`ADMIN`. `promote`/`demote`/`disable` guard on the target being a plain `USER` (`role='USER'` plus the flag) in SQL, so an `ADMIN` or `PS` target changes zero rows and returns `409 ACCOUNT_NOT_ELIGIBLE`; `disable` also rejects a self-target with `422`. All three are same-origin + CSRF protected and audited. Removal is soft because `rfqs.user_id` is `ON DELETE RESTRICT`.
+
+## RFQ API
 
 ### `POST /api/v1/rfqs`
 
@@ -264,21 +273,31 @@ Confirmed primary mappings:
 
 Outbound subject structure:
 
-`<existing subject> [RFQ:<opaque-token>][BATCH:<batch-code>]`
+FCN:
+
+`<issuer base subject> <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
+
+DAC family:
+
+`<issuer base subject ending FCN(T+7)> DAC/DRA <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
 
 Requirements:
 
-- No personal email address in the token.
+- The deterministic short code contains no personal email address or employee number; only its
+  hash is stored in the dedicated correlation column.
 - Do not use `##`.
 - Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes.
-- Preserve the existing issuer subject before the appended token.
+- Preserve the issuer base subject. Product marker, optional branch label and correlation tags must
+  remain in the order above.
+- BMJB is shared by BNP, MS, JPM and BARCLAYS. An issuer-specific Product-body change must not be
+  applied to the shared batch without proving it remains valid for all four issuers.
 - Inbound normalization may remove repeated mail-system reply/forward prefixes for matching, but always preserves `rawSubject`.
 - Subject evidence is never sufficient for authorization or ownership.
 - If the subject tag is missing, exactly one tag found in sanitized message body content may be
   used as correlation evidence. Multiple or conflicting subject/body tags produce
   `MANUAL_REVIEW`; sender/batch/ownership checks are unchanged.
 
-## Parser interface draft
+## Parser interface
 
 Each issuer parser must implement the conceptual operations:
 
@@ -346,6 +365,6 @@ endpoints and metadata, never the private R2 object key or a permanent public UR
 
 The quote-card footer displays the complete outbound subject reference as `[RFQ:<10-character-code>]`, derived with the same server-side correlation helper used by outbound email. It is a display/reference value only; ownership continues to be enforced by the authenticated RFQ/artifact join.
 
-## Error response draft
+## Error response
 
 Errors use a stable machine code, user-safe message, request ID, and optional field errors. They never include raw mail, stack traces, secrets, password material, correlation tokens, or another user's identifiers.

@@ -25,6 +25,7 @@
       <span id="backendUser"></span>
       <button id="backendNewRfq" type="button" class="secondary">新增詢價</button>
       <button id="backendMyRfqs" type="button" class="secondary">我的詢價 <span id="backendRfqBadge" class="backend-rfq-badge" hidden>0</span></button>
+      <button id="backendAdminAccounts" type="button" class="secondary" hidden>所有帳號列表</button>
       <button id="backendAdminRegistrations" type="button" class="secondary" hidden>使用者申請審核</button>
       <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
       <button id="backendAdminTimelines" type="button" class="secondary" hidden>RFQ 處理時間軸</button>
@@ -99,6 +100,15 @@
         <div id="backendRegistrationReviewList" class="backend-registration-list"></div>
       </section>
     </dialog>
+    <dialog id="backendAccounts" class="backend-dialog backend-accounts-dialog">
+      <section class="backend-panel">
+        <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>所有帳號列表</h2></div><button id="closeBackendAccounts" type="button" class="secondary">關閉</button></div>
+        <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。管理者可升級／降級 PS 帳號並剔除一般帳號；PS 只能剔除一般帳號。無法剔除管理者或 PS 帳號。</p>
+        <p id="backendAccountsError" class="backend-error" role="alert"></p>
+        <p id="backendAccountsStatus" class="backend-admin-status" role="status"></p>
+        <div id="backendAccountsList" class="backend-accounts-list"></div>
+      </section>
+    </dialog>
     <dialog id="backendRfqTimelines" class="backend-dialog backend-timeline-dialog">
       <section class="backend-panel">
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>RFQ 處理時間軸</h2></div><button id="closeBackendRfqTimelines" type="button" class="secondary">關閉</button></div>
@@ -147,6 +157,11 @@
   const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
   const adminRegistrationReviewError = document.querySelector("#backendRegistrationReviewError");
   const adminRegistrationReviewStatus = document.querySelector("#backendRegistrationReviewStatus");
+  const adminAccountsButton = document.querySelector("#backendAdminAccounts");
+  const adminAccountsDialog = document.querySelector("#backendAccounts");
+  const adminAccountsList = document.querySelector("#backendAccountsList");
+  const adminAccountsError = document.querySelector("#backendAccountsError");
+  const adminAccountsStatus = document.querySelector("#backendAccountsStatus");
   const adminOutboundButton = document.querySelector("#backendAdminOutbound");
   const adminOutboundDialog = document.querySelector("#backendOutboundArchive");
   const adminOutboundList = document.querySelector("#backendOutboundArchiveList");
@@ -193,7 +208,9 @@
   function setUser(user) {
     state.user = user;
     userbar.hidden = !user;
-    adminRegistrationsButton.hidden = !user || user.role !== "ADMIN";
+    const isSupport = !!user && (user.role === "ADMIN" || user.role === "PS");
+    adminAccountsButton.hidden = !isSupport;
+    adminRegistrationsButton.hidden = !isSupport;
     adminOutboundButton.hidden = !user || user.role !== "ADMIN";
     adminTimelinesButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
@@ -417,14 +434,18 @@
     }
   }
 
+  function isSupportRole() {
+    return state.user?.role === "ADMIN" || state.user?.role === "PS";
+  }
+
   async function openAdminRegistrationReview() {
-    if (state.user?.role !== "ADMIN") return;
+    if (!isSupportRole()) return;
     if (!adminRegistrationReviewDialog.open) adminRegistrationReviewDialog.showModal();
     await loadAdminRegistrations();
   }
 
   async function reviewRegistration(userId, action, displayName) {
-    if (state.user?.role !== "ADMIN") return;
+    if (!isSupportRole()) return;
     let reason = "";
     if (action === "approve") {
       if (!window.confirm(`確定核准「${displayName}」的使用者申請？`)) return;
@@ -522,6 +543,89 @@
     } catch (error) {
       adminTimelinesError.textContent = error.message;
       adminTimelinesList.innerHTML = "";
+    }
+  }
+
+  function accountRoleLabel(role) {
+    return role === "ADMIN" ? "管理者" : role === "PS" ? "PS" : "一般";
+  }
+
+  function accountStatusLabel(status) {
+    return { ACTIVE: "使用中", PENDING_APPROVAL: "待審核", REJECTED: "已拒絕", SUSPENDED: "已停權", DISABLED: "已剔除" }[status] || status;
+  }
+
+  function renderAdminAccountList(accounts) {
+    if (!accounts.length) {
+      adminAccountsList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有帳號。</p>";
+      return;
+    }
+    const viewer = state.user?.role;
+    const selfId = state.user?.id;
+    adminAccountsList.innerHTML = `<table><thead><tr><th>建立時間</th><th>使用者</th><th>分行</th><th>身份</th><th>狀態</th><th>上次上線</th><th>操作</th></tr></thead><tbody>${accounts.map(account => {
+      const actions = [];
+      if (viewer === "ADMIN" && account.role === "USER" && account.status === "ACTIVE") {
+        actions.push(`<button type="button" class="primary" data-account-action="promote" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">升級為PS</button>`);
+      }
+      if (viewer === "ADMIN" && account.role === "PS") {
+        actions.push(`<button type="button" class="secondary" data-account-action="demote" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">降級為一般</button>`);
+      }
+      if (account.role === "USER" && account.status !== "DISABLED" && account.id !== selfId) {
+        actions.push(`<button type="button" class="secondary" data-account-action="disable" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">剔除</button>`);
+      }
+      return `<tr>
+        <td>${escapeHtml(formatDateTime(account.createdAt))}</td>
+        <td>${escapeHtml(account.displayName)}<br><small>${escapeHtml(account.username)}</small></td>
+        <td>${escapeHtml(account.branchName)}</td>
+        <td>${escapeHtml(accountRoleLabel(account.role))}</td>
+        <td>${escapeHtml(accountStatusLabel(account.status))}</td>
+        <td>${account.lastSeenAt ? escapeHtml(formatDateTime(account.lastSeenAt)) : "尚未登入"}</td>
+        <td class="backend-registration-actions">${actions.join("") || "—"}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+  }
+
+  async function loadAdminAccounts(statusMessage = "") {
+    adminAccountsError.textContent = "";
+    adminAccountsStatus.textContent = statusMessage;
+    adminAccountsList.innerHTML = "<p class=\"backend-archive-empty\">正在載入帳號列表…</p>";
+    try {
+      renderAdminAccountList((await request("/admin/accounts")).accounts);
+    } catch (error) {
+      adminAccountsError.textContent = error.message;
+      adminAccountsList.innerHTML = "";
+    }
+  }
+
+  async function openAdminAccounts() {
+    if (!isSupportRole()) return;
+    if (!adminAccountsDialog.open) adminAccountsDialog.showModal();
+    await loadAdminAccounts();
+  }
+
+  async function accountAction(userId, action, displayName) {
+    if (!isSupportRole()) return;
+    const prompts = {
+      promote: `確定將「${displayName}」升級為 PS 帳號？PS 可審核申請並剔除一般帳號。`,
+      demote: `確定將「${displayName}」降級為一般帳號？`,
+      disable: `確定剔除（停用）帳號「${displayName}」？該帳號將立即無法登入。`
+    };
+    if (!prompts[action] || !window.confirm(prompts[action])) return;
+    const buttons = [...adminAccountsList.querySelectorAll("button")];
+    buttons.forEach(item => { item.disabled = true; });
+    adminAccountsError.textContent = "";
+    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…" }[action];
+    try {
+      await request(`/admin/accounts/${encodeURIComponent(userId)}/${action}`, { method: "POST", body: "{}" });
+      const done = {
+        promote: `已將「${displayName}」升級為 PS。`,
+        demote: `已將「${displayName}」降級為一般帳號。`,
+        disable: `已剔除「${displayName}」。`
+      };
+      await loadAdminAccounts(done[action]);
+    } catch (error) {
+      adminAccountsError.textContent = error.message;
+      adminAccountsStatus.textContent = "";
+      buttons.forEach(item => { item.disabled = false; });
     }
   }
 
@@ -874,6 +978,12 @@
   });
   adminTimelinesButton.addEventListener("click", openAdminRfqTimelines);
   document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
+  adminAccountsButton.addEventListener("click", openAdminAccounts);
+  document.querySelector("#closeBackendAccounts").addEventListener("click", () => adminAccountsDialog.close());
+  adminAccountsList.addEventListener("click", event => {
+    const target = event.target.closest("[data-account-action][data-account-id]");
+    if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName);
+  });
   addEventListener("popstate", () => {
     const rfqId = currentRfqFromUrl();
     if (rfqId && state.user) void openRfq(rfqId, { updateUrl: false });

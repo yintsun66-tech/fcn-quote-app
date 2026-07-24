@@ -41,7 +41,11 @@ snapshotted according to ADR 0002. The new product marker must not change either
   email has only one subject and issuers use that subject to select one pricing module, mixed
   product requests remain operationally ambiguous. Until a separately approved product-batch
   design is implemented, any email containing DAC receives the `DAC/DRA` marker.
-- A controlled live DAC RFQ is still required to prove issuer-side module routing end to end.
+- An authorized production DAC RFQ proved the marker and forwarding path for eight replies. BNP,
+  MS, JPM, NOMURA, UBS, DBS and SG produced valid DAC quotes. BARCLAYS replied but its COMET module
+  rejected Product=`DAC`; the accepted BARCLAYS DAC-family Product/module rule remains unknown.
+- Because BMJB is shared with BNP, MS and JPM—and Product=`DAC` worked for those three—do not
+  globally change the shared BMJB Product value based on an unconfirmed BARCLAYS-specific guess.
 
 ## Evidence / implementation links
 

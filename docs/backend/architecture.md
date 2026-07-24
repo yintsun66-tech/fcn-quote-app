@@ -1,6 +1,6 @@
 # FCN Quote Backend Architecture
 
-Status: Current production baseline (2026-07-24)
+Status: Current production baseline (2026-07-25)
 Target domain: `yintsun66.com`  
 Current backend branch: `feature/subject-branch-correlation`
 
@@ -90,11 +90,16 @@ flowchart LR
 
 The approved end-user model is application-managed username/password authentication, not Cloudflare Access identity-provider login. Cloudflare Access is therefore reserved for infrastructure and administration boundaries such as internal diagnostics and `/admin`, with the application admin role still checked by the Worker.
 
+The application recognizes three effective roles: `USER`, `PS` (privileged support), and `ADMIN`. `PS` is a delegated support tier stored as the `users.is_privileged_support` flag (migration 0010) and derived into an effective role by the Worker (`effectiveRole`), keeping the stored `role` column `USER`/`ADMIN`. `PS` may review registrations and remove (soft-disable) regular accounts; only `ADMIN` may promote/demote `PS` and view outbound/timeline diagnostics; `ADMIN` and `PS` accounts cannot be removed. See ADR 0012 and `docs/runbooks/admin.md`.
+
 ### Outbound email worker/consumer
 
 - Reuses the existing eight email format definitions rather than inventing new column orders.
 - Sends all request emails to `i14053@firstbank.com.tw` from `rfq@yintsun66.com` after Cloudflare verification.
-- Adds an opaque token without personal data, for example `[RFQ:7B41...][BATCH:BMJB]`.
+- Appends a deterministic 10-character correlation code without personal data, for example
+  `[RFQ:K7P2R9QTBM][BATCH:BMJB]`; only its hash is stored as the dedicated correlation value.
+- For DAC-family requests, inserts `DAC/DRA` immediately after `FCN(T+7)` and before the branch
+  label and correlation tags (ADR 0011).
 - Never adds `##` or a reply/forward prefix to the generated subject.
 - Records a content hash and idempotency key before sending.
 
@@ -187,7 +192,7 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 1. The bank mailbox forwards issuer replies to `rfq@yintsun66.com`.
 2. Email Worker stores raw MIME and rejects exact duplicates by message ID/content hash.
 3. Parser identifies issuer from verified sender evidence, not from subject label alone.
-4. Parser correlates the opaque RFQ token, message thread evidence, and D1 ownership. If forwarding
+4. Parser correlates the short RFQ code, message thread evidence, and D1 ownership. If forwarding
    removed the subject tag, exactly one matching tag in sanitized body content may be used;
    conflicting tags require manual review.
 5. Parsed rows are matched to immutable trade IDs and normalized into canonical quotes.
@@ -232,7 +237,10 @@ an explicit recalculation.
 
 - Preserve the current 1-to-20 trade limit.
 - Preserve current field defaults, fixed values, and email-time validation.
-- Preserve the eight subjects and issuer-specific column orders before appending the opaque token.
+- Preserve the eight issuer-specific base subjects and column orders. Product marker, branch label
+  and correlation tags must follow the order documented in ADR 0011 and the subject contract.
+- BMJB is shared by BNP, MS, JPM and BARCLAYS. Do not change its table Product value globally to
+  solve one issuer's module-routing rule without separately proving the other three remain valid.
 - Preserve the trailing empty HTML email cell workaround.
 - Keep Trade Date out of restored browser draft data.
 - Keep current responsive mobile/desktop behavior until the result UI phase is separately approved.
@@ -240,16 +248,23 @@ an explicit recalculation.
 
 ## Known production gates
 
-- A real forwarded bank reply must still prove which original headers survive the bank forwarding rule.
+- The observed production forwarding path preserved enough sender and correlation evidence to
+  classify eight issuer replies in one controlled DAC RFQ. This evidence does not prove every
+  issuer template or every optional header will always survive forwarding.
+- In that RFQ, BNP, MS, JPM, NOMURA, UBS, DBS and SG produced valid DAC quotes. BARCLAYS replied
+  from its allowlisted sender but COMET rejected Product=`DAC` with a product-name error. The
+  accepted BARCLAYS DAC-family Product value and any required subject/module variation remain
+  unconfirmed; do not guess `DRA` or alter the shared BMJB body globally.
 - MS OBU remains warning-only because no account-level OBU attribute has been defined.
 - CITI uses the approved `100 - Upfront` conversion and preserves raw Upfront separately.
 - Browser Rendering free-plan capacity must be observed under real completion bursts; image jobs are queued and retryable.
 - Raw `.msg` and Excel files are references only and are not committed; repository fixtures remain synthetic/anonymized.
 
-## Remaining prerequisites for Phase 2+
+## Remaining operational prerequisites
 
-- Name the initial registration-approval administrator accounts.
-- Define username rules and whether users can reset their own passwords.
-- Confirm the exact forwarded-message header/MIME preservation with a test message.
-- Verify `rfq@yintsun66.com` and `i14053@firstbank.com.tw` in the selected Cloudflare email product.
-- Confirm the Cloudflare plan and Browser Rendering concurrency before the load test.
+- Confirm the exact BARCLAYS DAC-family Product value and whether the bank forwarding workflow can
+  support a separate BARCLAYS request batch if its body must differ from the shared BMJB batch.
+- Verify forwarding/header behavior for issuer templates not covered by the observed production
+  evidence and keep sender mismatch/manual-review behavior fail-closed.
+- Define and exercise the approved administrator recovery and user password-reset process.
+- Confirm Browser Rendering concurrency and Queue capacity with the expected-load test.

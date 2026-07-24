@@ -158,6 +158,111 @@ describe("registration and authentication", () => {
     expect(user).toEqual({ status: "REJECTED", rejection_reason: "分行資料待補" });
   });
 
+  it("manages the PS tier: promote, PS approvals/removals, guards, and demote", async () => {
+    async function activate(username: string, role: "USER" | "ADMIN" = "USER"): Promise<string> {
+      await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE', role = ? WHERE username_normalized = ?")
+        .bind(role, username).run();
+      const row = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = ?").bind(username).first<{ id: string }>();
+      if (!row?.id) throw new Error(`missing user ${username}`);
+      return row.id;
+    }
+    async function login(username: string, ip: string): Promise<{ cookie: string; csrf: string }> {
+      const response = await api("/api/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password: "Correct Horse Battery 123!" })
+      }, ip);
+      expect(response.status).toBe(200);
+      return authentication(response);
+    }
+
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psadm01", "22001")) }, "203.0.113.1");
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr01", "22002")) }, "203.0.113.2");
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr02", "22003")) }, "203.0.113.3");
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr03", "22004")) }, "203.0.113.4");
+    const adminId = await activate("psadm01", "ADMIN");
+    const promoteId = await activate("psusr01");
+    const disableId = await activate("psusr02");
+    const plainId = await activate("psusr03");
+
+    const adminAuth = await login("psadm01", "203.0.113.11");
+
+    // ADMIN can list every account with an approximate last-online value.
+    const accountsResponse = await api("/api/v1/admin/accounts", { headers: { cookie: adminAuth.cookie } });
+    expect(accountsResponse.status).toBe(200);
+    const accounts = (await accountsResponse.json<{ accounts: Array<{ id: string; username: string; role: string; status: string; lastSeenAt: string | null }> }>()).accounts;
+    expect(accounts.find(item => item.username === "psusr01")).toMatchObject({ role: "USER", status: "ACTIVE" });
+    expect(accounts.find(item => item.username === "psadm01")).toMatchObject({ role: "ADMIN" });
+    expect(accounts.some(item => "lastSeenAt" in item)).toBe(true);
+
+    // A regular USER cannot reach account management at all.
+    const userAuth = await login("psusr03", "203.0.113.12");
+    expect((await api("/api/v1/admin/accounts", { headers: { cookie: userAuth.cookie } })).status).toBe(403);
+    expect((await api(`/api/v1/admin/accounts/${disableId}/disable`, {
+      method: "POST",
+      headers: { cookie: userAuth.cookie, "x-csrf-token": userAuth.csrf }
+    })).status).toBe(403);
+
+    // ADMIN promotes a USER to PS.
+    const promoteResponse = await api(`/api/v1/admin/accounts/${promoteId}/promote`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
+    });
+    expect(promoteResponse.status).toBe(200);
+    expect(await promoteResponse.json()).toMatchObject({ userId: promoteId, role: "PS" });
+
+    // The promoted account now authenticates as PS.
+    const psAuth = await login("psusr01", "203.0.113.13");
+    const psSession = await api("/api/v1/auth/session", { headers: { cookie: psAuth.cookie } });
+    expect(await psSession.json()).toMatchObject({ user: { username: "psusr01", role: "PS" } });
+
+    // PS can approve a pending registration.
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr04", "22005")) }, "203.0.113.5");
+    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = 'psusr04'").first<{ id: string }>();
+    const pendingId = pending?.id as string;
+    const psApprove = await api(`/api/v1/admin/registrations/${pendingId}/approve`, {
+      method: "POST",
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf }
+    });
+    expect(psApprove.status).toBe(200);
+
+    // PS can remove (soft-disable) a regular USER; that USER can no longer log in.
+    const psDisable = await api(`/api/v1/admin/accounts/${disableId}/disable`, {
+      method: "POST",
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf }
+    });
+    expect(psDisable.status).toBe(200);
+    expect(await psDisable.json()).toMatchObject({ userId: disableId, status: "DISABLED" });
+    const disabledLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "psusr02", password: "Correct Horse Battery 123!" })
+    }, "203.0.113.14");
+    expect(disabledLogin.status).toBe(401);
+
+    // PS cannot promote, cannot remove an ADMIN, and cannot remove another PS.
+    expect((await api(`/api/v1/admin/accounts/${plainId}/promote`, {
+      method: "POST",
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf }
+    })).status).toBe(403);
+    expect((await api(`/api/v1/admin/accounts/${adminId}/disable`, {
+      method: "POST",
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf }
+    })).status).toBe(409);
+    expect((await api(`/api/v1/admin/accounts/${promoteId}/disable`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
+    })).status).toBe(409);
+
+    // ADMIN can demote the PS account back to a regular USER.
+    const demoteResponse = await api(`/api/v1/admin/accounts/${promoteId}/demote`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
+    });
+    expect(demoteResponse.status).toBe(200);
+    expect(await demoteResponse.json()).toMatchObject({ userId: promoteId, role: "USER" });
+    const demotedFlag = await testEnv.DB.prepare("SELECT is_privileged_support FROM users WHERE id = ?").bind(promoteId).first<{ is_privileged_support: number }>();
+    expect(demotedFlag?.is_privileged_support).toBe(0);
+  });
+
   it("rate-limits repeated failed logins without counting successful logins", async () => {
     const ip = "198.51.100.19";
     for (let attempt = 0; attempt < 5; attempt += 1) {

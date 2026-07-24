@@ -1,5 +1,5 @@
 import { decryptEmployeeNumber, encryptEmployeeNumber, hashPassword, keyedHash, randomToken, sha256Text, verifyPassword } from "./crypto";
-import { addSeconds, insertAudit, loadSession, newId, nowIso } from "./db";
+import { addSeconds, effectiveRole, insertAudit, loadSession, newId, nowIso } from "./db";
 import { AppError } from "./errors";
 import { clientAddress, CSRF_COOKIE, csrfCookie, jsonResponse, parseCookies, readJson, requestId, requireSameOrigin, SESSION_COOKIE, sessionCookie } from "./http";
 import type { AppEnv, SessionContext } from "./types";
@@ -15,6 +15,7 @@ interface UserAuthRow {
   password_iterations: number;
   status: string;
   role: "USER" | "ADMIN";
+  is_privileged_support: number;
   credential_version: number;
 }
 
@@ -107,7 +108,7 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
 
   const user = await env.DB.prepare(
     `SELECT id, username_normalized, display_name, branch_name, password_hash, password_salt,
-            password_iterations, status, role, credential_version
+            password_iterations, status, role, is_privileged_support, credential_version
        FROM users WHERE username_normalized = ?`
   ).bind(input.username).first<UserAuthRow>();
   const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
@@ -141,7 +142,7 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
       username: user.username_normalized,
       displayName: user.display_name,
       branchName: user.branch_name,
-      role: user.role
+      role: effectiveRole(user.role, user.is_privileged_support)
     }
   });
   response.headers.append("set-cookie", sessionCookie(sessionToken));
@@ -185,6 +186,13 @@ export function requireAdmin(session: SessionContext): void {
   if (session.user.role !== "ADMIN") throw new AppError(403, "ADMIN_REQUIRED", "需要管理者權限。 ");
 }
 
+// ADMIN or PS (privileged support) may review registrations and remove regular accounts.
+export function requireAdminOrPs(session: SessionContext): void {
+  if (session.user.role !== "ADMIN" && session.user.role !== "PS") {
+    throw new AppError(403, "ADMIN_REQUIRED", "需要管理者或 PS 權限。 ");
+  }
+}
+
 interface PendingUserRow {
   id: string;
   username_normalized: string;
@@ -196,7 +204,7 @@ interface PendingUserRow {
 }
 
 export async function listRegistrations(env: AppEnv, session: SessionContext): Promise<Response> {
-  requireAdmin(session);
+  requireAdminOrPs(session);
   const result = await env.DB.prepare(
     `SELECT id, username_normalized, display_name, branch_name, employee_number_ciphertext,
             employee_number_iv, created_at
@@ -214,7 +222,7 @@ export async function listRegistrations(env: AppEnv, session: SessionContext): P
 }
 
 export async function approveRegistration(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
-  requireAdmin(session);
+  requireAdminOrPs(session);
   requireSameOrigin(request);
   await requireCsrf(request, session);
   const now = nowIso();
@@ -228,7 +236,7 @@ export async function approveRegistration(request: Request, env: AppEnv, session
 }
 
 export async function rejectRegistration(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
-  requireAdmin(session);
+  requireAdminOrPs(session);
   requireSameOrigin(request);
   await requireCsrf(request, session);
   const body = await readJson(request);
@@ -245,4 +253,87 @@ export async function rejectRegistration(request: Request, env: AppEnv, session:
   if (result.meta.changes !== 1) throw new AppError(404, "REGISTRATION_NOT_FOUND", "找不到待核准的註冊資料。 ");
   await insertAudit(env, "REGISTRATION_REJECTED", "USER", userId, session.user.id, requestId(request), { reasonLength: reason.length });
   return jsonResponse({ status: "REJECTED", userId });
+}
+
+interface AccountRow {
+  id: string;
+  username_normalized: string;
+  display_name: string;
+  branch_name: string;
+  role: "USER" | "ADMIN";
+  is_privileged_support: number;
+  status: string;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+// All accounts plus each account's last-online time (MAX session last_seen_at).
+// Employee numbers are intentionally excluded to keep this broader list privacy-minimal.
+export async function listAccounts(env: AppEnv, session: SessionContext): Promise<Response> {
+  requireAdminOrPs(session);
+  const result = await env.DB.prepare(
+    `SELECT u.id, u.username_normalized, u.display_name, u.branch_name, u.role,
+            u.is_privileged_support, u.status, u.created_at,
+            (SELECT MAX(s.last_seen_at) FROM user_sessions s WHERE s.user_id = u.id) AS last_seen_at
+       FROM users u ORDER BY u.created_at ASC LIMIT 500`
+  ).all<AccountRow>();
+  const accounts = result.results.map(row => ({
+    id: row.id,
+    username: row.username_normalized,
+    displayName: row.display_name,
+    branchName: row.branch_name,
+    role: effectiveRole(row.role, row.is_privileged_support),
+    status: row.status,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at
+  }));
+  return jsonResponse({ accounts });
+}
+
+// Promote a regular USER account to PS. ADMIN only. Only an ACTIVE plain USER is eligible.
+export async function promoteAccount(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
+  requireAdmin(session);
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const result = await env.DB.prepare(
+    `UPDATE users SET is_privileged_support = 1, updated_at = ?
+      WHERE id = ? AND role = 'USER' AND is_privileged_support = 0 AND status = 'ACTIVE'`
+  ).bind(nowIso(), userId).run();
+  if (result.meta.changes !== 1) throw new AppError(409, "ACCOUNT_NOT_ELIGIBLE", "找不到可升級為 PS 的一般帳號。 ");
+  await insertAudit(env, "ACCOUNT_PROMOTED_PS", "USER", userId, session.user.id, requestId(request));
+  return jsonResponse({ userId, role: "PS" });
+}
+
+// Demote a PS account back to a regular USER. ADMIN only.
+export async function demoteAccount(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
+  requireAdmin(session);
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const result = await env.DB.prepare(
+    `UPDATE users SET is_privileged_support = 0, updated_at = ?
+      WHERE id = ? AND role = 'USER' AND is_privileged_support = 1`
+  ).bind(nowIso(), userId).run();
+  if (result.meta.changes !== 1) throw new AppError(409, "ACCOUNT_NOT_ELIGIBLE", "找不到可降級的 PS 帳號。 ");
+  await insertAudit(env, "ACCOUNT_DEMOTED_PS", "USER", userId, session.user.id, requestId(request));
+  return jsonResponse({ userId, role: "USER" });
+}
+
+// Remove (soft-disable) a regular USER account. ADMIN or PS. ADMIN and PS accounts are
+// protected: the guard requires role='USER' AND is_privileged_support=0. Disabling is a
+// soft status change (rfqs.user_id is ON DELETE RESTRICT), and active sessions are revoked.
+export async function disableAccount(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
+  requireAdminOrPs(session);
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  if (userId === session.user.id) throw new AppError(422, "ACCOUNT_SELF_TARGET", "無法剔除自己的帳號。 ");
+  const now = nowIso();
+  const result = await env.DB.prepare(
+    `UPDATE users SET status = 'DISABLED', updated_at = ?
+      WHERE id = ? AND role = 'USER' AND is_privileged_support = 0 AND status != 'DISABLED'`
+  ).bind(now, userId).run();
+  if (result.meta.changes !== 1) throw new AppError(409, "ACCOUNT_NOT_ELIGIBLE", "只能剔除一般帳號；找不到可剔除的帳號。 ");
+  await env.DB.prepare("UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+    .bind(now, userId).run();
+  await insertAudit(env, "ACCOUNT_DISABLED", "USER", userId, session.user.id, requestId(request));
+  return jsonResponse({ userId, status: "DISABLED" });
 }

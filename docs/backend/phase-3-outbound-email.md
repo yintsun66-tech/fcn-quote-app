@@ -1,6 +1,7 @@
 # Phase 3 Outbound Email
 
-Status: implemented and locally verified on 2026-07-21. Cloudflare D1 migrations and the Worker version are deployed. The Queue producer is active; the Queue consumer requires the account-level `workers.dev` namespace to be initialized before its trigger can be attached.
+Status: implemented, deployed and exercised in production as of 2026-07-25. Queue producers,
+consumers and dead-letter queues are attached.
 
 ## Implemented scope
 
@@ -16,7 +17,8 @@ Status: implemented and locally verified on 2026-07-21. Cloudflare D1 migrations
   the outbound message.
 - The HTML-only trailing empty-cell workaround remains in place for UBS, CITI, and CA.
 - Each email batch has an observable D1 job and is sent through `fcn-outbound-email` with `fcn-outbound-email-dlq` as its dead-letter queue.
-- After all eight batches are marked sent, the RFQ enters `WAITING` and receives a deadline ten minutes after `sent_at`.
+- After all required batches are marked sent, the RFQ enters `WAITING` and receives a hard deadline
+  fifteen minutes after `sent_at`; the seven-minute point is a UI reminder only.
 
 ## Public API response
 
@@ -44,15 +46,28 @@ Repeating the same operation with the same `Idempotency-Key` returns the stored 
 - No arbitrary browser-supplied sender, recipient, or subject is accepted.
 - Email HTML/plain text is generated just in time from frozen trades and is not stored in D1.
 - D1 stores base subject, content hash, correlation-token hash, safe status/error codes, provider message ID, and timestamps.
-- General logs and audit metadata do not contain transaction conditions, email bodies, or the opaque correlation token.
+- General logs and audit metadata do not contain transaction conditions, email bodies, or the
+  plaintext short correlation code.
 
 ## Retry invariant and residual risk
 
 Queue delivery is at least once. A D1 lease prevents concurrent duplicate processing, and a `SENT` batch is never sent again. The content hash is persisted before the call to Cloudflare Email Sending.
 
-Cloudflare Email Sending does not expose a provider idempotency key in the binding used here. There remains a narrow unavoidable case: if the provider accepts a message but the Worker terminates before D1 records `SENT`, a retry can send the same batch again. Inbound Phase 4 must deduplicate replies by RFQ token, batch, Message-ID, and content evidence; operations should also monitor duplicate outbound provider IDs.
+Cloudflare Email Sending does not expose a provider idempotency key in the binding used here. There remains a narrow unavoidable case: if the provider accepts a message but the Worker terminates before D1 records `SENT`, a retry can send the same batch again. Inbound processing therefore deduplicates replies by RFQ code, batch, Message-ID, and content evidence; operations should also monitor duplicate outbound provider IDs.
 
 The deterministic token depends on `EMPLOYEE_LOOKUP_KEY`. Do not rotate this secret while any RFQ is queued or waiting. A future key-version migration is required before routine key rotation.
+
+## Production evidence and unresolved BARCLAYS rule
+
+An authorized three-trade DAC run sent all eight batches with the documented `DAC/DRA`, branch and
+correlation-tag order. Eight issuer replies correlated successfully. BNP, MS, JPM, NOMURA, UBS, DBS
+and SG returned valid DAC quotes. BARCLAYS also replied, but COMET rejected Product=`DAC` for every
+row with a product-name error; this is an issuer rejection, not a delivery or parser failure.
+
+The exact BARCLAYS DAC-family Product value or module-specific subject is not yet confirmed. Because
+BMJB is shared with BNP, MS and JPM—and Product=`DAC` worked for those three—do not globally replace
+the BMJB Product value with `DRA`, `WRA` or another guess. A BARCLAYS-specific body/batch is a
+separate design change that first requires issuer confirmation and bank-routing verification.
 
 ## Cloudflare resources
 
@@ -63,7 +78,10 @@ The deterministic token depends on `EMPLOYEE_LOOKUP_KEY`. Do not rotate this sec
 - Email binding sender allowlist: `rfq@yintsun66.com`
 - API custom domain: `api.yintsun66.com`
 
-The Free plan includes 10,000 Queue operations per day. A normally delivered eight-batch RFQ consumes about 24 operations (eight writes, reads, and deletes), excluding retries. At 2,000 email messages/day, other Phase 4 queues will need a separate capacity calculation before production use.
+A normally delivered eight-batch RFQ creates multiple Queue operations before inbound parsing,
+normalization, ranking and rendering are counted. Cloudflare plan limits are external and may
+change; confirm the current account limits and measure real Queue usage before the 2,000-message
+daily target is treated as supported.
 
 ## Verification
 
@@ -72,7 +90,10 @@ Run from `backend`:
 ```powershell
 pnpm test
 pnpm run typecheck
-pnpm build
+pnpm run build
 ```
 
-Tests cover the eight profile column counts, final blank cells, CITI transformations, subject safety, eleven-issuer/eight-batch snapshots, idempotent D1 creation, all-eight send completion, and duplicate post-`SENT` delivery.
+The current repository baseline is 16 test files / 84 tests. Tests cover the eight profile column
+counts, final blank cells, CITI transformations, subject safety and DAC marker order,
+eleven-issuer/eight-batch snapshots, idempotent D1 creation, send completion, and duplicate
+post-`SENT` delivery.

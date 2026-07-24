@@ -1,7 +1,7 @@
 # Phase 5–7 production baseline
 
-Implemented: 2026-07-21
-Branch: `feature/backend-foundation`
+Implemented: 2026-07-21; current baseline reviewed 2026-07-25
+Branch: `feature/subject-branch-correlation`
 
 ## Workflow
 
@@ -72,6 +72,16 @@ Do not put secrets in `wrangler.jsonc`. `EMPLOYEE_DATA_KEY` and `EMPLOYEE_LOOKUP
 - A late reply requires an explicit owner recalculation; the previous ranking run remains immutable.
 - If Browser Rendering is unavailable, the artifact remains failed/queued independently of the completed ranking.
 
-## Remaining live verification
+## Live verification status
 
-The full path from `i14053@firstbank.com.tw` through the forwarding rule needs one real issuer reply. Confirm preservation of original From/Return-Path/DKIM/Message-ID/In-Reply-To/References and opaque RFQ token before treating automatic issuer recognition as production-proven.
+One authorized three-trade DAC RFQ exercised all eight outbound batches. Eight issuer replies were
+forwarded and correlated. BNP, MS, JPM, NOMURA, UBS, DBS and SG produced valid quotes; BARCLAYS
+replied from its allowlisted sender but rejected Product=`DAC`, so it correctly became
+`ISSUER_REJECTED` rather than `TIMEOUT`, `NO_QUOTE` or `PARSE_ERROR`. Ranking persisted five results
+per trade and the three deterministic rank-one image artifacts reached `READY`.
+
+This evidence proves the observed forwarding path and current SG/UBS normalization cases, not every
+issuer template or optional mail header. The exact BARCLAYS DAC-family Product/module rule remains
+unknown. Do not guess an alternate Product value or globally change the shared BMJB body; obtain
+issuer confirmation and verify whether a separate BARCLAYS request batch can be routed before
+changing production behavior.

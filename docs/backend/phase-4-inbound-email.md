@@ -1,10 +1,10 @@
 # Phase 4 Inbound Email Ingestion and MIME Classification
 
-Status: Phase 4a ingestion and Phase 4b MIME classification implemented for deployment on 2026-07-21.
+Status: deployed production baseline as of 2026-07-25.
 
 ## Scope
 
-Phase 4a receives RFC822/MIME addressed to `rfq@yintsun66.com`, stores the raw message in private R2, writes bounded metadata to D1, and enqueues one idempotent parse job. Phase 4b parses MIME with `postal-mime`, extracts bounded table cell text, evaluates sender/subject evidence, correlates replies to an RFQ, and records a terminal classification. It does not execute attachments, fetch links, normalize issuer quote rows, match trades, or rank quotes.
+Phase 4a receives RFC822/MIME addressed to `rfq@yintsun66.com`, stores the raw message in private R2, writes bounded metadata to D1, and enqueues one idempotent parse job. Phase 4b parses MIME with `postal-mime`, extracts bounded table cell text, evaluates sender/subject evidence, correlates replies to an RFQ, and records a terminal classification. It does not execute attachments or fetch links. Downstream Queue consumers normalize issuer rows, match trades and rank valid quotes.
 
 ## Cloudflare resources
 
@@ -34,7 +34,8 @@ The R2 bucket must not have a public development URL or custom domain. Raw mail 
 - `postal-mime` is pinned to version `2.7.5`; parsing depth and header size are bounded.
 - Subject matching uses an NFKC-normalized copy while preserving `raw_subject`.
 - `##<requester-marker>##` is auxiliary evidence only and is persisted only as a keyed, irreversible hash.
-- The opaque `[RFQ:...][BATCH:...]` token, or a unique `In-Reply-To`/`References` match, is required for RFQ correlation.
+- The deterministic 10-character `[RFQ:...][BATCH:...]` correlation code, or a unique
+  `In-Reply-To`/`References` match, is required for RFQ correlation.
 - BMJB identifies a mail batch, not an issuer. BNP, MS, JPM, and BARCLAYS are disambiguated by sender evidence.
 - Sender evidence is limited to approved issuer domains and exact known sender addresses in a forwarding wrapper.
 - Conflicting sender evidence becomes `SENDER_MISMATCH`; unknown sender becomes `MANUAL_REVIEW`; missing correlation becomes `UNMATCHED_RFQ`.
@@ -42,13 +43,15 @@ The R2 bucket must not have a public development URL or custom domain. Raw mail 
 - Queue jobs use a lease and terminal completion state so duplicate deliveries do not produce duplicate parse results.
 - Replies after `deadline_at` are preserved as `LATE_REPLY` and are not eligible to overwrite a finalized result.
 
-## Deferred to the issuer-normalization phase
+## Downstream normalization status
 
-- eleven issuer parser profiles
-- quote normalization and trade matching
-- plain-text-only issuer table fallbacks
-- quote rejection/no-quote interpretation
-- expected-issuer terminal-state updates
-- ranking and finalization
+The `quote-normalize` and `quote-rank` consumers now implement the eleven issuer profiles, quote
+normalization, trade matching, rejection/no-quote handling, expected-issuer state updates and
+versioned ranking/finalization. Parser profiles remain fail-closed when sender, correlation,
+template, unit or trade evidence is ambiguous.
 
-Before production parser trust rules are enabled, forward a controlled message through `i14053@firstbank.com.tw` and verify which original headers and MIME parts survive the bank forwarding rule.
+Observed production evidence now includes eight forwarded issuer replies from one authorized DAC
+RFQ. All eight correlated; seven normalized to valid quotes, while BARCLAYS was correctly recorded
+as `ISSUER_REJECTED` because its own COMET response rejected Product=`DAC`. SG fixed-period mapping
+and the UBS VMRAN alias were proven on this path. This evidence is intentionally anonymized and
+does not replace tests or prove behavior for issuer templates that did not reply.

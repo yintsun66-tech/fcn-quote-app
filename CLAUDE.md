@@ -31,6 +31,11 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
+- Production evidence now proves DAC replies and ranking for BNP, MS, JPM, NOMURA, UBS, DBS, and
+  SG. Barclays COMET preserved the `DAC/DRA` subject marker but rejected Product=`DAC`. Do not
+  guess the Barclays DAC code or change the shared BMJB body globally: the same BMJB request
+  already works for BNP/MS/JPM. Read ADR 0011 and the latest `docs/HANDOFF.md` before proposing
+  any Barclays-specific split.
 
 ## Handback checklist
 

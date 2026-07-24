@@ -1,6 +1,6 @@
 # Project handoff
 
-Updated: 2026-07-24 (Asia/Taipei)
+Updated: 2026-07-25 (Asia/Taipei)
 
 Current branch: `feature/subject-branch-correlation`
 
@@ -9,11 +9,12 @@ Latest production implementation commit:
 
 Production deployment record:
 Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` deployed 2026-07-24 from `23c084e`;
-recorded in this handoff update.
+the deployment record was committed as `3e684e0`.
 
-Branch remote state when this handoff was updated: the deployment-record push includes
-implementation commit `23c084e` and this handoff update on
-`origin/feature/subject-branch-correlation`. The branch is not merged to `main`.
+Branch remote state when this handoff was reviewed: `origin/feature/subject-branch-correlation`
+ends at `3e684e0` and includes implementation commit `23c084e`. The branch is not merged to
+`main`. The 2026-07-25 documentation alignment is local and uncommitted; it changes no runtime,
+Cloudflare resource or deployed asset.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -26,9 +27,11 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
   earlier behavior, deployed 2026-07-24; `GET /api/v1/health` returned HTTP 200 with
   `{"status":"ok"}`, and the live shared email asset contains the product-aware helper and
   `DAC/DRA` marker).
-- D1 database: `fcn-quote`; migrations in the repository currently run through
-  `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
-  top-five deployment; verify remote migration state again before any future migration.
+- D1 database: `fcn-quote`; migrations applied to remote D1 run through
+  `0009_top_five_quote_artifacts.sql`. The repository now also contains
+  `0010_ps_privilege.sql` (PS tier), which is **local only and NOT yet applied to remote D1**.
+  Migration 0009 was applied and verified during the top-five deployment; verify remote
+  migration state again before applying 0010.
 - Private R2 bucket: `fcn-quote-private`
 - Outbound sender and inbound Email Worker address: `rfq@yintsun66.com`
 - Fixed outbound recipient: `i14053@firstbank.com.tw`
@@ -38,6 +41,21 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 
 A successful Worker deployment does not prove that GitHub, the bank mailbox, forwarding rules,
 or issuer replies are healthy. Verify each boundary separately.
+
+## Local uncommitted work: PS tier + account management (NOT committed/migrated/deployed)
+
+Implements the operator request for an ADMIN **所有帳號列表** with last-online times, a `PS`
+support tier, and delegated moderation. See [ADR 0012](adr/0012-ps-tier-and-account-management.md).
+
+- **Schema:** new migration `backend/migrations/0010_ps_privilege.sql` adds
+  `users.is_privileged_support` (a safe `ALTER TABLE ADD COLUMN`; no table rebuild). The stored
+  `role` CHECK stays `('USER','ADMIN')`; the Worker derives the effective role
+  (`effectiveRole` in `db.ts`) so login/session return `USER | ADMIN | PS`.
+- **API (`auth.ts`, `index.ts`):** `GET /api/v1/admin/accounts`; `POST /api/v1/admin/accounts/:id/{promote,demote,disable}`; `requireAdminOrPs` now gates registration review and account listing. Promote/demote are ADMIN-only; disable and registration approve/reject are ADMIN or PS. Guards keep ADMIN/PS accounts un-removable and block self-removal; removal is a soft `status='DISABLED'` + session revoke (RFQ ownership is `ON DELETE RESTRICT`).
+- **UI (`backend-client.js`, `styles.css`):** new **所有帳號列表** button + dialog, visible to ADMIN/PS; registration-review button now visible to PS; per-row 升級為PS / 降級為一般 / 剔除 actions with confirmation. Server remains the source of truth.
+- **Tests:** `backend/test/auth.test.ts` adds a PS lifecycle test (list, promote, PS approve, PS disable, ADMIN/PS-protection 409s, USER 403s, demote). Suite is **16 files / 85 tests** passing.
+- **Verification run locally:** `node --check backend-client.js`, `pnpm run typecheck`, `pnpm test` (85), `pnpm run build` (dry run) all passed. `worker-configuration.d.ts` regenerated with no diff.
+- **Gated / still owed:** not committed, not pushed; migration `0010` **not applied to remote D1**; Worker **not deployed**; no authenticated browser walkthrough yet. Apply the migration before deploying the Worker that reads `is_privileged_support`. Each of commit/push, remote migration, and deploy needs explicit user authorization.
 
 ## Implemented system
 
@@ -134,10 +152,10 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: 16 files / 76 tests passed.
+- Full test suite: 16 files / 84 tests passed.
 - Cloudflare Worker dry-run build: passed.
-- Production static-asset readback: HTTP 200 for `backend-client.js` and `styles.css`, with the
-  new workspace markers present.
+- Production health/static readback: HTTP 200; the live shared email module contains
+  `buildProductAwareSubject` and the `DAC/DRA` marker.
 
 An authenticated browser walkthrough of every new workspace interaction was not performed after
 the deployment. Treat that as the smallest remaining UI verification task.
@@ -223,18 +241,45 @@ the deployment. Treat that as the smallest remaining UI verification task.
   product-batch design requires explicit approval.
 - Verification: shared-module syntax check, TypeScript source/test checks, the full test suite
   (16 files / 84 tests), and the Cloudflare dry-run build passed. Post-deploy health and live
-  asset checks returned HTTP 200. No real email was sent.
+  asset checks returned HTTP 200. Deployment verification itself did not send real mail; the
+  subsequent authorized production evidence is recorded below.
 - Implementation commit `23c084e` is deployed as Worker
   `2de5b070-6feb-4f1f-bf28-e710a0589793` and pushed to
   `origin/feature/subject-branch-correlation`.
+
+## Authorized production DAC evidence (reviewed 2026-07-25)
+
+- A post-deploy three-trade DAC RFQ sent all eight request batches with
+  `FCN(T+7) DAC/DRA <branch> [RFQ:<code>][BATCH:<code>]`; every outbound batch reached `SENT`.
+- Eight issuer replies correlated by the short subject code and completed MIME/table parsing.
+  BNP, MS, JPM, NOMURA, UBS, DBS, and SG produced valid DAC quotes. The ranking run completed
+  with five persisted results per trade, and all three rank-one quote images reached `READY`.
+- This proves the deployed SG fixed-period mapping and UBS `VMRAN` alias end to end. It also
+  proves that the bank forwarding wrapper can preserve enough original sender/subject evidence
+  for those observed issuers. It does not prove behavior for issuers that did not reply.
+- Barclays did reply from its allowlisted COMET sender and was correctly identified/correlated.
+  Its reply preserved the `DAC/DRA` subject marker but rejected Product=`DAC` on all three rows
+  with the safe error `Incorrect product name in "Product" column for Fixed Coupon Note`.
+  The backend correctly recorded `ISSUER_REJECTED`; this is not `NO_QUOTE`, `PARSE_ERROR`, or
+  missing inbound mail.
+- The accepted Barclays DAC product code and exact module-selection subject remain unknown.
+  Possible names such as `DRA` or `Range Accrual` are hypotheses only and must not be deployed
+  without confirmation from Barclays/bank operations.
+- BMJB is one shared request for BNP/MS/JPM/BARCLAYS. Because the same Product=`DAC` request
+  produced valid BNP/MS/JPM replies, changing BMJB globally could break three working issuers.
+  A Barclays-specific request profile/batch also requires confirmation that the bank forwarding
+  workflow can route it separately, followed by an approved API/schema/email-format plan.
+- CITI, GS, and CA had no correlated reply before the 15-minute deadline in this observed RFQ
+  and ended `TIMEOUT`; this does not change the Barclays diagnosis.
+- No raw MIME, full subject token, personal address, RFQ ID, or real quote fixture was committed.
 
 ## Production gaps and cautions
 
 1. A batch marked `SENT` means Cloudflare accepted it; it is not proof of delivery to the bank
    inbox.
 2. Cloudflare cannot poll `i14053@firstbank.com.tw`. Issuer replies must be forwarded by the bank
-   mailbox to `rfq@yintsun66.com`. The real forwarding/header-preservation chain is not yet fully
-   proven end to end.
+   mailbox to `rfq@yintsun66.com`. Production evidence now proves usable sender/subject
+   preservation for eight observed replies, but not for every issuer/template.
 3. `BMJB` is not an issuer identity. BNP/MS/JPM/BARCLAYS must be distinguished by the preserved
    original sender/domain.
 4. Subject/body correlation fallback exists, but some real forwarded messages have reached
@@ -259,12 +304,13 @@ the deployment. Treat that as the smallest remaining UI verification task.
    versioned recalculation; do not overwrite historical R2 objects.
 10. `main` does not contain the current backend feature branch. Do not merge or copy changes
     between branches without an explicit user request and a clean diff review.
-11. **DAC-architecture parsing (updated 2026-07-24).** DRA/WRA/Range Accrual aliases normalize
+11. **DAC-architecture parsing (updated 2026-07-25).** DRA/WRA/Range Accrual aliases normalize
     to canonical DAC, MS uses its separate shifted DRA layout, UBS reply-only `VMRAN` is recognized,
     and SG derives DAC from validated 1-24 fixed-coupon period values while retaining
-    `All Periods` as FCN. These corrections are deployed, but a new authorized live RFQ is still
-    required to prove SG/UBS end to end. The accepted BARCLAYS DAC outbound product code remains
-    unknown; do not guess or change the shared BMJB format without issuer/bank confirmation.
+    `All Periods` as FCN. An authorized live RFQ proved SG/UBS end to end. Barclays COMET instead
+    rejected Product=`DAC` even though the `DAC/DRA` subject marker survived; its accepted DAC
+    outbound product code remains unknown. Do not guess or change the shared BMJB format without
+    issuer/bank confirmation.
 
 ## User-owned/untracked work to preserve
 
@@ -285,18 +331,20 @@ the deployment. Treat that as the smallest remaining UI verification task.
 3. For email troubleshooting, use the ADMIN timing/archive views and structured D1 status fields;
    do not expose or commit raw mail. A real outbound RFQ sends bank email and therefore requires
    explicit user authorization.
-4. If changing issuer parsing, add an anonymous synthetic regression fixture and preserve raw
+4. Before changing Barclays DAC outbound behavior, obtain its accepted Product value and exact
+   subject contract. Decide whether bank operations can route a Barclays-specific request. Do
+   not globally change BMJB because Product=`DAC` is already proven for BNP/MS/JPM.
+5. If changing issuer parsing, add an anonymous synthetic regression fixture and preserve raw
    units, normalized units, invalid/no-quote states, and matching rules.
-5. If changing schema, bindings, secrets, authentication, email routes, dependencies, or
+6. If changing schema, bindings, secrets, authentication, email routes, dependencies, or
    production behavior, stop and obtain explicit approval before editing or deploying.
-6. Before handback, run the applicable verification baseline, inspect the complete Git diff,
+7. Before handback, run the applicable verification baseline, inspect the complete Git diff,
    update this file with exact evidence, and report whether commit, push, migration, and deploy
    each occurred.
-7. End-to-end checks still owed for the 2026-07-24 deploy (need an authorized real RFQ): the issuer
-   picker on 「發送詢價條件」 and per-issuer sending (BMJB grouping, ADR 0009); the DAC/DRA
-   floating-income note on the quote image; and the SG DAC / UBS VMRAN parser corrections against
-   a new live reply. Known open items: BARCLAYS DAC product code (gap 11) and CA reply latency
-   (gap 5).
+8. End-to-end checks still owed: selective per-issuer sending through the issuer picker
+   (especially BMJB grouping), visual confirmation of the DAC/DRA floating-income note on a
+   downloaded production image, Barclays DAC routing/code, and CA latency under the current
+   15-minute deadline.
 
 ## Deployment reminder
 

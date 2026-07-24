@@ -1,8 +1,16 @@
 import { sha256Text } from "./crypto";
-import type { AppEnv, SessionContext } from "./types";
+import type { AppEnv, SessionContext, UserRole } from "./types";
 
 export function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
+}
+
+// Derive the effective application role. The stored `role` column keeps its original
+// USER|ADMIN CHECK; the PS tier is layered on with the is_privileged_support flag
+// (migration 0010) so ADMIN always wins, then PS, then plain USER.
+export function effectiveRole(storedRole: "USER" | "ADMIN", isPrivilegedSupport: number | boolean): UserRole {
+  if (storedRole === "ADMIN") return "ADMIN";
+  return isPrivilegedSupport ? "PS" : "USER";
 }
 
 export function nowIso(): string {
@@ -41,6 +49,7 @@ interface SessionRow {
   display_name: string;
   branch_name: string;
   role: "USER" | "ADMIN";
+  is_privileged_support: number;
 }
 
 export async function loadSession(env: AppEnv, rawToken: string): Promise<SessionContext | null> {
@@ -48,7 +57,8 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.csrf_token_hash, s.absolute_expires_at, s.expires_at,
             s.credential_version, u.credential_version AS user_credential_version,
-            u.id AS user_id, u.username_normalized, u.display_name, u.branch_name, u.role
+            u.id AS user_id, u.username_normalized, u.display_name, u.branch_name, u.role,
+            u.is_privileged_support
        FROM user_sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ? AND s.revoked_at IS NULL AND u.status = 'ACTIVE'`
@@ -79,7 +89,7 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
       username: row.username_normalized,
       displayName: row.display_name,
       branchName: row.branch_name,
-      role: row.role,
+      role: effectiveRole(row.role, row.is_privileged_support),
       credentialVersion: row.user_credential_version
     }
   };

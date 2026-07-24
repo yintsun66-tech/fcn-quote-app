@@ -20,6 +20,17 @@ ADMIN 管理功能。
 API 位於 `https://api.yintsun66.com`。後端程式、D1 migrations、Queue consumers、
 Durable Object、R2 與測試位於 `backend/`。
 
+## 目前正式環境基線
+
+- 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。
+- 最新正式 Worker 版本為 `2de5b070-6feb-4f1f-bf28-e710a0589793`。
+- DAC 詢價主旨會在 `FCN(T+7)` 後加入 `DAC/DRA`；正式 RFQ 已證實
+  BNP、MS、JPM、NOMURA、UBS、DBS、SG 能回覆並進入排名。
+- Barclays 已回信但拒絕 Product=`DAC`，不是收信或 parser 遺失。Barclays 接受的
+  DAC 商品代碼／主旨尚未確認，不可直接修改共用 BMJB 格式或猜成 `DRA`。
+
+接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。
+
 ## 專案協作與後端文件
 
 - [共同協作規範](AGENTS.md)

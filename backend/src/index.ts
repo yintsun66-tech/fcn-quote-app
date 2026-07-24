@@ -3,6 +3,7 @@ import {
   demoteAccount,
   disableAccount,
   listAccounts,
+  lookupAccountByEmployeeNumber,
   listRegistrations,
   login,
   logout,
@@ -73,6 +74,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
   if (method === "GET" && path === "/api/v1/admin/registrations") return listRegistrations(env, session);
   if (method === "GET" && path === "/api/v1/admin/accounts") return listAccounts(env, session);
+  if (method === "POST" && path === "/api/v1/admin/accounts/lookup") return lookupAccountByEmployeeNumber(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/outbound-emails") return listAdminOutboundEmails(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/rfq-timelines") return listAdminRfqTimelines(request, env, session);
   const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);

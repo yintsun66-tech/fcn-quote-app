@@ -107,6 +107,12 @@
         <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。管理者可升級／降級 PS 帳號並剔除一般帳號；PS 只能剔除一般帳號。無法剔除管理者或 PS 帳號。</p>
         <p id="backendAccountsError" class="backend-error" role="alert"></p>
         <p id="backendAccountsStatus" class="backend-admin-status" role="status"></p>
+        <div id="backendAccountLookup" class="backend-account-lookup" hidden>
+          <label for="backendAccountLookupInput">以行編查詢帳號</label>
+          <input id="backendAccountLookupInput" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="五碼行編">
+          <button id="backendAccountLookupBtn" type="button" class="secondary">查詢</button>
+          <span id="backendAccountLookupResult" class="backend-account-lookup-result" role="status"></span>
+        </div>
         <div id="backendAccountsList" class="backend-accounts-list"></div>
       </section>
     </dialog>
@@ -164,6 +170,10 @@
   const adminAccountsList = document.querySelector("#backendAccountsList");
   const adminAccountsError = document.querySelector("#backendAccountsError");
   const adminAccountsStatus = document.querySelector("#backendAccountsStatus");
+  const accountLookupRow = document.querySelector("#backendAccountLookup");
+  const accountLookupInput = document.querySelector("#backendAccountLookupInput");
+  const accountLookupBtn = document.querySelector("#backendAccountLookupBtn");
+  const accountLookupResult = document.querySelector("#backendAccountLookupResult");
   const adminOutboundButton = document.querySelector("#backendAdminOutbound");
   const adminOutboundDialog = document.querySelector("#backendOutboundArchive");
   const adminOutboundList = document.querySelector("#backendOutboundArchiveList");
@@ -618,8 +628,29 @@
 
   async function openAdminAccounts() {
     if (!isSupportRole()) return;
+    accountLookupRow.hidden = state.user?.role !== "ADMIN";
+    accountLookupInput.value = "";
+    accountLookupResult.textContent = "";
     if (!adminAccountsDialog.open) adminAccountsDialog.showModal();
     await loadAdminAccounts();
+  }
+
+  async function lookupAccountByEmployee() {
+    if (state.user?.role !== "ADMIN") return;
+    const employeeNumber = accountLookupInput.value.trim();
+    accountLookupResult.textContent = "";
+    if (!/^[0-9]{5}$/.test(employeeNumber)) { accountLookupResult.textContent = "請輸入五碼行編。"; return; }
+    accountLookupBtn.disabled = true;
+    try {
+      const { account } = await request("/admin/accounts/lookup", { method: "POST", body: JSON.stringify({ employeeNumber }) });
+      accountLookupResult.textContent = account
+        ? `行編 ${employeeNumber} → ${account.displayName}（登入帳號 ${account.username}｜${account.branchName}｜${accountRoleLabel(account.role)}｜${accountStatusLabel(account.status)}）`
+        : `行編 ${employeeNumber}：查無帳號。`;
+    } catch (error) {
+      accountLookupResult.textContent = error.message;
+    } finally {
+      accountLookupBtn.disabled = false;
+    }
   }
 
   async function accountAction(userId, action, displayName) {
@@ -1000,6 +1031,10 @@
   document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
   adminAccountsButton.addEventListener("click", openAdminAccounts);
   document.querySelector("#closeBackendAccounts").addEventListener("click", () => adminAccountsDialog.close());
+  accountLookupBtn.addEventListener("click", lookupAccountByEmployee);
+  accountLookupInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); void lookupAccountByEmployee(); }
+  });
   adminAccountsList.addEventListener("click", event => {
     const target = event.target.closest("[data-account-action][data-account-id]");
     if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName);

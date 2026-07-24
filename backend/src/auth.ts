@@ -381,3 +381,46 @@ export async function disableAccount(request: Request, env: AppEnv, session: Ses
   await insertAudit(env, "ACCOUNT_DISABLED", "USER", userId, session.user.id, requestId(request));
   return jsonResponse({ userId, status: "DISABLED" });
 }
+
+// Look up which existing account holds a given employee number. ADMIN only, because it maps the
+// employee-number identifier to an account (the linkage deliberately kept out of the PS account
+// list). The employee number is matched via its keyed lookup hash, so no employee number is
+// decrypted; the queried value is never written to the audit log.
+export async function lookupAccountByEmployeeNumber(request: Request, env: AppEnv, session: SessionContext): Promise<Response> {
+  requireAdmin(session);
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const body = await readJson(request);
+  const raw = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>).employeeNumber
+    : undefined;
+  const employeeNumber = typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d{5}$/.test(employeeNumber)) throw new AppError(422, "VALIDATION_ERROR", "行編必須為五碼數字。 ");
+  const lookupHash = await keyedHash(env.EMPLOYEE_LOOKUP_KEY, employeeNumber);
+  const row = await env.DB.prepare(
+    `SELECT id, username_normalized, display_name, branch_name, role, is_privileged_support, status, created_at
+       FROM users WHERE employee_number_lookup_hash = ?`
+  ).bind(lookupHash).first<{
+    id: string;
+    username_normalized: string;
+    display_name: string;
+    branch_name: string;
+    role: "USER" | "ADMIN";
+    is_privileged_support: number;
+    status: string;
+    created_at: string;
+  }>();
+  await insertAudit(env, "ACCOUNT_LOOKUP_BY_EMPLOYEE", "USER", row?.id ?? null, session.user.id, requestId(request), { found: Boolean(row) });
+  if (!row) return jsonResponse({ account: null });
+  return jsonResponse({
+    account: {
+      id: row.id,
+      username: row.username_normalized,
+      displayName: row.display_name,
+      branchName: row.branch_name,
+      role: effectiveRole(row.role, row.is_privileged_support),
+      status: row.status,
+      createdAt: row.created_at
+    }
+  });
+}

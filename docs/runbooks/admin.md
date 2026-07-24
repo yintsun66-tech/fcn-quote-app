@@ -41,6 +41,12 @@ sessions end immediately.
    - **剔除** (ADMIN or PS, regular users only): confirm to disable the account. It becomes
      `已剔除` and cannot log in. ADMIN and PS rows have no 剔除 control.
 5. Each change is recorded as an audit event. The list reloads after a successful action.
+6. **以行編查詢帳號 (ADMIN only):** the account list has an employee-number lookup box (visible to
+   ADMIN, not PS). Enter a five-digit 行編 and choose **查詢** to see which existing account holds
+   it (login account, name, branch, role, status), or「查無帳號」if none. Use this to resolve a
+   registration that was blocked because「行編已存在」— it identifies the colleague who already has
+   an account. The lookup matches by keyed hash (no employee number is decrypted) and never writes
+   the queried 行編 to the audit log.
 
 ## Approve or reject a user registration
 

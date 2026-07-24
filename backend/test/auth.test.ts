@@ -293,6 +293,43 @@ describe("registration and authentication", () => {
     expect(body.duplicates.latestAt).toBeTruthy();
   });
 
+  it("looks up an existing account by employee number for administrators only", async () => {
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("lookupu1", "51001")) }, "203.0.113.51");
+    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='lookupu1'").run();
+    await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("lookupu2", "51002")) }, "203.0.113.52");
+    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='lookupu2'").run();
+
+    const adminLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+    }, "203.0.113.53");
+    const adminAuth = authentication(adminLogin);
+    const adminHeaders = { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf };
+
+    const found = await api("/api/v1/admin/accounts/lookup", { method: "POST", headers: adminHeaders, body: JSON.stringify({ employeeNumber: "51001" }) });
+    expect(found.status).toBe(200);
+    expect(await found.json()).toMatchObject({ account: { username: "lookupu1", status: "ACTIVE" } });
+
+    const missing = await api("/api/v1/admin/accounts/lookup", { method: "POST", headers: adminHeaders, body: JSON.stringify({ employeeNumber: "50000" }) });
+    expect(missing.status).toBe(200);
+    expect(await missing.json()).toMatchObject({ account: null });
+
+    const badInput = await api("/api/v1/admin/accounts/lookup", { method: "POST", headers: adminHeaders, body: JSON.stringify({ employeeNumber: "999" }) });
+    expect(badInput.status).toBe(422);
+
+    const userLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "lookupu2", password: "Correct Horse Battery 123!" })
+    }, "203.0.113.54");
+    const userAuth = authentication(userLogin);
+    const forbidden = await api("/api/v1/admin/accounts/lookup", {
+      method: "POST",
+      headers: { cookie: userAuth.cookie, "x-csrf-token": userAuth.csrf },
+      body: JSON.stringify({ employeeNumber: "51001" })
+    });
+    expect(forbidden.status).toBe(403);
+  });
+
   it("rate-limits repeated failed logins without counting successful logins", async () => {
     const ip = "198.51.100.19";
     for (let attempt = 0; attempt < 5; attempt += 1) {

@@ -5,11 +5,11 @@ Updated: 2026-07-24 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`376f48c feat(artifacts): add DAC/DRA floating-income note to quote image`
+`65a233a perf(rfq): reduce unchanged polling load`
 
 Production deployment record:
-Worker `c33e0b05-5052-4567-8a82-c87750346630` deployed 2026-07-24 (records commits `4a45ad5` +
-`376f48c`); recorded in this handoff update.
+Worker `66384b5b-42fe-4032-a9c0-79a033b6eb96` deployed 2026-07-24 from `65a233a`;
+recorded in this handoff update.
 
 Branch remote state when this handoff was updated: synchronized with
 `origin/feature/subject-branch-correlation`; not merged to `main`.
@@ -21,9 +21,10 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `c33e0b05-5052-4567-8a82-c87750346630` (selective issuer send + UI tweaks + DAC/DRA image note,
-  deployed 2026-07-24; `GET /api/v1/health` → `{"status":"ok"}`; the deployed `index.html` and
-  `backend-client.js` carry the `manual-email-button` and the issuer picker).
+  `66384b5b-42fe-4032-a9c0-79a033b6eb96` (efficient polling + all earlier selective-send and
+  DAC/DRA behavior, deployed 2026-07-24; `GET /api/v1/health` → `{"status":"ok"}`; the deployed
+  `backend-client.js` carries the summary/snapshot routes, hidden-document pause and adaptive
+  polling).
 - D1 database: `fcn-quote`; migrations in the repository currently run through
   `0009_top_five_quote_artifacts.sql`. Migration 0009 was applied and verified during the
   top-five deployment; verify remote migration state again before any future migration.
@@ -158,7 +159,7 @@ the deployment. Treat that as the smallest remaining UI verification task.
   `pnpm run build` (dry run). Committed (`4a45ad5`, `376f48c`) and deployed 2026-07-24 as Worker
   `c33e0b05-5052-4567-8a82-c87750346630` (health `ok`; live assets carry the new button + picker).
 
-## Efficient RFQ polling (implemented locally; not committed/deployed)
+## Efficient RFQ polling (committed, pushed, and deployed)
 
 - Corrects stale architecture/production text: current branch/migrations, selective issuer
   snapshots, rank-one-only automatic image rendering and the latest 76-test baseline.
@@ -176,6 +177,11 @@ the deployment. Treat that as the smallest remaining UI verification task.
 - Verification: root JavaScript syntax and source/test TypeScript checks passed;
   `backend/test/rfqs.test.ts` passed (1 file / 9 tests); the full suite passed (16 files /
   77 tests); and the Cloudflare Worker dry-run build passed.
+- Implementation commit `65a233a` is pushed to
+  `origin/feature/subject-branch-correlation` and deployed as Worker
+  `66384b5b-42fe-4032-a9c0-79a033b6eb96`.
+- Post-deploy verification: API health and the cache-bypassed live client returned HTTP 200; the
+  client contains `/rfqs/summary`, `/snapshot`, `document.hidden`, and adaptive-polling markers.
 - Not yet verified: an authenticated browser walkthrough and a live 50-user read-path load test.
 
 ## Production gaps and cautions

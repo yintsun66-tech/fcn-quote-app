@@ -15,7 +15,7 @@ import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
 import { consumeInboundEmail } from "./inbound-parser";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
-import { createRfq, getRfq, listRfqs, validateRfq } from "./rfqs";
+import { createRfq, getRfq, getRfqListSummary, listRfqs, validateRfq } from "./rfqs";
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, requestTradeArtifact } from "./artifacts";
@@ -24,6 +24,7 @@ import {
   downloadArtifact,
   finalizeRfqNow,
   getRfqResults,
+  getRfqSnapshot,
   getRfqStatus,
   listRfqArtifacts,
   recalculateRfq
@@ -77,6 +78,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const rejectMatch = /^\/api\/v1\/admin\/registrations\/([^/]+)\/reject$/.exec(path);
   if (method === "POST" && rejectMatch?.[1]) return rejectRegistration(request, env, session, rejectMatch[1]);
 
+  if (method === "GET" && path === "/api/v1/rfqs/summary") return getRfqListSummary(env, session);
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);
   if (method === "GET" && path === "/api/v1/rfqs") return listRfqs(request, env, session);
   const validateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/validate$/.exec(path);
@@ -85,6 +87,8 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && sendMatch?.[1]) return sendRfq(request, env, session, sendMatch[1]);
   const statusMatch = /^\/api\/v1\/rfqs\/([^/]+)\/status$/.exec(path);
   if (method === "GET" && statusMatch?.[1]) return getRfqStatus(env, session, statusMatch[1]);
+  const snapshotMatch = /^\/api\/v1\/rfqs\/([^/]+)\/snapshot$/.exec(path);
+  if (method === "GET" && snapshotMatch?.[1]) return getRfqSnapshot(request, env, session, snapshotMatch[1]);
   const resultsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/results$/.exec(path);
   if (method === "GET" && resultsMatch?.[1]) return getRfqResults(env, session, resultsMatch[1]);
   const artifactsMatch = /^\/api\/v1\/rfqs\/([^/]+)\/artifacts$/.exec(path);

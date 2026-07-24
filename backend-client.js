@@ -9,6 +9,9 @@
     rfqId: null,
     timer: null,
     badgeTimer: null,
+    snapshotVersion: null,
+    pollDelayMs: 4000,
+    pollContext: null,
     hasRankings: false,
     rfqListScope: "active",
     rfqListCursor: null,
@@ -314,14 +317,14 @@
 
   async function refreshRfqBadge() {
     clearTimeout(state.badgeTimer);
-    if (!state.user) return;
+    if (!state.user || document.hidden) return;
     try {
-      const payload = await request("/rfqs?scope=active&limit=1");
-      setRfqBadge(payload.summary.activeCount);
+      const payload = await request("/rfqs/summary");
+      setRfqBadge(payload.activeCount);
     } catch {
       setRfqBadge(0);
     } finally {
-      if (state.user) state.badgeTimer = setTimeout(refreshRfqBadge, 30000);
+      if (state.user && !document.hidden) state.badgeTimer = setTimeout(refreshRfqBadge, 30000);
     }
   }
 
@@ -341,6 +344,9 @@
   async function openRfq(rfqId, { updateUrl = true, replace = false } = {}) {
     if (!/^rfq_[A-Za-z0-9-]+$/u.test(rfqId)) return;
     clearTimeout(state.timer);
+    state.snapshotVersion = null;
+    state.pollDelayMs = 4000;
+    state.pollContext = null;
     if (rfqHistoryDialog.open) rfqHistoryDialog.close();
     state.rfqId = rfqId;
     state.hasRankings = false;
@@ -356,6 +362,9 @@
   function closeRfqProgress({ updateUrl = true } = {}) {
     clearTimeout(state.timer);
     state.rfqId = null;
+    state.snapshotVersion = null;
+    state.pollDelayMs = 4000;
+    state.pollContext = null;
     if (progressDialog.open) progressDialog.close();
     if (updateUrl) updateRfqUrl(null);
     void refreshRfqBadge();
@@ -588,6 +597,9 @@
         body: JSON.stringify({ issuers: Array.isArray(issuers) ? issuers : [] })
       });
       state.rfqId = rfqId;
+      state.snapshotVersion = null;
+      state.pollDelayMs = 4000;
+      state.pollContext = null;
       state.hasRankings = false;
       updateRfqUrl(rfqId);
       statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
@@ -671,37 +683,68 @@
     </section>`;
   }
 
+  function scheduleResultRefresh(delayMs) {
+    clearTimeout(state.timer);
+    if (!state.rfqId || document.hidden) return;
+    state.timer = setTimeout(refreshResults, delayMs);
+  }
+
+  function nextResultPollDelay(changed) {
+    const context = state.pollContext;
+    const deadlineRemaining = context?.deadlineAt ? Date.parse(context.deadlineAt) - Date.now() : null;
+    const urgent = context?.hasPendingArtifacts
+      || context?.workflowStatus === "FINALIZING"
+      || (Number.isFinite(deadlineRemaining) && deadlineRemaining <= 60000);
+    if (urgent) {
+      state.pollDelayMs = 2000;
+      return state.pollDelayMs;
+    }
+    if (changed) {
+      state.pollDelayMs = 4000;
+      return state.pollDelayMs;
+    }
+    state.pollDelayMs = state.pollDelayMs <= 4000 ? 8000 : 15000;
+    return state.pollDelayMs;
+  }
+
+  function shouldContinueResultPolling() {
+    const context = state.pollContext;
+    if (!context) return false;
+    if (context.hasPendingArtifacts || context.isProvisional) return true;
+    return !["COMPLETED", "NO_VALID_QUOTE", "FAILED", "CANCELLED"].includes(context.workflowStatus);
+  }
+
   async function refreshResults() {
     clearTimeout(state.timer);
-    if (!state.rfqId) return;
+    if (!state.rfqId || document.hidden) return;
     try {
-      const status = await request(`/rfqs/${state.rfqId}/status`);
-      renderStatus(status);
-      // Once the reply window has closed, the finalize→rank tail is short, so poll every 2s
-      // to surface the result sooner; keep the calmer 4s cadence during the long wait.
-      const deadlinePassed = status.rfq.deadlineAt ? Date.parse(status.rfq.deadlineAt) <= Date.now() : false;
-      if (["WAITING", "PARTIAL", "FINALIZING", "COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)) {
-        const results = await request(`/rfqs/${state.rfqId}/results`);
-        const artifacts = ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)
-          ? (await request(`/rfqs/${state.rfqId}/artifacts`)).artifacts
-          : [];
-        renderResults(results, Object.fromEntries(artifacts.map(item => [item.quoteId, item])));
-        if (!results.rfq.isProvisional) renderArtifactSummary(artifacts);
-        if (artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")) {
-          state.timer = setTimeout(refreshResults, 2000);
-        } else if (results.rfq.isProvisional) {
-          state.timer = setTimeout(refreshResults, deadlinePassed ? 2000 : 4000);
+      const query = state.snapshotVersion ? `?since=${encodeURIComponent(state.snapshotVersion)}` : "";
+      const snapshot = await request(`/rfqs/${state.rfqId}/snapshot${query}`);
+      if (snapshot.changed) {
+        state.snapshotVersion = snapshot.version;
+        const status = snapshot.status;
+        const results = snapshot.results;
+        const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts : [];
+        renderStatus(status);
+        if (results) {
+          renderResults(results, Object.fromEntries(artifacts.map(item => [item.quoteId, item])));
+          if (!results.rfq.isProvisional) renderArtifactSummary(artifacts);
         }
-      } else {
-        state.timer = setTimeout(refreshResults, deadlinePassed ? 2000 : 4000);
+        state.pollContext = {
+          workflowStatus: status.rfq.workflowStatus,
+          deadlineAt: status.rfq.deadlineAt,
+          isProvisional: Boolean(results?.rfq?.isProvisional),
+          hasPendingArtifacts: artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")
+        };
       }
+      if (shouldContinueResultPolling()) scheduleResultRefresh(nextResultPollDelay(snapshot.changed));
     } catch (error) {
       document.querySelector("#backendCountdown").textContent = error.message;
       if (error.code === "RFQ_NOT_FOUND") {
         document.querySelector("#backendRankings").innerHTML = "<p>此詢價不存在，或不屬於目前登入的使用者。請回到「我的詢價」重新選擇。</p>";
         return;
       }
-      state.timer = setTimeout(refreshResults, 8000);
+      scheduleResultRefresh(8000);
     }
   }
 
@@ -837,7 +880,10 @@
     else if (progressDialog.open) closeRfqProgress({ updateUrl: false });
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.user) {
+    if (document.hidden) {
+      clearTimeout(state.timer);
+      clearTimeout(state.badgeTimer);
+    } else if (state.user) {
       void refreshRfqBadge();
       if (state.rfqId) void refreshResults();
     }

@@ -1,5 +1,6 @@
 import { requireCsrf } from "./auth";
 import { requestFinalization } from "./coordinator";
+import { sha256Text, stableStringify } from "./crypto";
 import { insertAudit } from "./db";
 import { AppError } from "./errors";
 import { jsonResponse, requestId, requireSameOrigin } from "./http";
@@ -33,19 +34,23 @@ async function ownedWorkflow(env: AppEnv, userId: string, rfqId: string): Promis
   return row;
 }
 
-export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
+async function loadRfqStatus(
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string
+): Promise<{ rfq: OwnedWorkflow; payload: Record<string, unknown> }> {
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
   const issuers = await env.DB.prepare(
     `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
       WHERE rfq_id = ? ORDER BY issuer`
   ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>();
-  const artifacts = await env.DB.prepare(
+  const artifacts = rfq.current_ranking_version > 0 ? await env.DB.prepare(
     `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
       WHERE rfq_id = ? AND ranking_run_id = (
         SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
       ) ORDER BY trade_code, created_at`
-  ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
-  return jsonResponse({
+  ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
+  return { rfq, payload: {
     rfq: {
       id: rfq.id, workflowStatus: rfq.workflow_status, createdAt: rfq.created_at,
       sentAt: rfq.sent_at, softDeadlineAt: rfqSoftDeadlineAt(env, rfq.sent_at),
@@ -58,11 +63,62 @@ export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: 
       status: row.status, byteSize: row.byte_size,
       completedAt: row.completed_at, expiresAt: row.expires_at
     }))
-  });
+  } };
 }
 
-export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
-  const rfq = await ownedWorkflow(env, session.user.id, rfqId);
+export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
+  return jsonResponse((await loadRfqStatus(env, session, rfqId)).payload);
+}
+
+export async function getRfqSnapshot(
+  request: Request,
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string
+): Promise<Response> {
+  const since = new URL(request.url).searchParams.get("since");
+  if (since && !/^[A-Za-z0-9_-]{43}$/u.test(since)) {
+    throw new AppError(400, "INVALID_SNAPSHOT_VERSION", "詢價快照版本格式無效。 ");
+  }
+  const loadedStatus = await loadRfqStatus(env, session, rfqId);
+  const status = loadedStatus.payload as {
+    rfq: { workflowStatus: string; rankingVersion: number };
+    issuers: unknown[];
+    artifacts: unknown[];
+  };
+  const isProvisional = status.rfq.rankingVersion === 0
+    && ["WAITING", "PARTIAL", "FINALIZING"].includes(status.rfq.workflowStatus);
+  const quoteState = isProvisional ? await env.DB.prepare(
+    `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
+       FROM issuer_quotes WHERE rfq_id = ?`
+  ).bind(rfqId).first<{ quote_count: number; latest_quote_at: string | null }>() : null;
+  const version = await sha256Text(stableStringify({
+    status,
+    provisionalQuoteCount: Number(quoteState?.quote_count ?? 0),
+    provisionalLatestQuoteAt: quoteState?.latest_quote_at ?? null
+  }));
+  if (since === version) return jsonResponse({ changed: false, version });
+
+  const hasResults = ["WAITING", "PARTIAL", "FINALIZING", "COMPLETED", "NO_VALID_QUOTE"].includes(
+    status.rfq.workflowStatus
+  );
+  const results = hasResults
+    ? await loadRfqResultsPayload(env, session, rfqId, loadedStatus.rfq)
+    : null;
+  const artifacts = status.rfq.rankingVersion > 0
+    && ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)
+    ? (await loadRfqArtifactsPayload(env, session, rfqId, loadedStatus.rfq)).artifacts
+    : [];
+  return jsonResponse({ changed: true, version, status, results, artifacts });
+}
+
+async function loadRfqResultsPayload(
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string,
+  loadedRfq?: OwnedWorkflow
+): Promise<Record<string, unknown>> {
+  const rfq = loadedRfq ?? await ownedWorkflow(env, session.user.id, rfqId);
   const trades = await env.DB.prepare(
     `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
        FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
@@ -148,7 +204,7 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
         : exclusions.results.filter(exclusion => exclusion.trade_id === trade.id).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
     };
   });
-  return jsonResponse({
+  return {
     rfq: {
       id: rfq.id,
       workflowStatus: rfq.workflow_status,
@@ -162,11 +218,20 @@ export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId:
         : false
     },
     trades: tradePayloads
-  });
+  };
 }
 
-export async function listRfqArtifacts(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
-  const rfq = await ownedWorkflow(env, session.user.id, rfqId);
+export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
+  return jsonResponse(await loadRfqResultsPayload(env, session, rfqId));
+}
+
+async function loadRfqArtifactsPayload(
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string,
+  loadedRfq?: OwnedWorkflow
+): Promise<{ artifacts: Record<string, unknown>[] }> {
+  const rfq = loadedRfq ?? await ownedWorkflow(env, session.user.id, rfqId);
   const artifacts = await env.DB.prepare(
     `SELECT a.id, a.trade_code, a.quote_id, a.issuer, a.content_type, a.byte_size,
             a.status, a.completed_at, a.expires_at, result.economic_rank,
@@ -178,14 +243,18 @@ export async function listRfqArtifacts(env: AppEnv, session: SessionContext, rfq
       WHERE a.rfq_id = ? AND r.version = ?
       ORDER BY a.trade_code, result.economic_rank, result.display_order`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
-  return jsonResponse({ artifacts: artifacts.results.map(row => ({
+  return { artifacts: artifacts.results.map(row => ({
     id: row.id, tradeCode: row.trade_code, quoteId: row.quote_id, issuer: row.issuer,
     rank: row.economic_rank, isDefault: row.is_image_winner === 1,
     contentType: row.content_type, byteSize: row.byte_size,
     status: row.status, completedAt: row.completed_at, expiresAt: row.expires_at,
     downloadUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download` : null,
     previewUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download?preview=1` : null
-  })) });
+  })) };
+}
+
+export async function listRfqArtifacts(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
+  return jsonResponse(await loadRfqArtifactsPayload(env, session, rfqId));
 }
 
 export async function downloadArtifact(request: Request, env: AppEnv, session: SessionContext, artifactId: string): Promise<Response> {

@@ -175,6 +175,11 @@ describe("RFQ API", () => {
     })]);
     expect(firstBody.summary.activeCount).toBeGreaterThanOrEqual(1);
     expect(firstBody.nextCursor).toBeTruthy();
+    const summary = await api("/api/v1/rfqs/summary", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toEqual({ activeCount: firstBody.summary.activeCount });
 
     const secondPage = await api(
       `/api/v1/rfqs?scope=all&limit=1&cursor=${encodeURIComponent(firstBody.nextCursor ?? "")}`,
@@ -203,6 +208,62 @@ describe("RFQ API", () => {
     });
     expect(invalidCursor.status).toBe(400);
     expect(await invalidCursor.json()).toMatchObject({ error: { code: "INVALID_RFQ_LIST_CURSOR" } });
+  });
+
+  it("returns a versioned owner-scoped snapshot and skips unchanged result data", async () => {
+    const created = await createRfq(userA, [trade({ underlyings: ["SNAPSHOT UW"] })]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.prepare(
+      `UPDATE rfqs
+          SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING',
+              sent_at = '2099-01-01T00:00:00.000Z',
+              deadline_at = '2099-01-01T00:15:00.000Z'
+        WHERE id = ?`
+    ).bind(rfqId).run();
+
+    const first = await api(`/api/v1/rfqs/${rfqId}/snapshot`, {
+      headers: { cookie: userA.cookie }
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json<{
+      changed: boolean;
+      version: string;
+      status: { rfq: { workflowStatus: string } };
+      results: { rfq: { isProvisional: boolean } };
+      artifacts: unknown[];
+    }>();
+    expect(firstBody).toMatchObject({
+      changed: true,
+      status: { rfq: { workflowStatus: "WAITING" } },
+      results: { rfq: { isProvisional: true } },
+      artifacts: []
+    });
+    expect(firstBody.version).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+
+    const unchanged = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(firstBody.version)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    expect(await unchanged.json()).toEqual({ changed: false, version: firstBody.version });
+
+    await testEnv.DB.prepare("UPDATE rfqs SET workflow_status = 'PARTIAL' WHERE id = ?").bind(rfqId).run();
+    const changed = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(firstBody.version)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    const changedBody = await changed.json<{ changed: boolean; version: string }>();
+    expect(changedBody.changed).toBe(true);
+    expect(changedBody.version).not.toBe(firstBody.version);
+
+    const otherUser = await api(`/api/v1/rfqs/${rfqId}/snapshot`, {
+      headers: { cookie: userB.cookie }
+    });
+    expect(otherUser.status).toBe(404);
+
+    const invalidVersion = await api(`/api/v1/rfqs/${rfqId}/snapshot?since=invalid`, {
+      headers: { cookie: userA.cookie }
+    });
+    expect(invalidVersion.status).toBe(400);
   });
 
   it("validates and freezes a draft RFQ", async () => {

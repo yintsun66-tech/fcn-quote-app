@@ -13,6 +13,7 @@ interface IdempotencyRow {
 }
 
 type RfqListScope = "all" | "active" | "completed";
+const ACTIVE_WORKFLOW_STATUS_SQL = "'DRAFT', 'VALIDATED', 'QUEUED', 'SENDING', 'WAITING', 'PARTIAL', 'FINALIZING'";
 
 interface RfqListCursor {
   createdAt: string;
@@ -164,7 +165,7 @@ export async function listRfqs(request: Request, env: AppEnv, session: SessionCo
   const limit = parseListLimit(request);
   const cursor = parseListCursor(request);
   const scopeCondition = scope === "active"
-    ? "AND r.workflow_status IN ('DRAFT', 'VALIDATED', 'QUEUED', 'SENDING', 'WAITING', 'PARTIAL', 'FINALIZING')"
+    ? `AND r.workflow_status IN (${ACTIVE_WORKFLOW_STATUS_SQL})`
     : scope === "completed"
       ? "AND r.workflow_status IN ('COMPLETED', 'NO_VALID_QUOTE', 'FAILED', 'CANCELLED')"
       : "";
@@ -199,7 +200,7 @@ export async function listRfqs(request: Request, env: AppEnv, session: SessionCo
   const activeCount = await env.DB.prepare(
     `SELECT COUNT(*) AS count FROM rfqs
       WHERE user_id = ?
-        AND workflow_status IN ('DRAFT', 'VALIDATED', 'QUEUED', 'SENDING', 'WAITING', 'PARTIAL', 'FINALIZING')`
+        AND workflow_status IN (${ACTIVE_WORKFLOW_STATUS_SQL})`
   ).bind(session.user.id).first<{ count: number }>();
   return jsonResponse({
     rfqs: page.map(row => ({
@@ -227,6 +228,15 @@ export async function listRfqs(request: Request, env: AppEnv, session: SessionCo
       ? encodeListCursor({ createdAt: last.created_at, id: last.id })
       : null
   });
+}
+
+export async function getRfqListSummary(env: AppEnv, session: SessionContext): Promise<Response> {
+  const active = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM rfqs
+      WHERE user_id = ?
+        AND workflow_status IN (${ACTIVE_WORKFLOW_STATUS_SQL})`
+  ).bind(session.user.id).first<{ count: number }>();
+  return jsonResponse({ activeCount: Number(active?.count ?? 0) });
 }
 
 export async function fetchOwnedRfq(env: AppEnv, userId: string, rfqId: string): Promise<{ rfq: RfqRow; trades: TradeRow[] }> {

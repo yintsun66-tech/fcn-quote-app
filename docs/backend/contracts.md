@@ -58,14 +58,26 @@ Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and 
 
 ### User read endpoints
 
+- `GET /api/v1/rfqs/summary`
 - `GET /api/v1/rfqs?scope=active|completed|all&limit=20&cursor=...`
 - `GET /api/v1/rfqs/:rfqId`
 - `GET /api/v1/rfqs/:rfqId/status`
+- `GET /api/v1/rfqs/:rfqId/snapshot?since=<version>`
 - `GET /api/v1/rfqs/:rfqId/results`
 - `GET /api/v1/rfqs/:rfqId/artifacts`
 - `GET /api/v1/artifacts/:artifactId/download`
 
 The server returns `404` for resources not owned by the current user, avoiding cross-user existence disclosure.
+
+The summary endpoint returns only `{ activeCount }` for the authenticated user. It is the
+lightweight source for the persistent workspace badge and does not execute the RFQ-card issuer or
+artifact aggregation query.
+
+The snapshot endpoint combines status, results and current-ranking artifacts behind one
+owner-scoped request. Its first or changed response is
+`{ changed: true, version, status, results, artifacts }`. A later request with the same opaque
+`since` version returns `{ changed: false, version }` and skips quote/result/artifact-list
+reloading. The version is only a change detector and is never authorization evidence.
 
 The RFQ collection endpoint is always filtered by the authenticated `user_id`. It returns
 workspace summaries ordered by creation time and opaque ID, an opaque `nextCursor`, and

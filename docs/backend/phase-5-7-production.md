@@ -7,13 +7,17 @@ Branch: `feature/backend-foundation`
 
 1. `POST /api/v1/rfqs` creates 1–20 immutable trades.
 2. Validation freezes the rows and enforces exactly one target field.
-3. Send creates eight outbound batches and an eleven-issuer expectation snapshot.
+3. Send creates only the outbound batches required by the selected issuers and snapshots those
+   expected issuers. An absent selection preserves the original eight-batch/eleven-issuer default;
+   BMJB remains one shared batch for BNP/MS/JPM/BARCLAYS.
 4. The final successful outbound batch starts one named RFQ Durable Object and sets the
    fifteen-minute hard alarm; the seven-minute point is a UI reminder only.
 5. Inbound MIME is stored privately, parsed, normalized through an issuer profile and matched to a trade.
 6. All-terminal or deadline finalization enqueues a versioned ranking run.
-7. Every issuer with a valid quote in the finalized ranking snapshot is rendered into a private R2 mobile-portrait PNG artifact; rank-one issuer groups remain the default view.
-8. The owner polls status/results, switches among ranked issuers, previews the selected artifact and downloads it through the authenticated Worker.
+7. The deterministic rank-one quote for each trade is automatically rendered into a private R2
+   mobile-portrait PNG artifact.
+8. The owner polls status/results and may explicitly request an idempotent image for another
+   persisted top-five quote, then previews or downloads it through the authenticated Worker.
 
 Late replies are stored but do not overwrite a finalized run. Recalculation creates a new version.
 

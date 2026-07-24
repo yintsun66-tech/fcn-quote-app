@@ -132,7 +132,7 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: 16 files / 72 tests passed.
+- Full test suite: 16 files / 76 tests passed.
 - Cloudflare Worker dry-run build: passed.
 - Production static-asset readback: HTTP 200 for `backend-client.js` and `styles.css`, with the
   new workspace markers present.
@@ -157,6 +157,26 @@ the deployment. Treat that as the smallest remaining UI verification task.
 - Verified: `node --check backend-client.js`; `pnpm run typecheck`; `pnpm test` (16 files, 76);
   `pnpm run build` (dry run). Committed (`4a45ad5`, `376f48c`) and deployed 2026-07-24 as Worker
   `c33e0b05-5052-4567-8a82-c87750346630` (health `ok`; live assets carry the new button + picker).
+
+## Efficient RFQ polling (implemented locally; not committed/deployed)
+
+- Corrects stale architecture/production text: current branch/migrations, selective issuer
+  snapshots, rank-one-only automatic image rendering and the latest 76-test baseline.
+- Adds owner-scoped `GET /api/v1/rfqs/summary` for the active badge, avoiding the full RFQ-card
+  aggregation query.
+- Adds owner-scoped `GET /api/v1/rfqs/:rfqId/snapshot?since=<version>` to combine status, results
+  and current-ranking artifacts. An unchanged version skips quote/result/artifact-list loading and
+  provisional reranking.
+- Snapshot invalidation includes safe status/issuer/artifact state plus a provisional quote
+  count/latest-created aggregate, so a second quote from an already-terminal issuer is detected.
+- Hidden documents stop badge/result timers. Visible unchanged polls back off 4s → 8s → 15s;
+  finalization, the last deadline minute and queued/rendering artifacts use 2s.
+- Existing status/results/artifacts APIs remain compatible. No migration, dependency, lockfile,
+  binding, secret, environment-variable or email-format change.
+- Verification: root JavaScript syntax and source/test TypeScript checks passed;
+  `backend/test/rfqs.test.ts` passed (1 file / 9 tests); the full suite passed (16 files /
+  77 tests); and the Cloudflare Worker dry-run build passed.
+- Not yet verified: an authenticated browser walkthrough and a live 50-user read-path load test.
 
 ## Production gaps and cautions
 

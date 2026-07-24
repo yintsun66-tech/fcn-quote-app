@@ -1,12 +1,15 @@
 # FCN Quote Backend Architecture
 
-Status: Phase 1–7 implementation baseline (2026-07-21)
+Status: Current production baseline (2026-07-24)
 Target domain: `yintsun66.com`  
-Repository branch at drafting time: `feature/backend-foundation`
+Current backend branch: `feature/subject-branch-correlation`
 
 ## Scope
 
-This document defines the implemented Cloudflare backend boundary for the existing static FCN/DAC quote application. Migrations 0001–0007, the API/Email Worker, five Queues, one RFQ Durable Object class, private R2 storage, Browser Rendering and the application-domain frontend are implemented on `feature/backend-foundation`.
+This document defines the implemented Cloudflare backend boundary for the existing static FCN/DAC
+quote application. Migrations 0001–0009, the API/Email Worker, five Queues, one RFQ Durable Object
+class, private R2 storage, Browser Rendering and the application-domain frontend are implemented
+on `feature/subject-branch-correlation`.
 
 The existing root-level static site remains unchanged during the backend build. Its current form validation, eight issuer email layouts, BBG lookup behavior, responsive layout, browser draft storage, and client-side quote image behavior remain compatibility constraints until a later phase explicitly replaces them.
 
@@ -70,11 +73,15 @@ flowchart LR
 - Provides an authenticated **我的詢價** workspace backed by `GET /api/v1/rfqs`. A stable
   `?rfq=<id>` locator restores the selected result after reload/login; the ID never replaces
   server-side ownership authorization (ADR 0008).
+- Uses a lightweight owner-scoped summary endpoint for the active badge and one versioned
+  status/results/artifacts snapshot endpoint for the open RFQ. Hidden documents stop application
+  polling; unchanged foreground snapshots progressively back off and skip provisional reranking
+  (ADR 0010).
 
 ### Application API Worker
 
 - Implements application registration, login, session validation, authorization, and RFQ APIs.
-- Creates immutable RFQ and expected-issuer snapshots.
+- Creates immutable RFQ and selected expected-issuer snapshots.
 - Validates that each RFQ contains 1 to 20 trades and each trade has exactly one target field.
 - Enforces `rfq.user_id === authenticated_user.id` for all user-facing reads and writes.
 - Enqueues work rather than performing mail, parsing, ranking, or rendering synchronously.
@@ -91,7 +98,9 @@ The approved end-user model is application-managed username/password authenticat
 - Never adds `##` or a reply/forward prefix to the generated subject.
 - Records a content hash and idempotency key before sending.
 
-Eight request batches produce an immutable expectation of up to eleven issuer replies:
+Up to eight request batches produce an immutable expectation of up to eleven issuer replies.
+The send API defaults to all eleven issuers but can snapshot and send only the user-selected
+subset (ADR 0009):
 
 - BMJB: BNP, MS, JPM, BARCLAYS
 - NOMURA
@@ -166,8 +175,10 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 1. Authenticated user creates 1 to 20 trades.
 2. Server assigns an RFQ ID and immutable trade IDs `T01` to `T20`.
 3. Server validates the target field and all non-target conditions.
-4. Server snapshots the expected eleven issuers and eight outbound batches.
-5. An idempotent send request queues the eight emails.
+4. Server snapshots the selected expected issuers and their required outbound batches; an absent
+   selection defaults to all eleven issuers and all eight batches.
+5. An idempotent send request queues only those batches. Selecting any BNP/MS/JPM/BARCLAYS issuer
+   still queues the shared BMJB batch, while only explicitly selected issuers enter ranking.
 6. On successful dispatch, the UI reminder becomes `sent_at + 7 minutes`; the RFQ hard deadline
    becomes `sent_at + 15 minutes`, and its Durable Object alarm is set.
 
@@ -198,6 +209,9 @@ an explicit recalculation.
 
 - The user can leave the waiting view without affecting the Durable Object, Queue or ranking
   workflow. Active/completed RFQs remain discoverable from the owner-scoped workspace.
+- The open result view reads a combined opaque-versioned snapshot. If status, issuer, artifact and
+  provisional quote-version state are unchanged, the backend skips full quote loading/ranking and
+  the UI keeps its last rendered data.
 - The user result page loads only RFQs owned by that authenticated user. During
   `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top five with the
   exact production ranking function.

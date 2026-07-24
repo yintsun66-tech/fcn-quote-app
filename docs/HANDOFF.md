@@ -5,17 +5,18 @@ Updated: 2026-07-25 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`0913f16 feat(admin): add PS support tier and all-accounts management`
+`fd7a380 feat(admin): surface blocked duplicate registrations to reviewers`
 
 Production deployment record:
-Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` deployed 2026-07-25 from `0913f16`, after
-applying migration `0010_ps_privilege.sql` to remote D1 `fcn-quote`.
-Previous: Worker `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
+Worker `364a345e-1910-4ec3-a370-337acdebc483` deployed 2026-07-25 from `fd7a380`
+(no D1 migration; reads existing `audit_events`).
+Previous: Worker `25d32525-71ab-4aa7-9e90-5fefcea00a05` from `0913f16` (PS tier + migration 0010);
+before that `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
 
-Branch state when this handoff was written: `feature/subject-branch-correlation` is at `482ccdd`
+Branch state when this handoff was written: `feature/subject-branch-correlation` is at `fd7a380`
 locally and on `origin` (they match). `0913f16` = PS tier + the previously-uncommitted
-2026-07-25 doc alignment (committed together); `482ccdd` = this deployment record. The branch is
-not merged to `main`.
+2026-07-25 doc alignment; `482ccdd` = PS deployment record; `fd7a380` = duplicate-registration
+visibility. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -24,11 +25,13 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `25d32525-71ab-4aa7-9e90-5fefcea00a05` (PS support tier + all-accounts management plus all
-  earlier behavior, deployed 2026-07-25; `GET /api/v1/health` returned HTTP 200 with
-  `{"status":"ok"}`; the live `backend-client.js` carries 所有帳號列表 / 升級為PS / 降級為一般 /
-  剔除 and the `/admin/accounts` routing; unauthenticated `GET /api/v1/admin/accounts` returns
-  401). Previous verified version: `2de5b070-6feb-4f1f-bf28-e710a0589793` from `23c084e`.
+  `364a345e-1910-4ec3-a370-337acdebc483` (duplicate-registration visibility on the review
+  screen, plus PS tier / all-accounts management and all earlier behavior, deployed 2026-07-25;
+  `GET /api/v1/health` returned HTTP 200 with `{"status":"ok"}`; the live `backend-client.js`
+  carries `renderDuplicateNote` / `backendRegistrationDuplicateNote` / 「筆重複申請被系統擋下」 and,
+  from the prior deploy, 所有帳號列表 / 升級為PS / 降級為一般 / 剔除 + `/admin/accounts`;
+  `styles.css` carries `backend-dup-note`). Previous verified versions:
+  `25d32525-71ab-4aa7-9e90-5fefcea00a05` from `0913f16`; `2de5b070-...` from `23c084e`.
 - D1 database: `fcn-quote`; migrations applied to remote D1 now run through
   `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
   applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
@@ -59,6 +62,26 @@ See [ADR 0012](adr/0012-ps-tier-and-account-management.md).
 - **Tests:** `backend/test/auth.test.ts` adds a PS lifecycle test (list, promote, PS approve, PS disable, ADMIN/PS-protection 409s, USER 403s, demote). Suite is **16 files / 85 tests** passing.
 - **Verification:** local — `node --check backend-client.js`, `pnpm run typecheck`, `pnpm test` (16 files / 85), `pnpm run build` (dry run) all passed; `worker-configuration.d.ts` no diff. Post-deploy — API health 200; live `backend-client.js` carries all four Chinese action markers plus `/admin/accounts`; unauth `/api/v1/admin/accounts` returns 401.
 - **Still owed:** an authenticated browser walkthrough (promote a test USER to PS, confirm PS can approve/剔除 but cannot touch ADMIN/PS rows, and that a disabled user is logged out). Commit/migrate/deploy/push are all complete; no merge to `main`.
+
+## Deployed feature: duplicate-registration visibility (`fd7a380`)
+
+Fixes an operator confusion: a "new" account never appeared in the pending list. Root cause —
+a registration whose **login account or employee number already exists** is intentionally
+answered with the same generic `202` as a new one (anti-enumeration, [auth.ts](../backend/src/auth.ts)
+`register`) and **creates no user row**, so it is invisible.
+
+- `register()` now records the colliding unique field (`employeeNumber` | `username` | `unknown`)
+  in the `REGISTRATION_DUPLICATE` audit metadata — the field name only, never the value.
+- `GET /api/v1/admin/registrations` also returns `duplicates { windowDays, count, latestAt, byField }`
+  (7-day window). The 使用者申請審核 screen shows an amber note explaining blocked duplicates.
+  Visible to ADMIN or PS.
+- No schema change (reads existing `audit_events`). Deployed as Worker `364a345e-...`.
+- **Diagnosed case:** account `99999` — login `99999` does not exist and pending count is 0, so
+  its blocked duplicate was an **employee-number (行編) collision**: 行編 `99999` already belongs to
+  an existing ACTIVE account under a different login name. Remedy: that person logs in with the
+  existing account (or password recovery); the same 行編 cannot be registered twice. Identifying
+  *which* existing account owns 行編 99999 would require decrypting employee numbers with the
+  Worker key (not done; available on request).
 
 ## Implemented system
 

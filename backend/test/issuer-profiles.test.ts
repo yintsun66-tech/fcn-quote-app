@@ -108,10 +108,21 @@ describe("issuer parser profiles", () => {
     });
   });
 
-  it("recognizes DAC-family product aliases (DRA / WRA / Range Accrual) as canonical DAC", () => {
-    // UBS labels the DAC architecture WRA; Nomura/DBS/SG/GS/CA/Citi use DRA — same columns as FCN.
+  it("recognizes DAC-family product aliases (DRA / WRA / VMRAN / Range Accrual) as canonical DAC", () => {
+    // UBS requests use WRA but live UBS replies use VMRAN; both represent the canonical DAC product.
     const ubs = cells(19, { 0: "WRA", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily", 10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note" });
     expect(parseIssuerTables("UBS", { tables: [{ index: 0, rows: [ubs] }] })[0]?.product).toBe("DAC");
+    const ubsReply = cells(20, {
+      0: "VMRAN", 1: "USD", 2: 1, 3: "AAA UW", 8: 68, 9: "Daily Memory",
+      10: 100, 11: 9.25, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note",
+      19: "Indicative Price ... UBS ID: synthetic-reference"
+    });
+    expect(parseIssuerTables("UBS", { tables: [{ index: 0, rows: [ubsReply] }] })[0]).toMatchObject({
+      product: "DAC",
+      parserProfile: "UBS_FCN_V2",
+      couponPaPct: 9.25,
+      comparablePricePct: 98
+    });
     const gs = cells(21, { 0: "DRA", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily", 10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1 });
     expect(parseIssuerTables("GS", { tables: [{ index: 0, rows: [gs] }] })[0]?.product).toBe("DAC");
   });
@@ -158,6 +169,113 @@ describe("issuer parser profiles", () => {
       kiBarrierPct: 70
     });
     expect(parsed[1]?.couponPaPct).toBeCloseTo(14.47);
+  });
+
+  it("maps SG fixed-coupon periods to DAC without accepting arbitrary text", () => {
+    const headers = [
+      "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",
+      "Underlying 1", "Underlying 2", "No. of Periods", "Settlement Frequency",
+      "Currency", "Quote ?", "Coupon p.a.", "Fixed Coupons", "Non-Call (m)",
+      "Put Strike", "AutoCall", "KO Type", "KI Type", "KI", "Offer Price",
+      "Funding Spread (Bps)", "Comment"
+    ];
+    const firstPeriod = cells(headers.length, {
+      4: "AAA UW", 5: "BBB UW", 6: 6, 7: "Monthly", 8: "USD", 9: "Coupon",
+      10: "11.25%", 11: "First Period", 12: 1, 13: "68%", 14: "100%",
+      15: "Daily Memory", 16: "N/A", 17: "N/A", 18: "98%"
+    });
+    const firstTwoPeriods = cells(headers.length, {
+      4: "BBB UW", 5: "CCC UW", 6: 6, 7: "Monthly", 8: "USD", 9: "Coupon",
+      10: "17.75%", 11: "First Two Periods", 12: 2, 13: "68%", 14: "100%",
+      15: "Daily Memory", 16: "N/A", 17: "N/A", 18: "98%"
+    });
+    const threePeriods = cells(headers.length, {
+      4: "CCC UW", 5: "DDD UW", 6: 6, 7: "Monthly", 8: "USD", 9: "Coupon",
+      10: "23.5%", 11: "3", 12: 3, 13: "68%", 14: "100%",
+      15: "Daily Memory", 16: "N/A", 17: "N/A", 18: "98%"
+    });
+    const unsupported = cells(headers.length, {
+      4: "AAA UW", 6: 6, 7: "Monthly", 8: "USD", 10: "12%",
+      11: "First Banana Periods", 12: 1, 13: "68%", 14: "100%",
+      15: "Daily Memory", 16: "N/A", 17: "N/A", 18: "98%"
+    });
+    const parsed = parseIssuerTables("SG", {
+      tables: [{ index: 0, rows: [headers, firstPeriod, firstTwoPeriods, threePeriods, unsupported] }]
+    });
+    expect(parsed).toHaveLength(3);
+    expect(parsed[0]).toMatchObject({
+      product: "DAC",
+      parserProfile: "SG_DAC_V1",
+      guaranteedPeriodsMonths: 1,
+      couponPaPct: 11.25
+    });
+    expect(parsed[1]).toMatchObject({
+      product: "DAC",
+      guaranteedPeriodsMonths: 2,
+      couponPaPct: 17.75
+    });
+    expect(parsed[2]).toMatchObject({
+      product: "DAC",
+      guaranteedPeriodsMonths: 3,
+      couponPaPct: 23.5
+    });
+  });
+
+  it("attaches BARCLAYS Comet row errors to response rows as rejection reasons", () => {
+    const quoteHeader = [
+      "Product", "Currency", "Guaranteed Periods (m)", "BBG Code 1", "BBG Code 2",
+      "BBG Code 3", "BBG Code 4", "BBG Code 5", "Strike (%)", "KO Type",
+      "KO Barrier (%)", "Coupon p.a. (%)", "Upfront / Note Price (%)", "Tenor (m)",
+      "Barrier Type", "KI Barrier (%)", "Observation Frequency (m)", "OTC",
+      "Effective Date Offset (calendar days)", "Notional", "Quote ID"
+    ];
+    const rejected = cells(quoteHeader.length, {
+      0: "DAC", 1: "USD", 2: 1, 3: "AAA UW", 4: "BBB UW", 8: 68,
+      9: "Daily Memory", 10: 100, 12: 98, 13: 6, 14: "NONE",
+      15: "Pls see below&nbsp;", 16: 1, 17: "Note", 18: 7
+    });
+    const originalRequest = cells(20, {
+      0: "DAC", 1: "USD", 2: 1, 3: "AAA UW", 4: "BBB UW", 8: 68,
+      9: "Daily Memory", 10: 100, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note", 18: 7
+    });
+    const separateValidQuote = cells(quoteHeader.length, {
+      0: "FCN", 1: "USD", 2: 1, 3: "CCC UW", 8: 80, 9: "Daily",
+      10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note", 18: 7
+    });
+    const parsed = parseIssuerTables("BARCLAYS", {
+      tables: [
+        { index: 0, rows: [quoteHeader, rejected] },
+        {
+          index: 1,
+          rows: [
+            ["Underlying (Bloomberg)", "Row", "Message"],
+            ["", "1", "Comet Email Parser Errors : Incorrect product name in &quot;Product&quot; column for Fixed Coupon Note"]
+          ]
+        },
+        {
+          index: 2,
+          rows: [quoteHeader, separateValidQuote]
+        },
+        {
+          index: 3,
+          rows: [[
+            "Product", "Currency", "Guaranteed Periods (m)", "BBG Code 1", "BBG Code 2",
+            "BBG Code 3", "BBG Code 4", "BBG Code 5", "Strike (%)", "KO Type",
+            "KO Barrier (%)", "Coupon p.a. (%)", "Upfront / NotePrice (%)", "Tenor (m)",
+            "Barrier Type", "KI Barrier (%)", "Observation Frequency (m)", "OTC",
+            "Effective Date Offset (Calendar Days)", "Trade Date"
+          ], originalRequest]
+        }
+      ]
+    });
+    expect(parsed).toHaveLength(3);
+    expect(parsed[0]).toMatchObject({
+      parserProfile: "BARCLAYS_FCN_V2",
+      rejectionReason: "Comet Email Parser Errors : Incorrect product name in \"Product\" column for Fixed Coupon Note",
+      warnings: ["BARCLAYS_COMET_ERROR"]
+    });
+    expect(parsed[1]).toMatchObject({ couponPaPct: 12.5, rejectionReason: null });
+    expect(parsed[2]?.rejectionReason).toBeNull();
   });
 
   it("converts CITI Upfront to comparable Note Price and derives KO type", () => {

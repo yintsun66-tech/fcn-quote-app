@@ -1,6 +1,6 @@
 import type { Issuer } from "./inbound-parser";
 
-export const ISSUER_PROFILE_VERSION = "issuer-fcn-v2";
+export const ISSUER_PROFILE_VERSION = "issuer-fcn-v3";
 
 export type QuoteStatus =
   | "VALID"
@@ -124,7 +124,7 @@ const STANDARD_PROFILES: Partial<Record<Issuer, StandardProfile>> = Object.freez
     columns: { product: 1, currency: 2, guaranteed: 3, underlyings: [4, 5, 6, 7, 8], strike: 9, koType: 10, koBarrier: 11, coupon: 12, price: 13, tenor: 14, barrierType: 15, kiBarrier: 16, observation: 17, otc: 18, effectiveOffset: 19, reference: 0, comment: 24 }
   },
   BARCLAYS: {
-    issuer: "BARCLAYS", displayName: "BARCLAYS", profile: "BARCLAYS_FCN_V1", unit: "WHOLE_PERCENT",
+    issuer: "BARCLAYS", displayName: "BARCLAYS", profile: "BARCLAYS_FCN_V2", unit: "WHOLE_PERCENT",
     priceLabel: "Upfront / NotePrice (%)", priceSemantics: "NOTE_PRICE",
     columns: { product: 0, currency: 1, guaranteed: 2, underlyings: [3, 4, 5, 6, 7], strike: 8, koType: 9, koBarrier: 10, coupon: 11, price: 12, tenor: 13, barrierType: 14, kiBarrier: 15, observation: 16, otc: 17, effectiveOffset: 18, reference: 24 }
   },
@@ -144,7 +144,7 @@ const STANDARD_PROFILES: Partial<Record<Issuer, StandardProfile>> = Object.freez
     columns: { product: 0, currency: 1, guaranteed: 2, underlyings: [3, 4, 5, 6], strike: 7, koType: 8, koBarrier: 9, coupon: 10, price: 11, tenor: 12, barrierType: 13, kiBarrier: 14, observation: 15, otc: 16, reference: 22 }
   },
   UBS: {
-    issuer: "UBS", displayName: "UBS", profile: "UBS_FCN_V1", unit: "WHOLE_PERCENT",
+    issuer: "UBS", displayName: "UBS", profile: "UBS_FCN_V2", unit: "WHOLE_PERCENT",
     priceLabel: "Cost (%)", priceSemantics: "COST",
     columns: { product: 0, currency: 1, guaranteed: 2, underlyings: [3, 4, 5, 6, 7], strike: 8, koType: 9, koBarrier: 10, coupon: 11, price: 12, tenor: 13, barrierType: 14, kiBarrier: 15, observation: 16, otc: 17 }
   },
@@ -202,9 +202,9 @@ function integer(value: string): number | null {
 function product(value: string): CanonicalProduct | null {
   const normalized = value.normalize("NFKC").trim().toUpperCase();
   if (normalized === "FCN" || normalized === "FCA") return "FCN";
-  // DAC family aliases: DAC (BNP/MS request), DRA (Nomura/DBS/SG/GS/CA/Citi), WRA (UBS),
-  // and "Range Accrual" (MS reply). All normalize to canonical DAC so DAC replies match DAC trades.
-  if (normalized === "DAC" || normalized === "DRA" || normalized === "WRA" || normalized === "RANGE ACCRUAL") return "DAC";
+  // Shared DAC family aliases. UBS reply-only VMRAN is intentionally handled in its issuer profile.
+  if (normalized === "DAC" || normalized === "DRA" || normalized === "WRA"
+    || normalized === "RANGE ACCRUAL") return "DAC";
   return null;
 }
 
@@ -276,6 +276,61 @@ function findHeaderIndex(headers: readonly string[], aliases: readonly string[])
   return headers.findIndex(header => normalizedAliases.has(normalizedHeader(header)));
 }
 
+function barclaysQuoteHeaderIndex(rows: readonly string[][]): number {
+  return rows.findIndex(row =>
+    findHeaderIndex(row, ["Product"]) >= 0
+    && findHeaderIndex(row, ["Quote ID", "Quote Id"]) >= 0
+  );
+}
+
+function barclaysCometErrors(document: ParsedTablesDocument): Map<number, Map<number, string>> {
+  const errorsByQuoteTable = new Map<number, Map<number, string>>();
+  let currentQuoteTableIndex: number | null = null;
+  for (const table of document.tables ?? []) {
+    if (barclaysQuoteHeaderIndex(table.rows) >= 0) currentQuoteTableIndex = table.index;
+    for (let headerIndex = 0; headerIndex < table.rows.length; headerIndex += 1) {
+      const headers = table.rows[headerIndex] ?? [];
+      const underlyingColumn = findHeaderIndex(headers, ["Underlying (Bloomberg)"]);
+      const rowColumn = findHeaderIndex(headers, ["Row"]);
+      const messageColumn = findHeaderIndex(headers, ["Message"]);
+      if (currentQuoteTableIndex === null || underlyingColumn < 0 || rowColumn < 0 || messageColumn < 0) continue;
+      const errors = errorsByQuoteTable.get(currentQuoteTableIndex) ?? new Map<number, string>();
+      for (let rowIndex = headerIndex + 1; rowIndex < table.rows.length; rowIndex += 1) {
+        const source = table.rows[rowIndex] ?? [];
+        const sequence = integer(text(source, rowColumn));
+        const message = text(source, messageColumn)
+          .replace(/&quot;/giu, "\"")
+          .replace(/&nbsp;|&#160;/giu, " ")
+          .trim();
+        if (sequence !== null && sequence > 0 && /COMET\s+EMAIL\s+PARSER\s+ERRORS/iu.test(message)) {
+          errors.set(sequence, message.slice(0, 1_000));
+        }
+      }
+      if (errors.size > 0) errorsByQuoteTable.set(currentQuoteTableIndex, errors);
+    }
+  }
+  return errorsByQuoteTable;
+}
+
+const SG_PERIOD_WORDS = new Set([
+  "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT",
+  "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN",
+  "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN", "TWENTY",
+  "TWENTY ONE", "TWENTY TWO", "TWENTY THREE", "TWENTY FOUR",
+  "TWENTY-ONE", "TWENTY-TWO", "TWENTY-THREE", "TWENTY-FOUR"
+]);
+
+function sgProduct(fixedCoupons: string): CanonicalProduct | null {
+  const normalized = fixedCoupons.normalize("NFKC").trim().toUpperCase().replace(/\s+/gu, " ");
+  if (normalized === "ALL PERIODS") return "FCN";
+  if (/^\d+$/u.test(normalized)) return Number(normalized) >= 1 && Number(normalized) <= 24 ? "DAC" : null;
+  const firstPeriods = /^FIRST(?:\s+(.+?))?\s+PERIODS?$/u.exec(normalized);
+  const count = firstPeriods?.[1];
+  if (firstPeriods && (!count || SG_PERIOD_WORDS.has(count)
+    || (/^\d+$/u.test(count) && Number(count) >= 1 && Number(count) <= 24))) return "DAC";
+  return null;
+}
+
 function sgColumns(rows: readonly string[][]): SgColumns | null {
   for (const row of rows) {
     const underlyings = row
@@ -322,7 +377,10 @@ function sgColumns(rows: readonly string[][]): SgColumns | null {
 
 function standardRow(profile: StandardProfile, row: string[], tableIndex: number, rowIndex: number): ParsedIssuerRow | null {
   const columns = profile.columns;
-  const parsedProduct = product(text(row, columns.product));
+  const rawProduct = text(row, columns.product);
+  const parsedProduct = profile.issuer === "UBS" && rawProduct.normalize("NFKC").trim().toUpperCase() === "VMRAN"
+    ? "DAC"
+    : product(rawProduct);
   const parsedCurrency = currency(text(row, columns.currency));
   const underlyings = columns.underlyings.map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
   if (!parsedProduct || !parsedCurrency || underlyings.length === 0) return null;
@@ -446,15 +504,15 @@ function sgRow(row: string[], tableIndex: number, rowIndex: number, detectedColu
   };
   const parsedCurrency = currency(text(row, columns.currency));
   const underlyings = columns.underlyings.map(index => underlying(text(row, index))).filter((value): value is string => Boolean(value));
-  const fixedCoupons = text(row, columns.fixedCoupons).toUpperCase();
-  const parsedProduct: CanonicalProduct | null = fixedCoupons === "ALL PERIODS" ? "FCN" : null;
+  const parsedProduct = sgProduct(text(row, columns.fixedCoupons));
   if (!parsedProduct || !parsedCurrency || underlyings.length === 0) return null;
   const rawTargets = targetRaw(row, columns.strike, columns.koBarrier, columns.coupon, columns.price, columns.kiBarrier);
   const rawPriceValue = percentage(rawTargets.price, "DECIMAL_FRACTION");
   const comment = optionalText(row, columns.comment);
   const barrierType = barrier(text(row, columns.barrierType));
   return {
-    issuer: "SG", issuerDisplayName: "SG", parserProfile: detectedColumns ? "SG_FCN_V2" : "SG_FCN_V1",
+    issuer: "SG", issuerDisplayName: "SG",
+    parserProfile: parsedProduct === "DAC" ? "SG_DAC_V1" : (detectedColumns ? "SG_FCN_V2" : "SG_FCN_V1"),
     sourceTableIndex: tableIndex, sourceRowIndex: rowIndex, rawValues: row,
     product: parsedProduct, currency: parsedCurrency, tenorMonths: months(text(row, columns.tenor)),
     guaranteedPeriodsMonths: integer(text(row, columns.guaranteed)), underlyings,
@@ -500,8 +558,12 @@ function citiRow(row: string[], tableIndex: number, rowIndex: number): ParsedIss
 
 export function parseIssuerTables(issuer: Issuer, document: ParsedTablesDocument): ParsedIssuerRow[] {
   const result: ParsedIssuerRow[] = [];
+  const barclaysErrors = issuer === "BARCLAYS"
+    ? barclaysCometErrors(document)
+    : new Map<number, Map<number, string>>();
   for (const table of document.tables ?? []) {
     const detectedSgColumns = issuer === "SG" ? sgColumns(table.rows) : null;
+    const barclaysHeaderIndex = issuer === "BARCLAYS" ? barclaysQuoteHeaderIndex(table.rows) : -1;
     for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) {
       const source = table.rows[rowIndex] ?? [];
       const row = issuer === "MS"
@@ -514,6 +576,14 @@ export function parseIssuerTables(issuer: Issuer, document: ParsedTablesDocument
               ? standardRow(STANDARD_PROFILES[issuer], source, table.index, rowIndex)
               : null;
       if (!row) continue;
+      if (issuer === "BARCLAYS" && barclaysHeaderIndex >= 0) {
+        const cometError = barclaysErrors.get(table.index)?.get(rowIndex - barclaysHeaderIndex);
+        if (cometError) {
+          row.issuerComment = cometError;
+          row.rejectionReason = cometError;
+          row.warnings.push("BARCLAYS_COMET_ERROR");
+        }
+      }
       result.push(row);
     }
   }

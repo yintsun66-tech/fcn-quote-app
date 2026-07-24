@@ -184,6 +184,27 @@ the deployment. Treat that as the smallest remaining UI verification task.
   client contains `/rfqs/summary`, `/snapshot`, `document.hidden`, and adaptive-polling markers.
 - Not yet verified: an authenticated browser walkthrough and a live 50-user read-path load test.
 
+## Local issuer-parser corrections awaiting commit/deployment
+
+- A production RFQ diagnostic proved that mail delivery, correlation and Queue processing
+  completed, but valid DAC replies from SG and UBS were discarded by product recognition.
+- The local working tree now maps SG `Fixed Coupons` values such as `First Period`,
+  `First Two Periods` and positive period counts to canonical DAC while retaining
+  `All Periods` as FCN. Unknown free text remains unsupported.
+- UBS reply product `VMRAN` now normalizes to canonical DAC; its large trailing Quote ID remains
+  metadata and does not shift the formal quote columns.
+- BARCLAYS Comet row errors are now attached to the corresponding response rows, so an invalid
+  product-name response becomes `ISSUER_REJECTED` with a safe reason instead of `NO_QUOTE`.
+  The accepted BARCLAYS DAC outbound product code is still unconfirmed and was not guessed or
+  changed; the shared BMJB outbound format remains intact.
+- Parser version advances to `issuer-fcn-v3`; affected profile identifiers advance without any
+  D1 migration, binding, dependency, lockfile or outbound-email format change.
+- Verification completed locally: source/test TypeScript checks passed, the full suite passed
+  (16 files / 79 tests), and the Cloudflare Worker dry-run build passed.
+- These changes are not committed, pushed or deployed. Existing finalized RFQs are not
+  automatically reparsed or reranked; use a new RFQ after deployment unless a separately reviewed,
+  versioned reprocessing workflow is implemented.
+
 ## Production gaps and cautions
 
 1. A batch marked `SENT` means Cloudflare accepted it; it is not proof of delivery to the bank

@@ -143,6 +143,9 @@ See [ADR 0008](adr/0008-recoverable-rfq-workspace.md) and
 - `backend-client.js`: application-domain authentication, RFQ workspace, result UI, images, and
   ADMIN dialogs. It activates only on `app.yintsun66.com` or with `?backend=1`.
 - `backend/src/index.ts`: Worker/Email/Queue/scheduled-event router.
+- `backend/src/auth.ts`: registration/login/session, `requireAdmin`/`requireAdminOrPs`, PS
+  promote/demote, account list/disable, employee-number lookup, and duplicate-registration
+  summary. `backend/src/db.ts`: `loadSession` + `effectiveRole` (USER|ADMIN|PS derivation).
 - `backend/src/rfqs.ts`: RFQ create/read/list/validate behavior.
 - `backend/src/outbound.ts`: outbound snapshot and Queue processing.
 - `backend/src/inbound.ts`, `backend/src/inbound-parser.ts`: MIME intake and correlation/parsing.
@@ -181,13 +184,15 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: 16 files / 84 tests passed.
+- Full test suite: 16 files / 87 tests passed (was 84 before the PS/account-management work).
 - Cloudflare Worker dry-run build: passed.
 - Production health/static readback: HTTP 200; the live shared email module contains
-  `buildProductAwareSubject` and the `DAC/DRA` marker.
+  `buildProductAwareSubject` and the `DAC/DRA` marker; the live `backend-client.js` also carries
+  the PS/account-management, duplicate-registration, and 以行編查詢帳號 markers; unauthenticated
+  `GET /api/v1/admin/accounts` and `POST /api/v1/admin/accounts/lookup` return 401.
 
-An authenticated browser walkthrough of every new workspace interaction was not performed after
-the deployment. Treat that as the smallest remaining UI verification task.
+An authenticated browser walkthrough of the new ADMIN/PS interactions was not performed after
+the deployment (see "Safe next steps"). Treat that as the smallest remaining UI verification task.
 
 ## UI and selective-send changes (2026-07-24)
 
@@ -340,6 +345,14 @@ the deployment. Treat that as the smallest remaining UI verification task.
     rejected Product=`DAC` even though the `DAC/DRA` subject marker survived; its accepted DAC
     outbound product code remains unknown. Do not guess or change the shared BMJB format without
     issuer/bank confirmation.
+12. **Roles and account management (ADR 0012).** Effective roles are `USER｜PS｜ADMIN`; `PS` is the
+    `users.is_privileged_support` flag (migration `0010`), never a stored `role` value —
+    always compare against the effective role from `effectiveRole`/the session, not the raw column.
+    Account removal is a soft `status='DISABLED'` (RFQ ownership is `ON DELETE RESTRICT`); do not
+    hard-delete users. ADMIN/PS accounts are protected by SQL `WHERE` guards, not only the UI.
+    Employee numbers stay out of the 所有帳號列表; the ADMIN-only `POST /admin/accounts/lookup`
+    matches by keyed hash and must never log the queried 行編. The `register()` duplicate path is
+    intentionally silent to the applicant (anti-enumeration); surface duplicates to reviewers only.
 
 ## User-owned/untracked work to preserve
 
@@ -370,10 +383,16 @@ the deployment. Treat that as the smallest remaining UI verification task.
 7. Before handback, run the applicable verification baseline, inspect the complete Git diff,
    update this file with exact evidence, and report whether commit, push, migration, and deploy
    each occurred.
-8. End-to-end checks still owed: selective per-issuer sending through the issuer picker
-   (especially BMJB grouping), visual confirmation of the DAC/DRA floating-income note on a
-   downloaded production image, Barclays DAC routing/code, and CA latency under the current
-   15-minute deadline.
+8. End-to-end checks still owed:
+   - **ADMIN/PS admin walkthrough (smallest remaining item).** As ADMIN (14053): open
+     **所有帳號列表**, confirm last-online times; promote a test USER to PS and confirm that USER
+     re-logs-in as PS; as that PS confirm it can 核准/剔除 a regular USER but sees no action on
+     ADMIN/PS rows and no 以行編查詢帳號 box; confirm a 剔除'd user is logged out; demote the PS
+     back; use 以行編查詢帳號 to resolve a「行編已存在」case; confirm the duplicate-registration
+     amber note appears after a duplicate attempt.
+   - Selective per-issuer sending through the issuer picker (especially BMJB grouping), visual
+     confirmation of the DAC/DRA floating-income note on a downloaded production image, Barclays
+     DAC routing/code, and CA latency under the current 15-minute deadline.
 
 ## Deployment reminder
 

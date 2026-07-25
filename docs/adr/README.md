@@ -44,5 +44,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0009: Selective issuer send](0009-selective-issuer-send.md)
 - [ADR 0010: Efficient RFQ polling and versioned snapshots](0010-efficient-rfq-polling.md)
 - [ADR 0011: DAC-family subject routing marker](0011-dac-subject-routing-marker.md)
+- [ADR 0012: PS support tier and account management](0012-ps-tier-and-account-management.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

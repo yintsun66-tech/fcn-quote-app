@@ -36,6 +36,12 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   guess the Barclays DAC code or change the shared BMJB body globally: the same BMJB request
   already works for BNP/MS/JPM. Read ADR 0011 and the latest `docs/HANDOFF.md` before proposing
   any Barclays-specific split.
+- Effective roles are `USER｜PS｜ADMIN` (ADR 0012). `PS` is the `users.is_privileged_support`
+  flag (migration `0010`, applied to remote D1), never a stored `role` value — gate on the
+  effective role from `effectiveRole`/the session. Account removal is a soft `status='DISABLED'`;
+  never hard-delete users. ADMIN/PS accounts are protected by SQL `WHERE` guards. The ADMIN-only
+  `POST /admin/accounts/lookup` must never log the queried 行編, and `register()` stays silent to
+  the applicant on duplicates (anti-enumeration). Migrations are applied through `0010`.
 
 ## Handback checklist
 

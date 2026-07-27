@@ -20,7 +20,8 @@ Previous: `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
 
 Production implementation head when this handoff was updated:
 `feature/subject-branch-correlation` at `481c220`, pushed to `origin`. The deployment-record
-documentation commit follows that implementation head. The branch is not merged to `main`.
+documentation commit `ec0e489` follows that implementation head and is the current remote branch
+HEAD. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -120,10 +121,11 @@ code or real quote value was copied into the repository.
 - Across 315 inbound messages, 228 are on-time parsed, 42 are linked late replies and 45 are the
   early untagged unmatched messages. No GS inbound message has ever been observed. CA has only two
   linked late replies and two early unmatched messages; no on-time parsed CA reply is present.
-- Under the current 15-minute cohort (18 RFQs), valid-reply counts are BNP/MS 15 each, DBS 14,
+- Under the historical 15-minute cohort before ADR 0015's grace (18 RFQs), valid-reply counts are BNP/MS 15 each, DBS 14,
   JPM 13, UBS 12, NOMURA 10, SG 9, CITI 8, BARCLAYS 7, and CA/GS 0. Keep the 15-minute deadline
-  while measuring current CA behavior; a longer global deadline should not be chosen from the
-  old 10-minute cohort alone.
+  as the issuer reply window while measuring current CA behavior; a longer global reply window
+  should not be chosen from the old 10-minute cohort alone. New RFQs also receive the ADR 0015
+  sixty-second transport grace.
 - Ranking is not stuck: all 43 rank jobs completed. Image rendering is the remaining terminal
   workflow defect: 93 artifacts are `READY`, while 9 artifacts across 6 RFQs/9 trades are
   `FAILED` with `BROWSER_RENDER_FAILED`; none of those trades currently has a ready alternative
@@ -217,12 +219,14 @@ The Cloudflare backend currently implements:
 - outbound mail archival in private R2 and an ADMIN archive viewer;
 - inbound RFC822/MIME intake, R2 retention, Queue-based parsing, issuer recognition,
   normalization, trade matching, and audit/error states;
-- per-trade ranking with the first five economic ranks, including ties at rank five;
+- per-trade persistence of the first five economic ranks for compatibility/audit, with public
+  results showing ranks 1–4 plus a server-validated custom fifth issuer;
 - Coupon descending and Price/Strike/KO/KI ascending ranking directions;
-- seven-minute provisional-result reminder, fifteen-minute hard finalization, and an
-  owner-authorized early-finalize action;
-- deterministic rank-one image generation plus owner-requested images for another persisted
-  top-five quote;
+- seven-minute provisional-result reminder, a fifteen-minute reply window followed by a
+  sixty-second mail-transport grace, and an owner-authorized early-finalize action outside grace;
+- immutable late replies and owner/ADMIN versioned recalculation;
+- deterministic rank-one image generation plus owner-requested images for exact ranks 1–4 or a
+  server-validated custom fifth quote;
 - portrait, issuer-themed quote cards stored in private R2;
 - ADMIN registration review, outbound archive, and RFQ timing diagnostics;
 - owner-scoped recoverable RFQ workspace.
@@ -264,7 +268,12 @@ See [ADR 0008](adr/0008-recoverable-rfq-workspace.md) and
 - `backend/src/issuer-profiles.ts`: issuer-specific row parsing and units.
 - `backend/src/quote-normalize.ts`: canonical quote normalization and expected-issuer terminal
   states.
-- `backend/src/ranking.ts`, `backend/src/results.ts`: finalization, ranking, result contracts.
+- `backend/src/rfq-timing.ts`: seven-minute reminder, fifteen-minute reply window, sixty-second
+  grace, and combined hard-deadline helpers.
+- `backend/src/ranking-policy.ts`: shared normal/recalculation eligibility, economic ranking, and
+  custom-fifth candidate policy.
+- `backend/src/ranking.ts`, `backend/src/results.ts`: versioned finalization, persisted ranking,
+  public result contracts, and owner/ADMIN recalculation.
 - `backend/src/artifacts.ts`, `backend/src/quote-card.ts`: image jobs and quote-card rendering.
 - `backend/src/coordinator.ts`: per-RFQ Durable Object and deadline orchestration.
 - `backend/migrations/`: immutable D1 migrations; never edit an applied migration.
@@ -296,15 +305,17 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: 16 files / 87 tests passed (was 84 before the PS/account-management work).
+- Full test suite: 16 files / 102 tests passed.
 - Cloudflare Worker dry-run build: passed.
-- Production health/static readback: HTTP 200; the live shared email module contains
-  `buildProductAwareSubject` and the `DAC/DRA` marker; the live `backend-client.js` also carries
-  the PS/account-management, duplicate-registration, and 以行編查詢帳號 markers; unauthenticated
-  `GET /api/v1/admin/accounts` and `POST /api/v1/admin/accounts/lookup` return 401.
+- Production health/static readback for Worker
+  `68c62104-aa1d-48b9-b391-ff03695224f6`: HTTP 200; the live `backend-client.js` contains
+  `backendRecalculate`, `inMailGrace`, `data-custom-fifth-select`, and `alternateQuotes`; the live
+  stylesheet contains `custom-fifth-row`. Earlier deployment checks also verified the
+  PS/account-management, duplicate-registration, and 以行編查詢帳號 guards.
 
-An authenticated browser walkthrough of the new ADMIN/PS interactions was not performed after
-the deployment (see "Safe next steps"). Treat that as the smallest remaining UI verification task.
+Authenticated browser walkthroughs remain outstanding for both ADMIN/PS account interactions and
+ADR 0015's grace/recalculation/custom-fifth workflow (see "Safe next steps"). Treat these as UI
+verification gaps, not evidence that the verified API/static deployment failed.
 
 ## UI and selective-send changes (2026-07-24)
 
@@ -473,10 +484,11 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
    message — likely no upstream quoting/forwarding, not a parser defect. CA *does* reply and its
    format parses and matches trades correctly (not a format bug like SG was); the issue is speed.
    Correlated CA replies were observed **~12.8 and ~25.4 minutes after send**, measured under the
-   old 600s deadline so both landed as `LATE_REPLY`/`TIMEOUT`. The current 900s (15-minute) hard
-   deadline would capture the ~13-minute case but not the ~25-minute one; CA has not yet been
-   re-tested under 900s. Reliably capturing CA's slow replies would need a longer
-   `RFQ_DEADLINE_SECONDS` (e.g. 1800s), which lengthens the wait for every RFQ — a user decision.
+   old 600s deadline so both landed as `LATE_REPLY`/`TIMEOUT`. The current 900s reply window plus
+   60s grace would capture the ~13-minute case but not the ~25-minute one; CA has not yet been
+   re-tested under the current timing. Reliably capturing CA's slow replies would need a longer
+   `RFQ_DEADLINE_SECONDS` reply window (e.g. 1800s), which lengthens the wait for every RFQ — a
+   user decision.
    Some CA replies also reached `UNMATCHED_RFQ` (subject-correlation failure, see item 4). Confirm
    upstream/timing before treating a CA timeout as a parser defect.
 6. MS is displayed as `MS（OBU不得承做）`, but no approved account-level OBU attribute or blocking
@@ -551,9 +563,13 @@ Production-audit repair order:
      ADMIN/PS rows and no 以行編查詢帳號 box; confirm a 剔除'd user is logged out; demote the PS
      back; use 以行編查詢帳號 to resolve a「行編已存在」case; confirm the duplicate-registration
      amber note appears after a duplicate attempt.
+   - The ADR 0015 result workflow: observe the 15:00–16:00 grace state, confirm early-finalize is
+     unavailable, exercise an owner and ADMIN late-reply recalculation, select a custom fifth
+     issuer outside ranks 1–4, and generate/download that issuer's image.
    - Selective per-issuer sending through the issuer picker (especially BMJB grouping), visual
      confirmation of the DAC/DRA floating-income note on a downloaded production image, Barclays
-     DAC routing/code, and CA latency under the current 15-minute deadline.
+     DAC routing/code, and CA latency under the current fifteen-minute reply window plus
+     sixty-second grace.
 
 ## Deployment reminder
 

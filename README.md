@@ -14,7 +14,8 @@
 
 正式應用位於 `https://app.yintsun66.com`。同一套根目錄資產由 Cloudflare Worker
 提供，並透過 `backend-client.js` 加入登入、可勾選發行機構的後端自動寄信、回覆解析、
-經濟前四名加自選第五家比價、私人報價圖（DAC 產品加註浮動收益）、可恢復的「我的詢價」工作區，以及
+15 分鐘報價期加 60 秒郵件轉送緩衝、經濟前四名加自選第五家比價、晚到報價版本化
+重新排名、私人報價圖（DAC 產品加註浮動收益）、可恢復的「我的詢價」工作區，以及
 ADMIN／PS 管理功能（所有帳號列表與上次上線時間、升級／降級 PS、剔除一般帳號、
 使用者申請審核、重複申請提示、以行編查詢帳號）。
 
@@ -24,7 +25,12 @@ Durable Object、R2 與測試位於 `backend/`。
 ## 目前正式環境基線
 
 - 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。
-- 最新正式 Worker 版本為 `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`（2026-07-27 部署）。
+- 目前遠端分支 HEAD 為 `ec0e489`；正式功能 commit 為 `481c220`。
+- 最新正式 Worker 版本為 `68c62104-aa1d-48b9-b391-ff03695224f6`（2026-07-27 部署）。
+- 正式時序為 7 分鐘暫定提醒、15 分鐘發行機構回覆期、其後 60 秒郵件轉送緩衝，
+  最晚 16 分鐘建立正式排名。緩衝期間不可提早結束。
+- 正式結果自動顯示經濟排名 1–4；第五列由使用者從前四名以外的有效發行機構選擇，
+  並可產圖。晚到報價保留原始狀態，僅能由詢價本人或 ADMIN 建立新的不可變排名版本。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
   `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0010`。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
@@ -32,6 +38,9 @@ Durable Object、R2 與測試位於 `backend/`。
   `DAC(T+7)`；規則詳見 ADR 0014。
 - Barclays 已回信但拒絕 Product=`DAC`，不是收信或 parser 遺失。Barclays 接受的
   DAC 商品代碼／主旨尚未確認，不可直接修改共用 BMJB 格式或猜成 `DRA`。
+- 目前驗證基線為 16 個測試檔、102 項測試；JavaScript 語法、TypeScript typecheck、
+  完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health 與新前端
+  程式標記已驗證，但尚未完成登入後的完整人工操作巡檢。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。
 

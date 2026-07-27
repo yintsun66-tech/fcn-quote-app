@@ -1,7 +1,9 @@
 # Phase 5–7 production baseline
 
-Implemented: 2026-07-21; current baseline reviewed 2026-07-25
+Implemented: 2026-07-21; current baseline reviewed 2026-07-27
 Branch: `feature/subject-branch-correlation`
+Production implementation: `481c220`; Worker `68c62104-aa1d-48b9-b391-ff03695224f6`
+Verification baseline: 16 test files / 102 tests
 
 ## Workflow
 

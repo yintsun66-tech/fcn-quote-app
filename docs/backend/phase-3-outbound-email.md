@@ -20,8 +20,10 @@ issuer-specific first-trade label is deployed but has not yet been verified by a
   the outbound message.
 - The HTML-only trailing empty-cell workaround remains in place for UBS, CITI, and CA.
 - Each email batch has an observable D1 job and is sent through `fcn-outbound-email` with `fcn-outbound-email-dlq` as its dead-letter queue.
-- After all required batches are marked sent, the RFQ enters `WAITING` and receives a hard deadline
-  fifteen minutes after `sent_at`; the seven-minute point is a UI reminder only.
+- After all required batches are marked sent, the RFQ enters `WAITING`. Seven minutes is a UI
+  reminder, fifteen minutes is the issuer reply-window boundary, and a sixty-second mail-transport
+  grace extends the persisted hard deadline and Durable Object alarm to sixteen minutes
+  (ADR 0015).
 
 ## Public API response
 
@@ -98,7 +100,8 @@ pnpm run typecheck
 pnpm run build
 ```
 
-The current repository baseline is 16 test files / 99 tests. Tests cover the eight profile column
+The current repository baseline is 16 test files / 102 tests. Tests cover the eight profile column
 counts, final blank cells, CITI transformations, subject safety, first-row and issuer-specific
 DAC/DRA labels, eleven-issuer/eight-batch snapshots, idempotent D1 creation, send completion, and
-duplicate post-`SENT` delivery.
+duplicate post-`SENT` delivery. Timing/ranking integration tests additionally cover the sixty-second
+grace, explicit late-reply recalculation, and custom-fifth artifact authorization.

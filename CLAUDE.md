@@ -31,6 +31,21 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
+- The remote branch HEAD is `ec0e489`; production code is implementation commit `481c220`,
+  deployed as Worker `68c62104-aa1d-48b9-b391-ff03695224f6` on 2026-07-27. The current verification
+  baseline is 16 test files / 102 tests. A deployment record is evidence of Worker/static-asset
+  publication, not evidence that real bank mail was delivered.
+- ADR 0015 is the current timing/ranking contract. `RFQ_DEADLINE_SECONDS=900` is the issuer reply
+  window, not the complete hard deadline. `RFQ_MAIL_GRACE_SECONDS=60` extends persisted
+  `deadline_at` and the Durable Object alarm to 960 seconds. During the final minute the UI shows
+  `正在等待最後郵件轉送`, stays provisional, and must not allow early finalization.
+- Public results show economic ranks 1–4 plus a server-returned custom fifth issuer outside those
+  ranks. The database still persists the first five economic ranks for compatibility/audit.
+  Rank-one images remain automatic; exact rank 1–4 and server-validated custom-fifth quotes may be
+  rendered on demand. Never authorize an arbitrary quote ID only because the browser submitted it.
+- Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
+  new version through the existing recalculation endpoint, which admits only finite, matched,
+  non-rejected late values. Never rewrite the previous ranking version or original quote status.
 - Production evidence proves DAC replies and ranking for BNP, MS, JPM, NOMURA, UBS, DBS, and SG.
   The old run used a `DAC/DRA` subject marker. ADR 0014 keeps the first-trade rule but uses
   `DRA(T+7)` for NOMURA/DBS/SG/GS/CA and `DAC(T+7)` for BMJB/UBS/CITI. Barclays COMET rejected

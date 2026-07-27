@@ -100,6 +100,13 @@ describe("RFQ API", () => {
     expect(body.rfq.trades[19]).toMatchObject({ tradeCode: "T20", targetField: "COUPON" });
   });
 
+  it("accepts ZAR as an RFQ currency", async () => {
+    const response = await createRfq(userA, [trade({ currency: "ZAR" })]);
+    expect(response.status).toBe(201);
+    const body = await response.json<{ rfq: { trades: Array<{ currency: string }> } }>();
+    expect(body.rfq.trades[0]?.currency).toBe("ZAR");
+  });
+
   it("rejects more than twenty trades and invalid blank-field rules", async () => {
     const tooMany = await createRfq(userA, Array.from({ length: 21 }, () => trade()));
     expect(tooMany.status).toBe(422);

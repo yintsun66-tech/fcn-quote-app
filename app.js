@@ -138,7 +138,7 @@ import {
     row.innerHTML = `
       <td class="row-number"></td>
       <td>${select("product", ["FCN", "DAC"], "FCN")}</td>
-      <td>${select("currency", ["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD"], "USD")}</td>
+      <td>${select("currency", ["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD", "ZAR"], "USD")}</td>
       <td>${input("tradeDate", `value="${formatDate()}" placeholder="DD-MMM-YY" required`)}</td>
       <td>${input("tenor", 'type="number" min="1" max="24" value="12" required')}</td>
       <td>${input("bbgCode1", 'autocomplete="off" placeholder="例如 AAPL" required')}</td>

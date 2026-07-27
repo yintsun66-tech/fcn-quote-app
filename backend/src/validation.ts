@@ -2,7 +2,7 @@ import { sha256Text, stableStringify } from "./crypto";
 import { AppError } from "./errors";
 import type { NormalizedTrade, TargetField } from "./types";
 
-const CURRENCIES = new Set(["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD"]);
+const CURRENCIES = new Set(["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD", "ZAR"]);
 const KO_TYPES = new Set(["Daily", "Daily Memory", "Period End", "Period End Memory"]);
 const BARRIER_TYPES = new Set(["EKI", "AKI", "NONE"]);
 const MONTHS = new Map([

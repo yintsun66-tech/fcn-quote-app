@@ -3,7 +3,7 @@ import { insertAudit, newId, nowIso } from "./db";
 import { rfqCorrelationCode } from "./crypto";
 import { AppError } from "./errors";
 import { jsonResponse, requestId, requireSameOrigin } from "./http";
-import { renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
+import { QUOTE_CARD_WIDTH_PX, renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
 import { customFifthCandidates, rankValidQuotes, type QuoteRankRow } from "./ranking-policy";
 import type { AppEnv, ImageRenderJob, SessionContext, TargetField } from "./types";
 
@@ -88,16 +88,16 @@ function artifactResponse(artifact: RequestedArtifact): Record<string, unknown> 
   };
 }
 
-export async function requestTradeArtifact(
-  request: Request,
+// Single authorization path for every quote-card rendering route (server-side artifacts and the
+// client-rendered card). The browser may name a quote id, but only a quote the server itself ranks
+// within economic ranks 1-4, or admits as a custom-fifth candidate, is ever authorized.
+async function authorizeCardQuote(
   env: AppEnv,
   session: SessionContext,
   rfqId: string,
   tradeCode: string,
   quoteId?: string
-): Promise<Response> {
-  requireSameOrigin(request);
-  await requireCsrf(request, session);
+): Promise<ArtifactRequestQuote> {
   const rfq = await env.DB.prepare(
     "SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ? AND user_id = ?"
   ).bind(rfqId, session.user.id).first<{ workflow_status: string; current_ranking_version: number }>();
@@ -138,13 +138,13 @@ export async function requestTradeArtifact(
     }
   } else {
     rankedQuote = await env.DB.prepare(
-    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
-       FROM ranking_runs run
-       JOIN ranking_results result ON result.ranking_run_id = run.id AND result.is_image_winner = 1
-       JOIN rfq_trades trade ON trade.id = result.trade_id
-       JOIN issuer_quotes q ON q.id = result.quote_id
-      WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
-      LIMIT 1`
+      `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
+         FROM ranking_runs run
+         JOIN ranking_results result ON result.ranking_run_id = run.id AND result.is_image_winner = 1
+         JOIN rfq_trades trade ON trade.id = result.trade_id
+         JOIN issuer_quotes q ON q.id = result.quote_id
+        WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
+        LIMIT 1`
     ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestQuote>();
   }
   if (!rankedQuote) {
@@ -154,6 +154,80 @@ export async function requestTradeArtifact(
       quoteId ? "此報價不在目前的前四名或自選第五名候選中。" : "此筆交易沒有可產圖的第一名報價。"
     );
   }
+  return rankedQuote;
+}
+
+// Loads the exact card model used by the Browser Rendering path, so a client-rendered card and a
+// server-rendered artifact are generated from one template and one data query.
+async function loadCardTrades(
+  env: AppEnv,
+  rfqId: string,
+  tradeCode: string,
+  quoteId: string
+): Promise<QuoteCardTrade[]> {
+  const rows = await env.DB.prepare(
+    `SELECT t.sequence, t.trade_code, q.product, q.currency, q.issuer, q.issuer_display_name,
+            t.trade_date, q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
+            q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
+            q.ki_barrier_pct, q.comparable_price_pct
+       FROM rfq_trades t
+       JOIN issuer_quotes q ON q.trade_id = t.id
+      WHERE t.rfq_id = ? AND t.trade_code = ? AND q.id = ?
+      ORDER BY t.sequence`
+  ).bind(rfqId, tradeCode, quoteId).all<QuoteCardRow>();
+  if (!rows.results.length) throw new AppError(404, "QUOTE_CARD_NOT_FOUND", "找不到此報價的內容。 ");
+  return rows.results.map(row => ({
+    sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,
+    issuer: row.issuer, issuerDisplayName: row.issuer_display_name, tradeDate: row.trade_date,
+    tenorMonths: row.tenor_months,
+    guaranteedPeriodsMonths: row.guaranteed_periods_months, underlyings: safeUnderlyings(row.underlyings_json),
+    couponPaPct: row.coupon_pa_pct, strikePct: row.strike_pct, koBarrierPct: row.ko_barrier_pct,
+    koType: row.ko_type, barrierType: row.barrier_type, kiBarrierPct: row.ki_barrier_pct,
+    comparablePricePct: row.comparable_price_pct
+  }));
+}
+
+// ADR 0017: returns the authorized quote-card document so the requesting browser can rasterize it
+// locally, instead of spending the shared Browser Rendering budget. The HTML is returned inside
+// JSON rather than as a rendered response so the API origin never serves renderable markup.
+export async function getTradeCardDocument(
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string,
+  tradeCode: string,
+  quoteId?: string
+): Promise<Response> {
+  const authorized = await authorizeCardQuote(env, session, rfqId, tradeCode, quoteId);
+  const trades = await loadCardTrades(env, rfqId, tradeCode, authorized.quote_id);
+  const html = renderQuoteCardHtml(
+    authorized.issuer,
+    trades,
+    await rfqCorrelationCode(env.EMPLOYEE_LOOKUP_KEY, rfqId)
+  );
+  return jsonResponse({
+    card: {
+      tradeCode,
+      quoteId: authorized.quote_id,
+      issuer: authorized.issuer,
+      rankingVersion: authorized.ranking_version,
+      renderProfileVersion: RENDER_PROFILE_VERSION,
+      width: QUOTE_CARD_WIDTH_PX,
+      html
+    }
+  });
+}
+
+export async function requestTradeArtifact(
+  request: Request,
+  env: AppEnv,
+  session: SessionContext,
+  rfqId: string,
+  tradeCode: string,
+  quoteId?: string
+): Promise<Response> {
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const rankedQuote = await authorizeCardQuote(env, session, rfqId, tradeCode, quoteId);
 
   const idempotencyKey = quoteArtifactIdempotencyKey(
     rfqId,
@@ -289,26 +363,12 @@ async function claimJob(env: AppEnv, requested: ImageRenderJob): Promise<Artifac
 export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJob): Promise<void> {
   const job = await claimJob(env, requested);
   if (!job) return;
-  const rows = await env.DB.prepare(
-    `SELECT t.sequence, t.trade_code, q.product, q.currency, q.issuer, q.issuer_display_name,
-            t.trade_date, q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
-            q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
-            q.ki_barrier_pct, q.comparable_price_pct
-       FROM rfq_trades t
-       JOIN issuer_quotes q ON q.trade_id = t.id
-      WHERE t.rfq_id = ? AND t.trade_code = ? AND q.id = ?
-      ORDER BY t.sequence`
-  ).bind(job.rfq_id, job.trade_code, job.quote_id).all<QuoteCardRow>();
-  if (!rows.results.length) throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
-  const trades: QuoteCardTrade[] = rows.results.map(row => ({
-    sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,
-    issuer: row.issuer, issuerDisplayName: row.issuer_display_name, tradeDate: row.trade_date,
-    tenorMonths: row.tenor_months,
-    guaranteedPeriodsMonths: row.guaranteed_periods_months, underlyings: safeUnderlyings(row.underlyings_json),
-    couponPaPct: row.coupon_pa_pct, strikePct: row.strike_pct, koBarrierPct: row.ko_barrier_pct,
-    koType: row.ko_type, barrierType: row.barrier_type, kiBarrierPct: row.ki_barrier_pct,
-    comparablePricePct: row.comparable_price_pct
-  }));
+  let trades: QuoteCardTrade[];
+  try {
+    trades = await loadCardTrades(env, job.rfq_id, job.trade_code, job.quote_id);
+  } catch {
+    throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
+  }
   const html = renderQuoteCardHtml(
     job.issuer,
     trades,
@@ -318,7 +378,7 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   try {
     response = await env.BROWSER.quickAction("screenshot", {
       html,
-      viewport: { width: 720, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
+      viewport: { width: QUOTE_CARD_WIDTH_PX, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
       screenshotOptions: { type: "png", fullPage: true },
       gotoOptions: { waitUntil: "networkidle0" }
     });

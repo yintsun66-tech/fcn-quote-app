@@ -23,7 +23,7 @@ import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, getRfqListSummary, listRfqs, validateRfq } from "./rfqs";
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
-import { consumeImageRender, requestTradeArtifact } from "./artifacts";
+import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "./artifacts";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import {
   downloadArtifact,
@@ -117,6 +117,14 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
       quoteArtifactMatch[2],
       quoteArtifactMatch[3]
     );
+  }
+  const quoteCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/quotes\/([^/]+)\/card$/.exec(path);
+  if (method === "GET" && quoteCardMatch?.[1] && quoteCardMatch[2] && quoteCardMatch[3]) {
+    return getTradeCardDocument(env, session, quoteCardMatch[1], quoteCardMatch[2], quoteCardMatch[3]);
+  }
+  const tradeCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/card$/.exec(path);
+  if (method === "GET" && tradeCardMatch?.[1] && tradeCardMatch[2]) {
+    return getTradeCardDocument(env, session, tradeCardMatch[1], tradeCardMatch[2]);
   }
   const tradeArtifactMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/artifact$/.exec(path);
   if (method === "POST" && tradeArtifactMatch?.[1] && tradeArtifactMatch[2]) {

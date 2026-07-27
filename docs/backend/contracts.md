@@ -38,6 +38,15 @@ Revokes the current server-side session and expires the cookie.
 
 Returns the minimum current-user profile needed by the UI. It never returns password material, employee-number protection keys, approval notes, or other users.
 
+### Quote-card document (ADR 0017)
+
+- `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/card` — rank-one card.
+- `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/quotes/:quoteId/card` — a specific authorized quote.
+
+Returns `{ card: { tradeCode, quoteId, issuer, rankingVersion, renderProfileVersion, width, html } }`. The requesting browser rasterizes `html` locally and downloads a PNG, so no Browser Rendering capacity, queue message or R2 object is consumed.
+
+Authorization is identical to the artifact endpoints and is enforced by the shared `authorizeCardQuote`: the caller must own the RFQ, the RFQ must be `COMPLETED` with a current ranking run, and the quote must be ranked 1–4 by the server or be a custom-fifth candidate. A quote id supplied by the browser is never trusted on its own. The document is returned inside JSON rather than as `text/html` so the API origin never serves renderable markup.
+
 ### Administrative registration endpoints
 
 - `GET /api/v1/admin/registrations?status=PENDING_APPROVAL`

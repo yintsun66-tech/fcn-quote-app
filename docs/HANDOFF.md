@@ -57,10 +57,33 @@ Changes:
 - Frontend hint text no longer promises automatic rendering; the on-demand buttons already existed
   for ranks 1–4 and the custom fifth.
 
-This is mitigation, not the structural fix — rendering still runs on a metered central resource.
-The planned follow-ups are client-side rasterization: **A** server-authorized card HTML rendered in
-the requesting browser (html2canvas, already used by the static mode), then **B** server-generated
-SVG rasterized with the browser's native canvas API (no library, no CDN, ~95% smaller R2 objects).
+This was mitigation, not the structural fix. The structural fix follows in ADR 0017.
+
+## Client-side quote-card rasterization (ADR 0017)
+
+The default image path no longer uses Browser Rendering at all.
+
+- New `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/card` and
+  `.../trades/:tradeCode/quotes/:quoteId/card` return the rendered card document inside JSON.
+- **Authorization is now shared, not duplicated.** `authorizeCardQuote` in `artifacts.ts` is the
+  single path used by both the card endpoint and `requestTradeArtifact` (ownership, `COMPLETED`,
+  current ranking run, economic ranks 1–4 or custom-fifth candidate). `loadCardTrades` and
+  `QUOTE_CARD_WIDTH_PX` are likewise shared, so the client card and the server artifact cannot
+  drift apart.
+- `backend-client.js` loads the document into an offscreen `sandbox="allow-same-origin"` iframe
+  (html2canvas can read the DOM; scripts stay blocked), waits for `document.fonts.ready`,
+  rasterizes at `scale: 2` and downloads the PNG. No queue message, no R2 object.
+- **Fallback retained:** html2canvas comes from a CDN that some corporate networks block. If
+  `window.html2canvas` is missing, the button falls back to the server-rendered artifact.
+- Capacity now scales with the number of users instead of three shared browsers, and default-path
+  images are not exposed to the 7.3% `BROWSER_RENDER_FAILED` rate.
+- Default-path images are **not persisted** (no artifact row, no R2 object, no 90-day expiry). The
+  download is the deliverable; the artifact path still exists when an archived copy is needed.
+
+Still planned (**B**): server-generated SVG rasterized with the browser's native canvas API — no
+library, no CDN, and ~95% smaller stored objects. Requires reimplementing the card layout in SVG,
+because the current design uses flexbox/grid/`flex-wrap`, which SVG cannot lay out automatically,
+and needs a subsetted CJK font embedded as a data URI to stay deterministic across devices.
 
 ## Deployed ZAR currency support
 

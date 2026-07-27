@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { processQuoteRankJob } from "../src/ranking";
-import { processImageRenderJob, requestTradeArtifact } from "../src/artifacts";
+import { getTradeCardDocument, processImageRenderJob, requestTradeArtifact } from "../src/artifacts";
 import { downloadArtifact, getRfqResults, listRfqArtifacts } from "../src/results";
 import { rfqCorrelationCode, sha256Text } from "../src/crypto";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, SessionContext } from "../src/types";
@@ -80,6 +80,7 @@ describe("versioned ranking persistence", () => {
     const imageJobs: ImageRenderJob[] = [];
     const appEnv = {
       DB: testEnv.DB,
+      EMPLOYEE_LOOKUP_KEY: testEnv.EMPLOYEE_LOOKUP_KEY,
       IMAGE_RENDER_QUEUE: { async send(job: ImageRenderJob) { imageJobs.push(job); } } as unknown as Queue<ImageRenderJob>
     } as AppEnv;
     const csrfToken = "ranking-artifact-csrf";
@@ -179,6 +180,28 @@ describe("versioned ranking persistence", () => {
     expect((await requestTradeArtifact(artifactRequest, appEnv, session, rfqId, "T01")).status).toBe(202);
     expect((await requestTradeArtifact(artifactRequest.clone(), appEnv, session, rfqId, "T01")).status).toBe(202);
     expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.issuer])).toEqual([["T01", "BNP"]]);
+
+    // ADR 0017: the client-rendered card reuses the same server-side authorization. It returns the
+    // card document without touching Browser Rendering, and refuses anything the server has not
+    // itself ranked into the top four or admitted as a custom-fifth candidate.
+    const queuedBeforeCard = imageJobs.length;
+    const cardResponse = await getTradeCardDocument(appEnv, session, rfqId, "T01", quoteIds[0]);
+    expect(cardResponse.status).toBe(200);
+    const cardBody = await cardResponse.json<{
+      card: { tradeCode: string; quoteId: string; issuer: string; width: number; html: string };
+    }>();
+    expect(cardBody.card).toMatchObject({ tradeCode: "T01", quoteId: quoteIds[0], issuer: "BNP", width: 720 });
+    expect(cardBody.card.html).toContain("<!doctype html>");
+    expect(imageJobs.length).toBe(queuedBeforeCard);
+    await expect(getTradeCardDocument(
+      appEnv,
+      { ...session, user: { ...session.user, id: `usr_${crypto.randomUUID()}` } },
+      rfqId,
+      "T01",
+      quoteIds[0]
+    )).rejects.toMatchObject({ code: "RFQ_NOT_FOUND" });
+    await expect(getTradeCardDocument(appEnv, session, rfqId, "T01", `qte_${crypto.randomUUID()}`))
+      .rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
 
     const alternateRequest = new Request(
       `${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/quotes/${quoteIds[3]}/artifact`,

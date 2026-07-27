@@ -49,5 +49,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0014: Issuer-specific DAC-family subject labels](0014-issuer-specific-dac-subject-label.md)
 - [ADR 0015: Mail-transport grace, custom fifth issuer, and late-reply recalculation](0015-mail-grace-custom-fifth-and-late-recalculation.md)
 - [ADR 0016: On-demand quote images](0016-on-demand-quote-images.md)
+- [ADR 0017: Client-side quote-card rasterization](0017-client-side-quote-card-rendering.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

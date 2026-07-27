@@ -881,8 +881,9 @@
   function artifactLinkHtml(artifact, tradeCode, quoteId, isImageWinner, provisional) {
     if (provisional) return "";
     if (!artifact) {
-      const label = isImageWinner ? "產出第一名報價圖" : "產出此發行機構報價圖";
-      // Rank-one is no longer pre-rendered (ADR 0016); every rank uses the same on-demand action.
+      const label = isImageWinner ? "下載第一名報價圖" : "下載此發行機構報價圖";
+      // Rank-one is no longer pre-rendered (ADR 0016); every rank uses the same on-demand action,
+      // which rasterizes in this browser (ADR 0017) and falls back to a server render if blocked.
       return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}" data-artifact-quote="${escapeHtml(quoteId)}">${label}</button>`;
     }
     if (artifact.status === "READY") {
@@ -967,7 +968,7 @@
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">需要報價圖時，請在發行機構旁按「產圖」；前四名及自選第五名皆可產出。</p>"
+        ? "<p class=\"artifact-pending\">需要報價圖時，請在發行機構旁按「下載報價圖」，圖片會直接在本機產生並下載；前四名及自選第五名皆可。</p>"
         : "";
       return;
     }
@@ -1072,14 +1073,67 @@
     issuerPickerDialog.close();
     submitRfq(selected);
   });
+  // ADR 0017: rasterize an authorized quote card in the requesting browser. The server still
+  // decides which quote may be rendered and still owns the card template; only the pixel work
+  // moves to the client, which removes the shared Browser Rendering budget from the hot path.
+  async function renderCardLocally(tradeCode, quoteId) {
+    const { card } = await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(tradeCode)}/quotes/${encodeURIComponent(quoteId)}/card`);
+    const frame = document.createElement("iframe");
+    // allow-same-origin lets html2canvas read the document; scripts stay blocked.
+    frame.setAttribute("sandbox", "allow-same-origin");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${card.width}px;height:10px;border:0;visibility:hidden`;
+    document.body.append(frame);
+    try {
+      await new Promise((resolve, reject) => {
+        frame.addEventListener("load", resolve, { once: true });
+        frame.addEventListener("error", () => reject(new Error("報價圖載入失敗。")), { once: true });
+        frame.srcdoc = card.html;
+      });
+      const frameDocument = frame.contentDocument;
+      if (!frameDocument?.body) throw new Error("無法讀取報價圖內容。");
+      if (frameDocument.fonts?.ready) await frameDocument.fonts.ready;
+      const height = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
+      frame.style.height = `${height}px`;
+      const canvas = await window.html2canvas(frameDocument.body, {
+        backgroundColor: null,
+        scale: 2,
+        logging: false,
+        useCORS: false,
+        width: card.width,
+        height,
+        windowWidth: card.width,
+        windowHeight: height
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("報價圖轉檔失敗。");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${state.rfqId}-${card.tradeCode}-${card.issuer}.png`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } finally {
+      frame.remove();
+    }
+  }
+
   async function requestArtifactFromButton(event) {
     const target = event.target.closest("[data-artifact-trade]");
     if (!target || !state.rfqId || !target.dataset.artifactQuote) return;
     const originalLabel = target.textContent;
+    const { artifactTrade, artifactQuote } = target.dataset;
     target.disabled = true;
-    target.textContent = "建立中…";
+    target.textContent = "產圖中…";
     try {
-      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(target.dataset.artifactTrade)}/quotes/${encodeURIComponent(target.dataset.artifactQuote)}/artifact`, {
+      if (typeof window.html2canvas === "function") {
+        await renderCardLocally(artifactTrade, artifactQuote);
+        target.disabled = false;
+        target.textContent = originalLabel;
+        return;
+      }
+      // The rasterizer is served from a CDN that some networks block. Fall back to the
+      // server-rendered artifact so the image stays obtainable.
+      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(artifactTrade)}/quotes/${encodeURIComponent(artifactQuote)}/artifact`, {
         method: "POST",
         body: "{}"
       });

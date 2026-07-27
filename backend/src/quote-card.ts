@@ -1,3 +1,7 @@
+// Layout width of the rendered card document. Shared so the Browser Rendering viewport and the
+// client-side rasterization path cannot drift apart.
+export const QUOTE_CARD_WIDTH_PX = 720;
+
 export interface QuoteCardTrade {
   sequence: number;
   tradeCode: string;
@@ -98,7 +102,7 @@ export function renderQuoteCardHtml(issuer: string, trades: QuoteCardTrade[], rf
     </article>`).join("");
   return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
     *{box-sizing:border-box}html,body{margin:0;background:#fff;color:#153445;font-family:Arial,"Microsoft JhengHei","Noto Sans TC",sans-serif}
-    body{width:720px;padding:18px;background:linear-gradient(160deg,#f6fafb,#edf5f6)}main{display:grid;gap:22px}
+    body{width:${QUOTE_CARD_WIDTH_PX}px;padding:18px;background:linear-gradient(160deg,#f6fafb,#edf5f6)}main{display:grid;gap:22px}
     .trade-card{overflow:hidden;border:1px solid #b8d3da;border-radius:22px;background:#fff;box-shadow:0 10px 28px rgba(13,69,88,.14)}
     .card-hero{min-height:200px;padding:26px 32px;background:linear-gradient(130deg,${theme.primary},${theme.accent});color:#fff}.trade-index{font-size:27px;font-weight:900}.hero-row{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:20px}.hero-row h1{margin:0;font-size:48px;line-height:1.05;letter-spacing:.5px}.hero-row p{margin:14px 0 0;font-size:29px}.hero-row>strong{font-size:31px;letter-spacing:.5px;text-align:right}
     .pair{display:grid;grid-template-columns:1fr 1fr}.pair>div{padding:28px 32px}.pair>div+div{border-left:1px solid #bdd7de}.pair small,.underlying-block>small{display:block;color:#286174;font-size:25px;line-height:1.25}.pair b{display:block;margin-top:18px;color:#153445;font-size:40px;line-height:1.1}.pair b.highlight{color:${theme.primary};font-size:44px}

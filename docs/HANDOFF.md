@@ -27,6 +27,41 @@ before making changes. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
+## On-demand quote images (ADR 0016) — Browser Rendering capacity
+
+Automatic rank-one image rendering is **disabled**. Rendering now happens only when a user asks
+for it, through the existing owner-authorized on-demand path.
+
+Why (read-only production audit, 2026-07-27):
+
+- `fcn-image-render` runs at `max_concurrency: 3`, matching the Browser Rendering free-plan
+  concurrent-browser allowance, on top of a per-day browser-time budget. It is the only centrally
+  metered, concurrency-limited resource in the pipeline.
+- 9 of 124 artifacts were `BROWSER_RENDER_FAILED` — a **7.3% failure rate at near-zero
+  concurrency** (51 RFQs / 6 days / 1–2 active users), with `max_retries: 3` consuming further
+  browser time per failure.
+- At 30–50 users (3.57 trades per RFQ) automatic rendering implies ~178 images/day at 50 RFQs/day
+  and ~714/day at 200 RFQs/day, against an estimated free-plan capacity of 150–300 images/day.
+  **The ceiling falls at the bottom of the target user range**, and it is a daily-budget ceiling,
+  not only a burst ceiling. Verify the current plan/limits in the Cloudflare dashboard.
+
+Changes:
+
+- `ranking.ts` no longer inserts `generated_artifacts` / `image_render_jobs` rows or enqueues a
+  render when a ranking run completes. `ranking_results.is_image_winner` still marks rank one;
+  ranking, ordering, ties and the persisted result set are unchanged.
+- New non-secret Worker variable `AUTO_RANK_ONE_IMAGE` (default `"0"`) restores the previous
+  behavior when set to `"1"`. Covered by a test.
+- `downloadArtifact` writes a `QUOTE_IMAGE_DOWNLOADED` audit event (preview flag + issuer only) so
+  **real image demand can be measured**. Query this before sizing any further rendering work.
+- Frontend hint text no longer promises automatic rendering; the on-demand buttons already existed
+  for ranks 1–4 and the custom fifth.
+
+This is mitigation, not the structural fix — rendering still runs on a metered central resource.
+The planned follow-ups are client-side rasterization: **A** server-authorized card HTML rendered in
+the requesting browser (html2canvas, already used by the static mode), then **B** server-generated
+SVG rasterized with the browser's native canvas API (no library, no CDN, ~95% smaller R2 objects).
+
 ## Deployed ZAR currency support
 
 Commit `98d969c` is pushed and deployed as Worker

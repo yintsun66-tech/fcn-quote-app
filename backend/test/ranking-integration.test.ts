@@ -143,18 +143,13 @@ describe("versioned ranking persistence", () => {
       [5, 6]
     ]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
-    expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.quoteId, imageJob.issuer])).toEqual([
-      ["T01", quoteIds[0], "BNP"]
-    ]);
+    // ADR 0016: rank one is still flagged as the image winner, but no image is rendered
+    // automatically. Nothing may reach the Browser Rendering queue until a user asks for it.
+    expect(imageJobs).toEqual([]);
     const artifacts = await testEnv.DB.prepare(
       "SELECT trade_code, quote_id, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY trade_code"
     ).bind(rfqId).all<{ trade_code: string; quote_id: string; issuer: string; render_profile_version: string }>();
-    expect(artifacts.results).toEqual([{
-      trade_code: "T01",
-      quote_id: quoteIds[0],
-      issuer: "BNP",
-      render_profile_version: "quote-card-reference-v3"
-    }]);
+    expect(artifacts.results).toEqual([]);
 
     const artifactRequest = new Request(`${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/artifact`, {
       method: "POST",
@@ -355,5 +350,22 @@ describe("versioned ranking persistence", () => {
     }>();
     expect(recalculated.rfq.rankingVersion).toBe(2);
     expect(recalculated.trades[0]?.rankings[0]).toMatchObject({ quoteId: lateQuoteId, rank: 1 });
+
+    // ADR 0016 compatibility switch: AUTO_RANK_ONE_IMAGE="1" restores automatic rank-one
+    // rendering, so the previous behavior stays available without a code change.
+    const autoJobId = `qrj_${crypto.randomUUID()}`;
+    await testEnv.DB.prepare(
+      `INSERT INTO quote_rank_jobs
+        (id, rfq_id, trigger, requested_version, idempotency_key, status,
+         available_at, created_at, updated_at)
+       VALUES (?, ?, 'RECALCULATION', 3, ?, 'QUEUED', ?, ?, ?)`
+    ).bind(autoJobId, rfqId, `ranking:${rfqId}:v3`, now, now, now).run();
+    const queuedBefore = imageJobs.length;
+    await processQuoteRankJob(
+      { ...appEnv, AUTO_RANK_ONE_IMAGE: "1" } as unknown as AppEnv,
+      { jobId: autoJobId, rfqId, trigger: "RECALCULATION", requestedVersion: 3 }
+    );
+    expect(imageJobs.length).toBe(queuedBefore + 1);
+    expect(imageJobs[imageJobs.length - 1]).toMatchObject({ tradeCode: "T01", quoteId: lateQuoteId });
   });
 });

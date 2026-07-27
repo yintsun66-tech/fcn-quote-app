@@ -882,6 +882,7 @@
     if (provisional) return "";
     if (!artifact) {
       const label = isImageWinner ? "產出第一名報價圖" : "產出此發行機構報價圖";
+      // Rank-one is no longer pre-rendered (ADR 0016); every rank uses the same on-demand action.
       return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}" data-artifact-quote="${escapeHtml(quoteId)}">${label}</button>`;
     }
     if (artifact.status === "READY") {
@@ -966,13 +967,13 @@
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">第一名會自動產圖；前四名及自選第五名可在發行機構旁另行產圖。</p>"
+        ? "<p class=\"artifact-pending\">需要報價圖時，請在發行機構旁按「產圖」；前四名及自選第五名皆可產出。</p>"
         : "";
       return;
     }
     artifactContainer.innerHTML = `<section class="backend-artifact-list">
       <h3>各交易報價圖</h3>
-      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜${item.isCustom ? "第 5 名（自選）" : `第 ${escapeHtml(item.rank)} 名`}｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名自動產圖）" : ""}：${item.status === "READY"
+      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜${item.isCustom ? "第 5 名（自選）" : `第 ${escapeHtml(item.rank)} 名`}｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名）" : ""}：${item.status === "READY"
         ? `<a class="artifact-link" href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noopener">預覽</a> · <a class="artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 PNG</a>`
         : item.status === "FAILED"
           ? `<button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(item.tradeCode)}" data-artifact-quote="${escapeHtml(item.quoteId)}">重新產圖</button>`

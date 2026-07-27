@@ -320,9 +320,16 @@ export async function downloadArtifact(request: Request, env: AppEnv, session: S
   if (Date.parse(artifact.expires_at) <= Date.now()) throw new AppError(410, "ARTIFACT_EXPIRED", "此報價圖已超過保存期限。 ");
   const object = await env.RAW_MAIL_BUCKET.get(artifact.r2_object_key);
   if (!object) throw new AppError(404, "ARTIFACT_OBJECT_NOT_FOUND", "報價圖檔案不存在。 ");
+  const isPreview = new URL(request.url).searchParams.get("preview") === "1";
+  // Records real image demand so render volume can be sized against actual downloads rather than
+  // assumed usage. Safe fields only: no quote value, correlation code or personal data.
+  await insertAudit(env, "QUOTE_IMAGE_DOWNLOADED", "ARTIFACT", artifactId, session.user.id, requestId(request), {
+    preview: isPreview,
+    issuer: artifact.issuer
+  });
   const headers = new Headers();
   headers.set("content-type", artifact.content_type);
-  const disposition = new URL(request.url).searchParams.get("preview") === "1" ? "inline" : "attachment";
+  const disposition = isPreview ? "inline" : "attachment";
   headers.set("content-disposition", `${disposition}; filename="${artifact.rfq_id}-${artifact.trade_code}-${artifact.issuer}.png"`);
   headers.set("cache-control", "private, no-store");
   headers.set("x-content-type-options", "nosniff");

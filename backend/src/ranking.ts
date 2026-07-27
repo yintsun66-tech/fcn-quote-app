@@ -97,6 +97,11 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
 
   const statements: D1PreparedStatement[] = [];
   const imageJobs: ImageRenderJob[] = [];
+  // Rank-one images are rendered on demand by default. Automatic rendering consumed the shared
+  // Browser Rendering budget for every trade of every RFQ regardless of whether the image was ever
+  // downloaded; the owner-authorized on-demand path already covers ranks 1-4 and the custom fifth.
+  // Set AUTO_RANK_ONE_IMAGE="1" to restore the previous automatic behavior.
+  const autoRankOneImage = String(env.AUTO_RANK_ONE_IMAGE) === "1";
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
@@ -117,7 +122,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
         result.quote.id === imageWinnerId ? 1 : 0, result.tieGroup, startedAt
       ));
     }
-    const imageWinner = ranked.find(result => result.quote.id === imageWinnerId);
+    const imageWinner = autoRankOneImage ? ranked.find(result => result.quote.id === imageWinnerId) : undefined;
     if (imageWinner) {
       const artifactId = newId("art");
       const imageJobId = newId("imgjob");

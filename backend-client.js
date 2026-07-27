@@ -1076,42 +1076,92 @@
   // ADR 0017: rasterize an authorized quote card in the requesting browser. The server still
   // decides which quote may be rendered and still owns the card template; only the pixel work
   // moves to the client, which removes the shared Browser Rendering budget from the hot path.
+  const CARD_RENDER_STEP_TIMEOUT_MS = 12000;
+  // iOS/iPadOS refuse to back a canvas larger than roughly 16.7M pixels (5M on low-memory
+  // devices) and return a blank one instead of throwing. Stay well under that.
+  const CARD_SAFE_CANVAS_PIXELS = 12e6;
+
+  // Every step below can stall indefinitely on mobile WebKit. Without this the button would sit
+  // on 「產圖中…」 forever, because an unsettled promise never reaches the caller's catch.
+  function withRenderTimeout(value, step) {
+    let timer;
+    return Promise.race([
+      Promise.resolve(value).finally(() => clearTimeout(timer)),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`本機產圖逾時（${step}）`)), CARD_RENDER_STEP_TIMEOUT_MS);
+      })
+    ]);
+  }
+
+  function showCardImage(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const dialog = document.createElement("dialog");
+    dialog.className = "backend-dialog backend-card-preview";
+    dialog.innerHTML = `<section class="backend-panel">
+      <div class="backend-results-heading"><div><p class="eyebrow">QUOTE IMAGE</p><h2>報價圖</h2></div><button type="button" class="secondary" data-card-close>關閉</button></div>
+      <p class="backend-archive-note">手機或平板請「長按圖片 → 儲存影像」，即可貼到 LINE 或郵件；電腦可直接按下載。</p>
+      <div class="backend-card-preview-frame"><img alt="報價圖" src="${url}"></div>
+      <a class="artifact-link" href="${url}" download="${escapeHtml(filename)}">下載 PNG</a>
+    </section>`;
+    document.body.append(dialog);
+    const close = () => {
+      dialog.close();
+      dialog.remove();
+      URL.revokeObjectURL(url);
+    };
+    dialog.querySelector("[data-card-close]").addEventListener("click", close);
+    dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+    dialog.showModal();
+  }
+
   async function renderCardLocally(tradeCode, quoteId) {
     const { card } = await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(tradeCode)}/quotes/${encodeURIComponent(quoteId)}/card`);
     const frame = document.createElement("iframe");
     // allow-same-origin lets html2canvas read the document; scripts stay blocked.
     frame.setAttribute("sandbox", "allow-same-origin");
     frame.setAttribute("aria-hidden", "true");
-    frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${card.width}px;height:10px;border:0;visibility:hidden`;
+    frame.setAttribute("tabindex", "-1");
+    // The frame must stay render-eligible. Mobile WebKit skips layout and paint for `display:none`
+    // and for offscreen `visibility:hidden` frames, which stalls both `fonts.ready` and the clone
+    // iframe html2canvas creates internally. `opacity:0` behind the page stays laid out but unseen.
+    frame.style.cssText = `position:fixed;left:0;top:0;width:${card.width}px;height:10px;border:0;opacity:0;pointer-events:none;z-index:-1`;
     document.body.append(frame);
     try {
-      await new Promise((resolve, reject) => {
+      await withRenderTimeout(new Promise((resolve, reject) => {
         frame.addEventListener("load", resolve, { once: true });
         frame.addEventListener("error", () => reject(new Error("報價圖載入失敗。")), { once: true });
         frame.srcdoc = card.html;
-      });
+      }), "載入");
       const frameDocument = frame.contentDocument;
       if (!frameDocument?.body) throw new Error("無法讀取報價圖內容。");
-      if (frameDocument.fonts?.ready) await frameDocument.fonts.ready;
+      // Fonts are a nice-to-have: rendering with the fallback face beats failing the whole export.
+      if (frameDocument.fonts?.ready) {
+        try {
+          await withRenderTimeout(frameDocument.fonts.ready, "字型");
+        } catch {
+          // continue with whatever fonts are already resolved
+        }
+      }
       const height = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
+      if (!height) throw new Error("報價圖版面尚未完成，請再試一次。");
       frame.style.height = `${height}px`;
-      const canvas = await window.html2canvas(frameDocument.body, {
+      const scale = Math.max(0.5, Math.min(2, Math.sqrt(CARD_SAFE_CANVAS_PIXELS / (card.width * height))));
+      const canvas = await withRenderTimeout(window.html2canvas(frameDocument.body, {
         backgroundColor: null,
-        scale: 2,
+        scale,
         logging: false,
         useCORS: false,
         width: card.width,
         height,
         windowWidth: card.width,
         windowHeight: height
-      });
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      }), "繪製");
+      const blob = await withRenderTimeout(
+        new Promise(resolve => canvas.toBlob(resolve, "image/png")),
+        "轉檔"
+      );
       if (!blob) throw new Error("報價圖轉檔失敗。");
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `${state.rfqId}-${card.tradeCode}-${card.issuer}.png`;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      showCardImage(blob, `${state.rfqId}-${card.tradeCode}-${card.issuer}.png`);
     } finally {
       frame.remove();
     }
@@ -1122,26 +1172,30 @@
     if (!target || !state.rfqId || !target.dataset.artifactQuote) return;
     const originalLabel = target.textContent;
     const { artifactTrade, artifactQuote } = target.dataset;
+    const status = document.querySelector("#backendCountdown");
     target.disabled = true;
     target.textContent = "產圖中…";
     try {
       if (typeof window.html2canvas === "function") {
-        await renderCardLocally(artifactTrade, artifactQuote);
-        target.disabled = false;
-        target.textContent = originalLabel;
-        return;
+        try {
+          await renderCardLocally(artifactTrade, artifactQuote);
+          return;
+        } catch (localError) {
+          // Local rasterization is best-effort. Anything from a blocked rasterizer to a mobile
+          // WebKit stall falls through to the server renderer so an image is still produced.
+          status.textContent = `${localError.message} 改用伺服器產圖…`;
+        }
       }
-      // The rasterizer is served from a CDN that some networks block. Fall back to the
-      // server-rendered artifact so the image stays obtainable.
       await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(artifactTrade)}/quotes/${encodeURIComponent(artifactQuote)}/artifact`, {
         method: "POST",
         body: "{}"
       });
       await refreshResults();
     } catch (error) {
+      status.textContent = error.message;
+    } finally {
       target.disabled = false;
       target.textContent = originalLabel;
-      document.querySelector("#backendCountdown").textContent = error.message;
     }
   }
   document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);

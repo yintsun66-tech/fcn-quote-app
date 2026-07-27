@@ -89,6 +89,50 @@ The default image path no longer uses Browser Rendering at all.
 - Default-path images are **not persisted** (no artifact row, no R2 object, no 90-day expiry). The
   download is the deliverable; the artifact path still exists when an archived copy is needed.
 
+### Mobile/tablet 「產圖中…」 hang — fixed
+
+Reported symptom: on phones and tablets the 下載報價圖 button stayed on 「產圖中…」 indefinitely.
+
+Root cause was structural: `renderCardLocally` had **four unbounded `await`s** (iframe `load`,
+`document.fonts.ready`, `html2canvas()`, `canvas.toBlob()`). None could ever reject, so if any one
+stalled, the promise never settled and the caller's `catch`/label reset never ran. The frame was
+also `visibility:hidden` and positioned offscreen, a configuration mobile WebKit deprioritizes or
+skips laying out — and html2canvas creates its *own* nested iframe inside ours and waits for that
+frame's `load` event.
+
+Measured in a reproduction harness (`scale: 2`, real vendored html2canvas):
+
+| trades | canvas | pixels | raw bitmap |
+| --- | --- | --- | --- |
+| 1 (the actual per-trade card) | 1440×2428 | 3.5M | 13 MB |
+| 3 | 1440×7076 | 10.2M | 40 MB |
+| 6 | 1440×14144 | **20.4M** | **78 MB** |
+
+Desktop Chromium backs canvases up to ~64M pixels, which is why the flow always succeeded there.
+**iOS/iPadOS cap canvas area near 16.7M pixels (5M on low-memory devices) and silently return a
+blank canvas instead of throwing.** A `display:none` frame measures `scrollHeight` 0; `opacity:0`
+in-viewport measures correctly.
+
+Fixes in `backend-client.js`:
+
+- Every step is wrapped in `withRenderTimeout` (12s). The button can no longer stick, whichever
+  step stalls, and a local failure now **falls through to the server renderer** so an image is
+  still produced. `fonts.ready` timing out is non-fatal — rendering with the fallback face beats
+  failing the export.
+- The frame is now render-eligible: `opacity:0` inside the viewport behind the page, instead of
+  offscreen `visibility:hidden`.
+- Scale is clamped to keep the bitmap under a 12M-pixel budget
+  (`sqrt(budget / (width × height))`, capped at 2), so tall cards cannot exceed mobile limits.
+- Zero measured height is now an explicit error rather than a silent 0×0 canvas.
+- The result is shown in a preview dialog with a 長按圖片→儲存影像 hint plus a download link,
+  because iOS Safari does not reliably honor `<a download>` for blob URLs — the previous code
+  called `link.click()` and assumed it worked.
+
+Verified in-browser: the timeout guard fires on a never-settling promise, and the `opacity:0`
+frame rasterizes to 1440×2536 (3.7M px, 1.27 MB PNG) for a single-trade card. **A real
+iOS/Android device check is still owed** — the browser pane is desktop Chromium and cannot
+reproduce mobile WebKit.
+
 ### Self-hosted rasterizer (closes the CDN fallback risk)
 
 `index.html` previously loaded html2canvas from `cdn.jsdelivr.net`. Corporate and bank networks

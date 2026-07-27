@@ -113,6 +113,8 @@ or issuer replies are healthy. Verify each boundary separately.
   (`feat: publish FCN V2 static snapshot`).
 - Current static program commit:
   `3ae50b78fb90ae9563c649ce2c1206a0591cf154`.
+- Current static repository HEAD after the public README deployment record:
+  `2664d3497cf8b5d0359ddccbb8e218339666217a`.
 - Snapshot source: the allowlisted public assets prepared from
   `feature/subject-branch-correlation` at implementation baseline `98d969c`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,

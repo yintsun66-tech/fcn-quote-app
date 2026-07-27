@@ -5,18 +5,19 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`bdd66c1 fix(outbound): select subject product from first trade`
+`4095b51 fix(outbound): use issuer-specific DRA subject labels`
 
 Production deployment record:
-Worker `566c7456-7e0f-42ac-9341-823c533ead71` deployed 2026-07-27 from `bdd66c1`
-(no D1 migration, secret or binding change; first-trade `FCN(T+7)` / `DAC(T+7)` subject label).
-Previous: `02311666-...` from `477b3c9` + `0d77eac` (parser/operations diagnostics);
+Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384` deployed 2026-07-27 from `4095b51`
+(no D1 migration, secret or binding change; issuer-specific `DAC(T+7)` / `DRA(T+7)` labels).
+Previous: `566c7456-...` from `bdd66c1` (first-trade product label);
+`02311666-...` from `477b3c9` + `0d77eac` (parser/operations diagnostics);
 `cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
 `364a345e-...` from `fd7a380` (duplicate-registration visibility);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `bdd66c1`, pushed to `origin`. The deployment-record
+`feature/subject-branch-correlation` at `4095b51`, pushed to `origin`. The deployment-record
 documentation commit follows that implementation head. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
@@ -26,12 +27,13 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `566c7456-7e0f-42ac-9341-823c533ead71` (first-trade product subject label and all earlier
-  behavior, deployed 2026-07-27). Post-deploy verification: `GET /api/v1/health` returned HTTP
-  200; live `index.html` and `app.js` contain the `first-trade-subject-v2` cache marker; live
-  `backend/shared/email-formats.js` contains `records[0]` and `DAC(T+7)` and no longer contains
-  the legacy `FCN(T+7) DAC/DRA` append expression.
-  Previous verified versions: `02311666-...` from `0d77eac`; `cc633dcb-...` from `0bbe159`;
+  `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384` (issuer-specific DAC/DRA subject labels and all
+  earlier behavior, deployed 2026-07-27). Post-deploy verification: `GET /api/v1/health`
+  returned HTTP 200; live `index.html` and `app.js` contain `issuer-product-subject-v3`; live
+  `backend/shared/email-formats.js` contains exactly five `dacSubjectProduct: "DRA"` profiles,
+  recognizes the DRA anchor and calls `institution.dacSubjectProduct`.
+  Previous verified versions: `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
+  `cc633dcb-...` from `0bbe159`;
   `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
   `2de5b070-...` from `23c084e`.
 - D1 database: `fcn-quote`; migrations applied to remote D1 now run through
@@ -403,7 +405,7 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   passed. No real RFQ was sent as a deployment test, so bank/issuer module routing under the new
   title still requires one separately authorized controlled RFQ.
 
-## Local issuer-specific DAC/DRA subject labels (uncommitted and not deployed)
+## Deployed issuer-specific DAC/DRA subject labels (`4095b51`)
 
 - ADR 0014 preserves first-row routing and FCN=`FCN(T+7)`, but maps DAC-family subjects by
   outbound batch: NOMURA/DBS/SG/GS/CA use `DRA(T+7)`; BMJB/UBS/CITI keep `DAC(T+7)`.
@@ -415,7 +417,11 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
 - Verification passes: JavaScript syntax checks; backend source/test typecheck; targeted
   email-format/outbound tests (2 files / 26 tests); full suite (16 files / 99 tests); and the
   Cloudflare dry-run build. Vitest emitted the known non-fatal sandbox static-analysis warnings;
-  all tests passed. No commit, push, deployment or real RFQ has occurred.
+  all tests passed.
+- Commit `4095b51` is pushed and deployed as Worker
+  `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`. Public API/static-source verification passed.
+  No real RFQ was sent as a deployment test, so issuer module routing still needs one separately
+  authorized controlled RFQ.
 
 ## Production gaps and cautions
 

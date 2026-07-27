@@ -2,8 +2,7 @@
 
 Status: implemented and deployed as of 2026-07-27. Queue producers, consumers and dead-letter
 queues are attached. The prior marker rule was exercised in production; ADR 0014's
-issuer-specific first-trade label is implemented locally but not yet deployed or verified by a
-new real RFQ.
+issuer-specific first-trade label is deployed but has not yet been verified by a new real RFQ.
 
 ## Implemented scope
 

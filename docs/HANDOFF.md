@@ -1,21 +1,23 @@
 # Project handoff
 
-Updated: 2026-07-27 (Asia/Taipei)
+Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`b7ae5fb build(vendor): self-host html2canvas instead of loading from a CDN`
+`7f1dca3 fix(artifacts): stop the mobile quote-image render from hanging forever`
 
 Production deployment record:
-Worker `f887ba53-2af9-4cf6-a493-bfc67cc4f489` deployed 2026-07-27 from `b7ae5fb`
-(self-hosted rasterizer). Post-deploy: API health 200;
+Worker `b18cba05-bd46-49b5-818e-71d36d9b9d39` deployed 2026-07-28 from `7f1dca3`
+(mobile render-hang fix). Post-deploy: API health 200; the live `backend-client.js` carries
+`withRenderTimeout`, `CARD_SAFE_CANVAS_PIXELS`, `showCardImage`, `opacity:0` and 「長按圖片」,
+and `styles.css` carries `backend-card-preview`.
+Previous: `f887ba53-2af9-4cf6-a493-bfc67cc4f489` from `b7ae5fb` (self-hosted rasterizer;
 `https://app.yintsun66.com/vendor/html2canvas-1.4.1.min.js` returns HTTP 200, 198,689 bytes,
-SHA-256 matching the vendored file exactly; the live page references
-`./vendor/html2canvas-1.4.1.min.js` and no third-party CDN host. Note the root page is edge-cached
-(`CF-Cache-Status: HIT`) — send `Cache-Control: no-cache` when verifying it, since a query string
-alone does not bust it.
-Previous: `fcf61774-b52b-45a4-ba40-2af46be691df` from `88bdbd9` (client-side quote-card
+SHA-256 matching the vendored file exactly, and no third-party CDN host remains on the live page.
+The root page is edge-cached — send `Cache-Control: no-cache` when verifying it, because a query
+string alone does not bust it);
+`fcf61774-b52b-45a4-ba40-2af46be691df` from `88bdbd9` (client-side quote-card
 rasterization, ADR 0017; unauthenticated card endpoint returns 401);
 `aa7a0656-bc5b-42b1-a6ae-63f16141de64` from `de9e8d9` (on-demand quote images,
 ADR 0016; `AUTO_RANK_ONE_IMAGE ("0")` confirmed in the deployed bindings);
@@ -30,9 +32,13 @@ economic top four plus custom fifth issuer/image);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `98d969c`, pushed to `origin`. A deployment-record
-documentation commit follows that implementation head. Resolve the current branch HEAD from Git
-before making changes. The branch is not merged to `main`.
+`feature/subject-branch-correlation` at `7f1dca3`, pushed to `origin` (local and remote match).
+Resolve the current branch HEAD from Git before making changes. The branch is not merged to
+`main`.
+
+Quote-image work landed in this order — read ADR 0016 then 0017 before touching that path:
+`de9e8d9` on-demand images → `88bdbd9` client-side rasterization → `b7ae5fb` self-hosted
+rasterizer → `7f1dca3` mobile hang fix.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -214,11 +220,15 @@ Commit `481c220` is pushed and deployed as Worker
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `fcf61774-b52b-45a4-ba40-2af46be691df` (client-side quote-card rasterization plus on-demand
-  images and all earlier behavior, deployed 2026-07-27). Post-deploy verification:
-  `GET /api/v1/health` returned HTTP 200; unauthenticated card endpoint returned 401; live
-  `backend-client.js` contains `renderCardLocally` / `allow-same-origin` / 「下載第一名報價圖」.
-  Previous verified versions: `aa7a0656-...` from `de9e8d9`; `a485a90c-...` from `98d969c`;
+  `b18cba05-bd46-49b5-818e-71d36d9b9d39` (mobile quote-image render-hang fix, on top of
+  client-side rasterization, the self-hosted rasterizer, on-demand images and all earlier
+  behavior, deployed 2026-07-28). Post-deploy verification: `GET /api/v1/health` returned
+  HTTP 200; live `backend-client.js` contains `withRenderTimeout`, `CARD_SAFE_CANVAS_PIXELS`,
+  `showCardImage`, `opacity:0` and 「長按圖片」; live `styles.css` contains
+  `backend-card-preview`; the vendored rasterizer is served from this origin with a matching
+  SHA-256 and no third-party CDN host remains on the live page.
+  Previous verified versions: `f887ba53-...` from `b7ae5fb`; `fcf61774-...` from `88bdbd9`;
+  `aa7a0656-...` from `de9e8d9`; `a485a90c-...` from `98d969c`;
   `68c62104-...` from `481c220`;
   `6520b77d-...` from `4095b51`;
   `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
@@ -453,7 +463,12 @@ See [ADR 0008](adr/0008-recoverable-rfq-workspace.md) and
   custom-fifth candidate policy.
 - `backend/src/ranking.ts`, `backend/src/results.ts`: versioned finalization, persisted ranking,
   public result contracts, and owner/ADMIN recalculation.
-- `backend/src/artifacts.ts`, `backend/src/quote-card.ts`: image jobs and quote-card rendering.
+- `backend/src/artifacts.ts`: image jobs, the shared `authorizeCardQuote` / `loadCardTrades`
+  helpers, and the `getTradeCardDocument` endpoint used by client-side rasterization.
+  `backend/src/quote-card.ts`: the card template and the exported `QUOTE_CARD_WIDTH_PX`.
+- `vendor/`: self-hosted third-party browser assets (currently html2canvas). Do not edit; see
+  `vendor/README.md` for provenance, the recorded SHA-256, and the update procedure. `.gitattributes`
+  marks `vendor/**` as `-text` so the bytes survive checkout on Windows.
 - `backend/src/coordinator.ts`: per-RFQ Durable Object and deadline orchestration.
 - `backend/migrations/`: immutable D1 migrations; never edit an applied migration.
 - `backend/test/`: Worker, parser, ranking, artifact, auth, and security regressions.
@@ -473,6 +488,7 @@ Generated files—`backend/public/`, `backend/dist/`, and
 The latest implementation was verified with:
 
 ```powershell
+node --check app.js
 node --check backend-client.js
 Set-Location backend
 pnpm run typecheck
@@ -484,17 +500,22 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: 16 files / 102 tests passed.
+- Full test suite: **16 files / 103 tests passed**.
 - Cloudflare Worker dry-run build: passed.
 - Production health/static readback for Worker
-  `68c62104-aa1d-48b9-b391-ff03695224f6`: HTTP 200; the live `backend-client.js` contains
-  `backendRecalculate`, `inMailGrace`, `data-custom-fifth-select`, and `alternateQuotes`; the live
-  stylesheet contains `custom-fifth-row`. Earlier deployment checks also verified the
-  PS/account-management, duplicate-registration, and 以行編查詢帳號 guards.
+  `b18cba05-bd46-49b5-818e-71d36d9b9d39`: HTTP 200; the live `backend-client.js` contains
+  `withRenderTimeout`, `CARD_SAFE_CANVAS_PIXELS`, `showCardImage` and 「長按圖片」; the live
+  stylesheet contains `backend-card-preview`. Earlier deployment checks verified the
+  quote-card endpoint guard (401 unauthenticated), the self-hosted rasterizer's SHA-256, and the
+  PS/account-management, duplicate-registration and 以行編查詢帳號 guards.
 
-Authenticated browser walkthroughs remain outstanding for both ADMIN/PS account interactions and
-ADR 0015's grace/recalculation/custom-fifth workflow (see "Safe next steps"). Treat these as UI
-verification gaps, not evidence that the verified API/static deployment failed.
+`backend/vitest.config.ts` reads migrations with `readD1Migrations("./migrations")`, so a new
+migration is exercised by the suite automatically.
+
+Authenticated browser walkthroughs remain outstanding for ADMIN/PS account interactions, ADR 0015's
+grace/recalculation/custom-fifth workflow, and — newly — the quote-image download on a **real
+iOS/Android device** (see "Safe next steps"). Treat these as UI verification gaps, not evidence
+that the verified API/static deployment failed.
 
 ## UI and selective-send changes (2026-07-24)
 
@@ -707,6 +728,19 @@ verification gaps, not evidence that the verified API/static deployment failed.
 
 ## Safe next steps
 
+**Highest-value item right now: the quote-image download on a real phone/tablet.** ADR 0017 moved
+rasterization into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile
+WebKit. The reproduction harness was desktop Chromium, so mobile behavior is reasoned from measured
+canvas sizes plus known iOS limits, **not observed on a device**. Ask the operator to press
+下載報價圖 on a phone/tablet; the three outcomes and what each means are recorded in the
+"Mobile/tablet 「產圖中…」 hang" section. If the message names a timed-out step, that step is the
+next thing to fix.
+
+**Second: decide ADR 0017-B with data, not assumption.** `QUOTE_IMAGE_DOWNLOADED` audit events have
+been collected since `de9e8d9`. Measure real image demand before investing in the deferred SVG
+renderer; after the client-side move and the self-hosted rasterizer, B's only remaining benefit is
+cross-device pixel consistency.
+
 Production-audit repair order:
 
 - Run one new controlled RFQ and review it through the ADMIN seven-day health panel. Historical
@@ -736,7 +770,11 @@ Production-audit repair order:
    update this file with exact evidence, and report whether commit, push, migration, and deploy
    each occurred.
 8. End-to-end checks still owed:
-   - **ADMIN/PS admin walkthrough (smallest remaining item).** As ADMIN (14053): open
+   - **Quote-image download on a real iOS/Android device (highest value).** Press 下載報價圖 and
+     confirm the preview dialog appears and the image can be long-pressed and saved. A message of
+     the form 「本機產圖逾時（步驟）改用伺服器產圖…」 means the hang is fixed but the local path
+     still fails on that device — the named step identifies what to fix next.
+   - **ADMIN/PS admin walkthrough.** As ADMIN (14053): open
      **所有帳號列表**, confirm last-online times; promote a test USER to PS and confirm that USER
      re-logs-in as PS; as that PS confirm it can 核准/剔除 a regular USER but sees no action on
      ADMIN/PS rows and no 以行編查詢帳號 box; confirm a 剔除'd user is logged out; demote the PS

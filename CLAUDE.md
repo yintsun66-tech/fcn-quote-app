@@ -31,8 +31,8 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
-- Production code is implementation commit `98d969c`, deployed as Worker
-  `a485a90c-56b9-4902-9192-e7b4b7f56eea` on 2026-07-27. Resolve the current branch HEAD from Git
+- Production code is implementation commit `7f1dca3`, deployed as Worker
+  `b18cba05-bd46-49b5-818e-71d36d9b9d39` on 2026-07-28. Resolve the current branch HEAD from Git
   rather than copying a historical handoff hash. The current verification baseline is 16 test
   files / 103 tests. A deployment record is evidence of Worker/static-asset publication, not
   evidence that real bank mail was delivered.
@@ -48,8 +48,19 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `正在等待最後郵件轉送`, stays provisional, and must not allow early finalization.
 - Public results show economic ranks 1–4 plus a server-returned custom fifth issuer outside those
   ranks. The database still persists the first five economic ranks for compatibility/audit.
-  Rank-one images remain automatic; exact rank 1–4 and server-validated custom-fifth quotes may be
-  rendered on demand. Never authorize an arbitrary quote ID only because the browser submitted it.
+  Never authorize an arbitrary quote ID only because the browser submitted it.
+- Quote images are **on demand only** (ADR 0016; `AUTO_RANK_ONE_IMAGE="0"`) and are rasterized in
+  the requesting browser (ADR 0017), so the default path uses no Browser Rendering and writes
+  nothing to R2. `authorizeCardQuote` in `artifacts.ts` is the single authorization path for both
+  the card endpoint and the server artifact — do not fork it. Browser Rendering remains the
+  fallback and is still capacity-limited (`fcn-image-render` `max_concurrency: 3` plus a per-day
+  browser-time budget), so do not reintroduce automatic rendering without re-measuring capacity.
+  Client rasterization must keep its per-step timeouts: every await there can stall on mobile
+  WebKit, and an unguarded one leaves the button stuck on 「產圖中…」 forever.
+- `vendor/` holds self-hosted third-party browser assets (html2canvas). Do not edit them, and do
+  not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
+  onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded
+  SHA-256; `.gitattributes` keeps `vendor/**` byte-exact on checkout.
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.

@@ -86,8 +86,8 @@ Because end users require application-managed usernames and passwords, Cloudflar
 - Preserve existing eight base subjects and HTML column formats.
 - Append the deterministic 10-character `[RFQ:...][BATCH:...]` correlation code; store its
   dedicated correlation value as a hash and never embed personal data.
-- For DAC-family requests, preserve the ADR 0011 subject order:
-  `FCN(T+7) DAC/DRA <branch?> [RFQ:...][BATCH:...]`.
+- Preserve the ADR 0013 subject order selected from the first trade:
+  `<FCN|DAC>(T+7) <branch?> [RFQ:...][BATCH:...]`; never append the legacy ` DAC/DRA` marker.
 - Never use `##`.
 - Never generate reply/forward prefixes such as `Re:`, `RE:`, `Fw:`, `FW:`, or `Fwd:`.
 - Enforce recipient allowlisting server-side; never accept an arbitrary recipient from the browser.

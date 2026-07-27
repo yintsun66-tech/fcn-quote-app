@@ -165,20 +165,26 @@ export function buildCorrelatedSubject(baseSubject, rfqToken, batchCode) {
 }
 
 export function buildProductAwareSubject(baseSubject, records) {
-  const hasDacProduct = records.some(record => {
-    const product = recordValue(record, "product").normalize("NFKC").replace(/\s+/g, " ").toUpperCase();
-    return ["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(product);
-  });
-  if (!hasDacProduct || /(?:^|\s)DAC\/DRA(?:\s|$)/i.test(baseSubject)) return baseSubject;
-  if (!baseSubject.includes("FCN(T+7)")) throw new Error("Missing FCN(T+7) subject anchor.");
-  return baseSubject.replace("FCN(T+7)", "FCN(T+7) DAC/DRA");
+  const firstProduct = recordValue(records[0] ?? {}, "product")
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+  const subjectProduct = ["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(firstProduct)
+    ? "DAC"
+    : firstProduct === "FCN" ? "FCN" : "";
+  const withoutLegacyMarker = baseSubject.replace(/\s+DAC\/DRA(?=\s|$)/gi, "");
+  if (!subjectProduct) return withoutLegacyMarker;
+  if (!/(?:FCN|DAC)\(T\+7\)/.test(withoutLegacyMarker)) {
+    throw new Error("Missing FCN/DAC(T+7) subject anchor.");
+  }
+  return withoutLegacyMarker.replace(/(?:FCN|DAC)\(T\+7\)/, `${subjectProduct}(T+7)`);
 }
 
 export function buildInstitutionEmail(key, records, correlation) {
   const institution = EMAIL_INSTITUTIONS[key];
   if (!institution) throw new Error("Unknown email institution.");
   const dataRows = records.map(record => institution.columns.map(column => String(column.value(record) ?? "")));
-  const subjectBase = buildProductAwareSubject(correlation?.subjectBase ?? institution.subject, records);
+  const subjectBase = correlation?.subjectBase ?? buildProductAwareSubject(institution.subject, records);
   return {
     key,
     label: institution.label,

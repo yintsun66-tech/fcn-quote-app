@@ -10,8 +10,9 @@ consumers and dead-letter queues are attached.
 - Sending snapshots eleven expected issuers; `BMJB` represents BNP, MS, JPM, and BARCLAYS as four separate expected replies.
 - `POST /api/v1/rfqs/:rfqId/send` requires an authenticated owner, same-origin request, CSRF token, validated RFQ, and `Idempotency-Key`.
 - The sender and recipient are fixed server-side to `rfq@yintsun66.com` and `i14053@firstbank.com.tw`.
-- FCN subjects retain the approved base subject. DAC-family requests insert `DAC/DRA`
-  immediately after `FCN(T+7)` and before the branch label.
+- The first trade selects the product shown in the T+7 segment: FCN uses `FCN(T+7)` and the DAC
+  family uses `DAC(T+7)`. Newly generated subjects do not contain the legacy ` DAC/DRA` marker
+  (ADR 0013).
 - Subjects append the deterministic short code `[RFQ:<code>][BATCH:<code>]`. Only its SHA-256
   hash is stored as a dedicated correlation value; the code is reconstructed while composing
   the outbound message.
@@ -59,10 +60,12 @@ The deterministic token depends on `EMPLOYEE_LOOKUP_KEY`. Do not rotate this sec
 
 ## Production evidence and unresolved BARCLAYS rule
 
-An authorized three-trade DAC run sent all eight batches with the documented `DAC/DRA`, branch and
-correlation-tag order. Eight issuer replies correlated successfully. BNP, MS, JPM, NOMURA, UBS, DBS
-and SG returned valid DAC quotes. BARCLAYS also replied, but COMET rejected Product=`DAC` for every
-row with a product-name error; this is an issuer rejection, not a delivery or parser failure.
+Before ADR 0013, an authorized three-trade DAC run sent all eight batches with the then-current
+`FCN(T+7) DAC/DRA` marker, branch and correlation-tag order. Eight issuer replies correlated
+successfully. BNP, MS, JPM, NOMURA, UBS, DBS and SG returned valid DAC quotes. BARCLAYS also
+replied, but COMET rejected Product=`DAC` for every row with a product-name error; this is an
+issuer rejection, not a delivery or parser failure. This is historical evidence and does not
+describe the current subject-construction contract.
 
 The exact BARCLAYS DAC-family Product value or module-specific subject is not yet confirmed. Because
 BMJB is shared with BNP, MS and JPM—and Product=`DAC` worked for those three—do not globally replace

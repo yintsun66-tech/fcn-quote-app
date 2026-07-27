@@ -1,7 +1,10 @@
 # ADR 0011: DAC-family subject routing marker
 
-Status: Accepted
+Status: Superseded by ADR 0013
 Date: 2026-07-24
+
+This ADR remains as the historical record of the deployed `DAC/DRA` marker experiment. ADR 0013
+replaces the active outbound-subject rule.
 
 ## Context
 

@@ -31,11 +31,11 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
-- Production evidence now proves DAC replies and ranking for BNP, MS, JPM, NOMURA, UBS, DBS, and
-  SG. Barclays COMET preserved the `DAC/DRA` subject marker but rejected Product=`DAC`. Do not
-  guess the Barclays DAC code or change the shared BMJB body globally: the same BMJB request
-  already works for BNP/MS/JPM. Read ADR 0011 and the latest `docs/HANDOFF.md` before proposing
-  any Barclays-specific split.
+- Production evidence proves DAC replies and ranking for BNP, MS, JPM, NOMURA, UBS, DBS, and SG.
+  The old run used a `DAC/DRA` subject marker; ADR 0013 supersedes that rule so the first trade
+  now selects `FCN(T+7)` or `DAC(T+7)`. Barclays COMET rejected body Product=`DAC`; do not guess
+  its DAC code or change the shared BMJB body globally. Read ADR 0013 and the latest
+  `docs/HANDOFF.md` before proposing any Barclays-specific split.
 - Effective roles are `USER｜PS｜ADMIN` (ADR 0012). `PS` is the `users.is_privileged_support`
   flag (migration `0010`, applied to remote D1), never a stored `role` value — gate on the
   effective role from `effectiveRole`/the session. Account removal is a soft `status='DISABLED'`;

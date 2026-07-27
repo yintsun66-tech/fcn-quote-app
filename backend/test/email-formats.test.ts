@@ -111,29 +111,40 @@ describe("shared issuer email formats", () => {
     expect(branchSubjectLabel("台".repeat(30)).length).toBeLessThanOrEqual(20 + 2);
   });
 
-  it("places the DAC/DRA routing marker after FCN(T+7) and before branch/correlation data", () => {
+  it("uses the first trade product in the T+7 subject label and preserves branch/correlation order", () => {
     const code = "K7P2R9QTBM";
     const branch = branchSubjectLabel("002");
     const institutionSubject = EMAIL_INSTITUTIONS.SG?.subject ?? "";
-    const subjectBase = `${institutionSubject} ${branch}`;
     const dacTrade = { ...trade, product: "DAC" };
+    const subjectBase = `${buildProductAwareSubject(institutionSubject, [dacTrade])} ${branch}`;
 
     expect(buildInstitutionEmail("SG", [dacTrade]).subject)
-      .toBe(`${institutionSubject} DAC/DRA`);
+      .toBe("SG[詢價]FCBKTPE: DAC(T+7)");
     expect(buildInstitutionEmail("SG", [dacTrade], { rfqToken: code, batchCode: "SG", subjectBase }).subject)
-      .toBe(`${institutionSubject} DAC/DRA ${branch} [RFQ:${code}][BATCH:SG]`);
+      .toBe(`SG[詢價]FCBKTPE: DAC(T+7) ${branch} [RFQ:${code}][BATCH:SG]`);
     expect(buildProductAwareSubject(`${institutionSubject} DAC/DRA ${branch}`, [dacTrade]))
-      .toBe(`${institutionSubject} DAC/DRA ${branch}`);
+      .toBe(`SG[詢價]FCBKTPE: DAC(T+7) ${branch}`);
+    expect(buildProductAwareSubject(`SG[詢價]FCBKTPE: DAC(T+7) ${branch}`, [trade]))
+      .toBe(`SG[詢價]FCBKTPE: FCN(T+7) ${branch}`);
   });
 
   it.each(["DAC", "DRA", "WRA", "Range Accrual"])(
-    "recognizes %s as a DAC-family subject-routing alias",
+    "recognizes %s as a DAC-family first-trade subject alias",
     product => {
       const baseSubject = EMAIL_INSTITUTIONS.UBS?.subject ?? "";
       expect(buildProductAwareSubject(baseSubject, [{ ...trade, product }]))
-        .toBe(`${baseSubject} DAC/DRA`);
+        .toBe("UBS[詢價]FCBKTPE: DAC(T+7)");
     }
   );
+
+  it("uses only the first trade to choose FCN or DAC for a mixed request", () => {
+    const baseSubject = EMAIL_INSTITUTIONS.BMJB?.subject ?? "";
+    const dacTrade = { ...trade, product: "DAC" };
+    expect(buildProductAwareSubject(baseSubject, [trade, dacTrade]))
+      .toBe("BMJB[詢價]FCBKTPE: FCN(T+7)");
+    expect(buildProductAwareSubject(baseSubject, [dacTrade, trade]))
+      .toBe("BMJB[詢價]FCBKTPE: DAC(T+7)");
+  });
 
   it("places the branch label before the correlation tags via subjectBase", () => {
     const code = "K7P2R9QTBM";

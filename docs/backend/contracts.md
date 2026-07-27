@@ -290,15 +290,18 @@ FCN:
 
 DAC family:
 
-`<issuer base subject ending FCN(T+7)> DAC/DRA <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
+`<issuer prefix> DAC(T+7) <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
 
 Requirements:
 
+- The first trade alone selects the product label: FCN → `FCN(T+7)`; DAC-family aliases
+  (`DAC`, `DRA`, `WRA`, `Range Accrual`) → `DAC(T+7)`.
+- Newly generated subjects never contain the legacy literal segment ` DAC/DRA`.
 - The deterministic short code contains no personal email address or employee number; only its
   hash is stored in the dedicated correlation column.
 - Do not use `##`.
 - Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes.
-- Preserve the issuer base subject. Product marker, optional branch label and correlation tags must
+- Preserve the issuer prefix. Product label, optional branch label and correlation tags must
   remain in the order above.
 - BMJB is shared by BNP, MS, JPM and BARCLAYS. An issuer-specific Product-body change must not be
   applied to the shared batch without proving it remains valid for all four issuers.

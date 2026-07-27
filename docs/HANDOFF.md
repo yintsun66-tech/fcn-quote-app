@@ -334,9 +334,9 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   automatically reparsed or reranked; use a new RFQ to verify the correction unless a separately
   reviewed, versioned reprocessing workflow is implemented.
 
-## DAC subject-routing marker (committed, pushed, and deployed)
+## Historical DAC subject-routing marker (deployed, superseded locally by ADR 0013)
 
-- DAC-family outbound requests now insert the literal `DAC/DRA` immediately after
+- The ADR 0011 implementation inserted the literal `DAC/DRA` immediately after
   `FCN(T+7)` and before the branch label and correlation tags. FCN-only subjects remain
   unchanged.
 - The rule recognizes canonical `DAC` plus the issuer aliases `DRA`, `WRA`, and
@@ -376,11 +376,28 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   without confirmation from Barclays/bank operations.
 - BMJB is one shared request for BNP/MS/JPM/BARCLAYS. Because the same Product=`DAC` request
   produced valid BNP/MS/JPM replies, changing BMJB globally could break three working issuers.
+
   A Barclays-specific request profile/batch also requires confirmation that the bank forwarding
   workflow can route it separately, followed by an approved API/schema/email-format plan.
 - CITI, GS, and CA had no correlated reply before the 15-minute deadline in this observed RFQ
   and ended `TIMEOUT`; this does not change the Barclays diagnosis.
 - No raw MIME, full subject token, personal address, RFQ ID, or real quote fixture was committed.
+
+## Local first-trade product subject change (uncommitted and not deployed)
+
+- ADR 0013 supersedes the separate subject marker for newly created requests. The first trade now
+  selects `FCN(T+7)` or `DAC(T+7)`, and the literal segment ` DAC/DRA` is removed.
+- Only the first row controls the subject in a mixed FCN/DAC RFQ, per the approved requirement.
+  Later rows do not change the pricing-module label.
+- The shared browser/Worker email-format helper owns the rule. New Worker batches snapshot the
+  resulting base subject; the Queue consumer preserves an already saved base-subject snapshot so
+  a legacy queued batch is not made unsendable by a code update.
+- Sender, recipient, branch label, correlation tags, mail table/body Product values, inbound
+  parsing, schema, dependencies, secrets and Cloudflare bindings are unchanged.
+- Verification passes: syntax checks for `app.js` and the shared email helper; backend source/test
+  typecheck; targeted email-format/outbound tests (2 files / 18 tests); full suite (16 files /
+  91 tests); and the Cloudflare dry-run build. Vitest emitted the known non-fatal sandbox
+  static-analysis warnings; all tests passed. No commit, push or deployment has occurred.
 
 ## Production gaps and cautions
 

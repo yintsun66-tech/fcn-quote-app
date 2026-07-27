@@ -5,13 +5,17 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`98d969c feat(currency): add ZAR quote support`
+`88bdbd9 feat(artifacts): rasterize quote cards in the requesting browser`
 
 Production deployment record:
-Worker `a485a90c-56b9-4902-9192-e7b4b7f56eea` deployed 2026-07-27 from `98d969c`
-(ZAR frontend option and server-side RFQ validation). No D1 migration, secret, dependency,
-lockfile, mail format or binding change.
-Previous: `68c62104-...` from `481c220` (mail grace, versioned late-reply recalculation, and
+Worker `fcf61774-b52b-45a4-ba40-2af46be691df` deployed 2026-07-27 from `88bdbd9`
+(client-side quote-card rasterization, ADR 0017). Post-deploy: API health 200; unauthenticated
+`GET /api/v1/rfqs/:id/trades/:code/card` returns 401; live `backend-client.js` carries
+`renderCardLocally`, `allow-same-origin` and 「下載第一名報價圖」.
+Previous: `aa7a0656-bc5b-42b1-a6ae-63f16141de64` from `de9e8d9` (on-demand quote images,
+ADR 0016; `AUTO_RANK_ONE_IMAGE ("0")` confirmed in the deployed bindings);
+`a485a90c-...` from `98d969c` (ZAR support);
+`68c62104-...` from `481c220` (mail grace, versioned late-reply recalculation, and
 economic top four plus custom fifth issuer/image);
 `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
 `566c7456-...` from `bdd66c1` (first-trade product label);
@@ -139,10 +143,12 @@ Commit `481c220` is pushed and deployed as Worker
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `a485a90c-56b9-4902-9192-e7b4b7f56eea` (ZAR support and all earlier behavior, deployed
-  2026-07-27). Post-deploy verification: `GET /api/v1/health` returned HTTP 200; cache-busted live
-  `app.js` and rendered selector both contain `ZAR`, with `USD` unchanged as the default.
-  Previous verified versions: `68c62104-...` from `481c220`;
+  `fcf61774-b52b-45a4-ba40-2af46be691df` (client-side quote-card rasterization plus on-demand
+  images and all earlier behavior, deployed 2026-07-27). Post-deploy verification:
+  `GET /api/v1/health` returned HTTP 200; unauthenticated card endpoint returned 401; live
+  `backend-client.js` contains `renderCardLocally` / `allow-same-origin` / 「下載第一名報價圖」.
+  Previous verified versions: `aa7a0656-...` from `de9e8d9`; `a485a90c-...` from `98d969c`;
+  `68c62104-...` from `481c220`;
   `6520b77d-...` from `4095b51`;
   `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
   `cc633dcb-...` from `0bbe159`;

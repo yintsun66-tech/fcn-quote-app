@@ -5,18 +5,19 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`0bbe159 feat(admin): look up an account by employee number (行編)`
+`0d77eac feat(operations): improve artifact retry and issuer health diagnostics`
 
 Production deployment record:
-Worker `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5` deployed 2026-07-25 from `0bbe159`
-(no D1 migration; new ADMIN-only employee-number lookup).
-Previous: `364a345e-...` from `fd7a380` (duplicate-registration visibility);
+Worker `02311666-eefc-40c9-95d7-c446e1c24312` deployed 2026-07-27 from
+`477b3c9` + `0d77eac` (no D1 migration, secret or binding change; inbound parser repairs,
+artifact retry diagnostics and ADMIN seven-day issuer health).
+Previous: `cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
+`364a345e-...` from `fd7a380` (duplicate-registration visibility);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
-Branch state when this handoff was written: `feature/subject-branch-correlation` is at `92e4b07`
-locally and on `origin` (they match). Production implementation remains `0bbe159`; subsequent
-commits through `92e4b07` are deployment/handback documentation. The branch is not merged to
-`main`.
+Production implementation head when this handoff was updated:
+`feature/subject-branch-correlation` at `0d77eac`, pushed to `origin`. The deployment-record
+documentation commit follows that implementation head. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -25,14 +26,14 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5` (ADMIN-only employee-number lookup, plus
-  duplicate-registration visibility, PS tier / all-accounts management and all earlier behavior,
-  deployed 2026-07-25; `GET /api/v1/health` returned HTTP 200; unauthenticated
-  `POST /api/v1/admin/accounts/lookup` returns 401; the live `backend-client.js` carries
-  `lookupAccountByEmployee` / 「以行編查詢帳號」 / `/admin/accounts/lookup` plus the prior
-  `renderDuplicateNote` and 所有帳號列表 markers; `styles.css` carries `backend-account-lookup`).
-  Previous verified versions: `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
-  `2de5b070-...` from `23c084e`.
+  `02311666-eefc-40c9-95d7-c446e1c24312` (inbound parser repairs, artifact retry diagnostics,
+  ADMIN seven-day issuer health and all earlier behavior, deployed 2026-07-27).
+  Post-deploy verification: `GET /api/v1/health` returned HTTP 200; unauthenticated
+  `GET /api/v1/admin/rfq-timelines` returned 401; the live `backend-client.js` contains
+  `backendRfqHealth`, `ISSUER_ZERO_INBOUND`, the failed-artifact retry branch and artifact request
+  markers; the live `styles.css` contains the health-panel styles.
+  Previous verified versions: `cc633dcb-...` from `0bbe159`; `364a345e-...` from `fd7a380`;
+  `25d32525-...` from `0913f16`; `2de5b070-...` from `23c084e`.
 - D1 database: `fcn-quote`; migrations applied to remote D1 now run through
   `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
   applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
@@ -92,10 +93,11 @@ code or real quote value was copied into the repository.
   artifact. The stored error loses the Browser Rendering HTTP/error category, so capacity,
   transient service failure and render-content failure cannot yet be distinguished.
 
-## Local production-audit repairs (uncommitted and not deployed)
+## Deployed production-audit repairs (`477b3c9`, `0d77eac`)
 
-The following minimal repairs are present in the working tree only. They do not add a migration,
-dependency, lockfile, binding, environment variable or deployment-setting change:
+The following minimal repairs are committed, pushed and deployed as Worker
+`02311666-eefc-40c9-95d7-c446e1c24312`. They did not add a migration, dependency, lockfile,
+binding, environment variable or deployment-setting change:
 
 - `issuer-fcn-v4` maps SG `At Maturity` to `EKI`; treats DBS `*Price Unavailable` and BARCLAYS
   `Pls see below` as no-quote target values unless separate issuer error detail proves rejection;
@@ -114,8 +116,11 @@ dependency, lockfile, binding, environment variable or deployment-setting change
   and 390×844 mobile browser smoke check loaded the current shell without console errors; the
   mobile page reported no horizontal overflow. The ADMIN-only populated health panel was not
   exercised against production credentials.
-- No commit, push, D1 mutation, Cloudflare deployment or production replay/reclassification has
-  been performed. Existing historical quote/status rows remain unchanged.
+- Deployment verification completed against the public health endpoint, unauthenticated ADMIN
+  guard and current frontend assets. The ADMIN-only populated health panel still has not been
+  exercised with production credentials.
+- No D1 mutation or production replay/reclassification was performed. Existing historical
+  quote/status rows remain unchanged; the parser changes apply to newly processed replies only.
 
 ## Deployed feature: PS tier + account management (committed `0913f16`, migrated, deployed)
 
@@ -437,9 +442,8 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
 
 Production-audit repair order:
 
-- Review and commit the local production-audit repairs above, then deploy only after explicit user
-  authorization. After deployment, run a new controlled RFQ; historical rows are intentionally
-  not re-parsed or rewritten automatically.
+- Run one new controlled RFQ and review it through the ADMIN seven-day health panel. Historical
+  rows are intentionally not re-parsed or rewritten automatically.
 - Use the ADMIN seven-day health panel to verify whether current GS/CA replies reach the inbound
   route and whether Browser Rendering HTTP failures recur. Do not infer bank delivery from `SENT`.
 - MS forwarded-original-table noise remains unproven at a safe header-signature level. Do not add

@@ -5,14 +5,19 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`88bdbd9 feat(artifacts): rasterize quote cards in the requesting browser`
+`b7ae5fb build(vendor): self-host html2canvas instead of loading from a CDN`
 
 Production deployment record:
-Worker `fcf61774-b52b-45a4-ba40-2af46be691df` deployed 2026-07-27 from `88bdbd9`
-(client-side quote-card rasterization, ADR 0017). Post-deploy: API health 200; unauthenticated
-`GET /api/v1/rfqs/:id/trades/:code/card` returns 401; live `backend-client.js` carries
-`renderCardLocally`, `allow-same-origin` and 「下載第一名報價圖」.
-Previous: `aa7a0656-bc5b-42b1-a6ae-63f16141de64` from `de9e8d9` (on-demand quote images,
+Worker `f887ba53-2af9-4cf6-a493-bfc67cc4f489` deployed 2026-07-27 from `b7ae5fb`
+(self-hosted rasterizer). Post-deploy: API health 200;
+`https://app.yintsun66.com/vendor/html2canvas-1.4.1.min.js` returns HTTP 200, 198,689 bytes,
+SHA-256 matching the vendored file exactly; the live page references
+`./vendor/html2canvas-1.4.1.min.js` and no third-party CDN host. Note the root page is edge-cached
+(`CF-Cache-Status: HIT`) — send `Cache-Control: no-cache` when verifying it, since a query string
+alone does not bust it.
+Previous: `fcf61774-b52b-45a4-ba40-2af46be691df` from `88bdbd9` (client-side quote-card
+rasterization, ADR 0017; unauthenticated card endpoint returns 401);
+`aa7a0656-bc5b-42b1-a6ae-63f16141de64` from `de9e8d9` (on-demand quote images,
 ADR 0016; `AUTO_RANK_ONE_IMAGE ("0")` confirmed in the deployed bindings);
 `a485a90c-...` from `98d969c` (ZAR support);
 `68c62104-...` from `481c220` (mail grace, versioned late-reply recalculation, and

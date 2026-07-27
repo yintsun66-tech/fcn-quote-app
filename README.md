@@ -25,7 +25,8 @@ Durable Object、R2 與測試位於 `backend/`。
 ## 目前正式環境基線
 
 - 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。
-- 目前遠端分支 HEAD 為 `ec0e489`；正式功能 commit 為 `481c220`。
+- 正式功能程式基線為 `481c220`；實際最新分支 HEAD 請以 Git history 與
+  [HANDOFF](docs/HANDOFF.md) 為準。
 - 最新正式 Worker 版本為 `68c62104-aa1d-48b9-b391-ff03695224f6`（2026-07-27 部署）。
 - 正式時序為 7 分鐘暫定提醒、15 分鐘發行機構回覆期、其後 60 秒郵件轉送緩衝，
   最晚 16 分鐘建立正式排名。緩衝期間不可提早結束。
@@ -41,8 +42,13 @@ Durable Object、R2 與測試位於 `backend/`。
 - 目前驗證基線為 16 個測試檔、102 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health 與新前端
   程式標記已驗證，但尚未完成登入後的完整人工操作巡檢。
+- GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
+  `yintsun66-tech/fcnV2` 的初次靜態程式發布 commit 為 `2d13926`。它只包含公開前端，
+  不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。
+如需快速比較 Cloudflare 正式版、功能分支與 GitHub Pages 靜態版，請開啟
+[版本與部署狀態](version-status.html)。
 
 ## 專案協作與後端文件
 

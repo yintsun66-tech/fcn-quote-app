@@ -31,10 +31,17 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
-- The remote branch HEAD is `ec0e489`; production code is implementation commit `481c220`,
-  deployed as Worker `68c62104-aa1d-48b9-b391-ff03695224f6` on 2026-07-27. The current verification
-  baseline is 16 test files / 102 tests. A deployment record is evidence of Worker/static-asset
-  publication, not evidence that real bank mail was delivered.
+- Production code is implementation commit `481c220`, deployed as Worker
+  `68c62104-aa1d-48b9-b391-ff03695224f6` on 2026-07-27. Resolve the current branch HEAD from Git
+  rather than copying a historical handoff hash. The current verification baseline is 16 test
+  files / 102 tests. A deployment record is evidence of Worker/static-asset publication, not
+  evidence that real bank mail was delivered.
+- `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
+  published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; initial static
+  program commit `2d13926` mirrors the approved public asset set. It contains no Cloudflare
+  backend or data. Future static syncs must copy only the allowlisted files from
+  `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
+  whole backend directory.
 - ADR 0015 is the current timing/ranking contract. `RFQ_DEADLINE_SECONDS=900` is the issuer reply
   window, not the complete hard deadline. `RFQ_MAIL_GRACE_SECONDS=60` extends persisted
   `deadline_at` and the Durable Object alarm to 960 seconds. During the final minute the UI shows

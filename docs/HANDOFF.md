@@ -20,8 +20,8 @@ Previous: `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
 
 Production implementation head when this handoff was updated:
 `feature/subject-branch-correlation` at `481c220`, pushed to `origin`. The deployment-record
-documentation commit `ec0e489` follows that implementation head and is the current remote branch
-HEAD. The branch is not merged to `main`.
+documentation commits `ec0e489` and `21ca68e` follow that implementation head. Resolve the current
+branch HEAD from Git before making changes. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -85,6 +85,31 @@ Commit `481c220` is pushed and deployed as Worker
 
 A successful Worker deployment does not prove that GitHub, the bank mailbox, forwarding rules,
 or issuer replies are healthy. Verify each boundary separately.
+
+## GitHub Pages static compatibility deployment
+
+- Public repository: `https://github.com/yintsun66-tech/fcnV2`
+- Pages URL: `https://yintsun66-tech.github.io/fcnV2/`
+- Deployment source: `main` branch, repository root; Pages status verified `built`.
+- Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
+  (`feat: publish FCN V2 static snapshot`).
+- Current static repository HEAD after recording that baseline in the status page:
+  `827df5aa7396a58f664690ebdbebfcf62bedd4d4`.
+- Snapshot source: the allowlisted public assets prepared from
+  `feature/subject-branch-correlation` at handoff baseline `21ca68e`; deployed application program
+  baseline remains `481c220`.
+- Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
+  `guide.html`, `version-status.html`, `交易所查詢0715.csv`,
+  `backend/shared/email-formats.js`, and a static-only `README.md`.
+- All eight browser assets returned HTTP 200 after the first Pages build. Browser checks loaded
+  the version page and static input page with no console errors; the static host did not activate
+  `backendAuth`.
+- GitHub Pages is not a backend migration. It has no authentication, D1, Queue, Email Worker, R2,
+  ranking, automatic mail, or private artifact service. Never copy secrets, raw mail, D1/R2
+  content, personal data, migrations, Worker source, or `.dev.vars` into `fcnV2`.
+- The static source allowlist lives in `backend/scripts/prepare-assets.mjs`. Future static syncs
+  should use an isolated clone of `fcnV2`, compare exact file hashes, and review its commit
+  independently from the Cloudflare Worker deployment.
 
 ## Read-only production RFQ audit (reviewed 2026-07-27)
 

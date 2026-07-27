@@ -11,6 +11,7 @@ const assets = [
   "app.js",
   "backend-client.js",
   "guide.html",
+  "version-status.html",
   "交易所查詢0715.csv",
   "backend/shared/email-formats.js"
 ];

@@ -84,10 +84,32 @@ The default image path no longer uses Browser Rendering at all.
 - Default-path images are **not persisted** (no artifact row, no R2 object, no 90-day expiry). The
   download is the deliverable; the artifact path still exists when an archived copy is needed.
 
-Still planned (**B**): server-generated SVG rasterized with the browser's native canvas API — no
-library, no CDN, and ~95% smaller stored objects. Requires reimplementing the card layout in SVG,
-because the current design uses flexbox/grid/`flex-wrap`, which SVG cannot lay out automatically,
-and needs a subsetted CJK font embedded as a data URI to stay deterministic across devices.
+### Self-hosted rasterizer (closes the CDN fallback risk)
+
+`index.html` previously loaded html2canvas from `cdn.jsdelivr.net`. Corporate and bank networks
+frequently block public CDNs, and when the rasterizer failed to load the button fell back to
+server-side Browser Rendering — exactly the metered path ADR 0017 removed. The library is now
+vendored at `vendor/html2canvas-1.4.1.min.js` and served from this application's own origin, so the
+client path no longer depends on a third-party host. It is published by
+`backend/scripts/prepare-assets.mjs` for both runtime modes; no CDN reference remains in the
+repository.
+
+Provenance (see `vendor/README.md`): fetched independently from jsdelivr and unpkg, byte-identical,
+SHA-256 `e87e550794322e574a1fda0c1549a3c70dae5a93d9113417a429016838eab8cb`, 198,689 bytes, MIT
+license header preserved. The bundle makes no third-party network requests. Do not edit the file;
+treat a version change as a production dependency change requiring approval.
+
+### Deferred: SVG rendering (**B**)
+
+Server-generated SVG rasterized with the browser's native canvas API — no library at all and much
+smaller stored objects. **Deliberately deferred.** After ADR 0017 the default path already avoids
+Browser Rendering and writes nothing to R2, and self-hosting removed the CDN risk, so B's remaining
+benefit is cross-device pixel consistency. It costs a full re-implementation of the card layout,
+because the current design relies on flexbox/grid/`flex-wrap`, which SVG cannot lay out
+automatically, and needs a subsetted CJK font embedded as a data URI to stay deterministic.
+
+**Decide with data, not assumption:** ADR 0016 added `QUOTE_IMAGE_DOWNLOADED` audit events. Let
+them accumulate for several days, then measure real image demand before committing to B.
 
 ## Deployed ZAR currency support
 

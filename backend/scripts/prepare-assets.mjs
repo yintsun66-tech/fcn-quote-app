@@ -13,6 +13,7 @@ const assets = [
   "guide.html",
   "version-status.html",
   "交易所查詢0715.csv",
+  "vendor/html2canvas-1.4.1.min.js",
   "backend/shared/email-formats.js"
 ];
 

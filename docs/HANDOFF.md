@@ -5,18 +5,18 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`0d77eac feat(operations): improve artifact retry and issuer health diagnostics`
+`bdd66c1 fix(outbound): select subject product from first trade`
 
 Production deployment record:
-Worker `02311666-eefc-40c9-95d7-c446e1c24312` deployed 2026-07-27 from
-`477b3c9` + `0d77eac` (no D1 migration, secret or binding change; inbound parser repairs,
-artifact retry diagnostics and ADMIN seven-day issuer health).
-Previous: `cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
+Worker `566c7456-7e0f-42ac-9341-823c533ead71` deployed 2026-07-27 from `bdd66c1`
+(no D1 migration, secret or binding change; first-trade `FCN(T+7)` / `DAC(T+7)` subject label).
+Previous: `02311666-...` from `477b3c9` + `0d77eac` (parser/operations diagnostics);
+`cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
 `364a345e-...` from `fd7a380` (duplicate-registration visibility);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `0d77eac`, pushed to `origin`. The deployment-record
+`feature/subject-branch-correlation` at `bdd66c1`, pushed to `origin`. The deployment-record
 documentation commit follows that implementation head. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
@@ -26,14 +26,14 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `02311666-eefc-40c9-95d7-c446e1c24312` (inbound parser repairs, artifact retry diagnostics,
-  ADMIN seven-day issuer health and all earlier behavior, deployed 2026-07-27).
-  Post-deploy verification: `GET /api/v1/health` returned HTTP 200; unauthenticated
-  `GET /api/v1/admin/rfq-timelines` returned 401; the live `backend-client.js` contains
-  `backendRfqHealth`, `ISSUER_ZERO_INBOUND`, the failed-artifact retry branch and artifact request
-  markers; the live `styles.css` contains the health-panel styles.
-  Previous verified versions: `cc633dcb-...` from `0bbe159`; `364a345e-...` from `fd7a380`;
-  `25d32525-...` from `0913f16`; `2de5b070-...` from `23c084e`.
+  `566c7456-7e0f-42ac-9341-823c533ead71` (first-trade product subject label and all earlier
+  behavior, deployed 2026-07-27). Post-deploy verification: `GET /api/v1/health` returned HTTP
+  200; live `index.html` and `app.js` contain the `first-trade-subject-v2` cache marker; live
+  `backend/shared/email-formats.js` contains `records[0]` and `DAC(T+7)` and no longer contains
+  the legacy `FCN(T+7) DAC/DRA` append expression.
+  Previous verified versions: `02311666-...` from `0d77eac`; `cc633dcb-...` from `0bbe159`;
+  `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
+  `2de5b070-...` from `23c084e`.
 - D1 database: `fcn-quote`; migrations applied to remote D1 now run through
   `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
   applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
@@ -334,7 +334,7 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   automatically reparsed or reranked; use a new RFQ to verify the correction unless a separately
   reviewed, versioned reprocessing workflow is implemented.
 
-## Historical DAC subject-routing marker (deployed, superseded locally by ADR 0013)
+## Historical DAC subject-routing marker (deployed, superseded by ADR 0013)
 
 - The ADR 0011 implementation inserted the literal `DAC/DRA` immediately after
   `FCN(T+7)` and before the branch label and correlation tags. FCN-only subjects remain
@@ -383,7 +383,7 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   and ended `TIMEOUT`; this does not change the Barclays diagnosis.
 - No raw MIME, full subject token, personal address, RFQ ID, or real quote fixture was committed.
 
-## Local first-trade product subject change (uncommitted and not deployed)
+## Deployed first-trade product subject change (`bdd66c1`)
 
 - ADR 0013 supersedes the separate subject marker for newly created requests. The first trade now
   selects `FCN(T+7)` or `DAC(T+7)`, and the literal segment ` DAC/DRA` is removed.
@@ -397,7 +397,11 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
 - Verification passes: syntax checks for `app.js` and the shared email helper; backend source/test
   typecheck; targeted email-format/outbound tests (2 files / 18 tests); full suite (16 files /
   91 tests); and the Cloudflare dry-run build. Vitest emitted the known non-fatal sandbox
-  static-analysis warnings; all tests passed. No commit, push or deployment has occurred.
+  static-analysis warnings; all tests passed.
+- Commit `bdd66c1` is pushed and deployed as Worker
+  `566c7456-7e0f-42ac-9341-823c533ead71`. Public health and cache-busted source-asset checks
+  passed. No real RFQ was sent as a deployment test, so bank/issuer module routing under the new
+  title still requires one separately authorized controlled RFQ.
 
 ## Production gaps and cautions
 

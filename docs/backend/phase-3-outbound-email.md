@@ -1,7 +1,8 @@
 # Phase 3 Outbound Email
 
-Status: implemented, deployed and exercised in production as of 2026-07-25. Queue producers,
-consumers and dead-letter queues are attached.
+Status: implemented and deployed as of 2026-07-27. Queue producers, consumers and dead-letter
+queues are attached. The prior marker rule was exercised in production; ADR 0013's first-trade
+product label is deployed but has not yet been verified by sending a new real RFQ.
 
 ## Implemented scope
 

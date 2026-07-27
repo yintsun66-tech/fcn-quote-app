@@ -24,7 +24,7 @@ Durable Object、R2 與測試位於 `backend/`。
 ## 目前正式環境基線
 
 - 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。
-- 最新正式 Worker 版本為 `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5`（2026-07-25 部署）。
+- 最新正式 Worker 版本為 `566c7456-7e0f-42ac-9341-823c533ead71`（2026-07-27 部署）。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
   `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0010`。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 使用 `FCN(T+7)`，DAC 使用

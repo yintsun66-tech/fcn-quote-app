@@ -106,16 +106,21 @@ Each summary includes workflow/dispatch status, timestamps, trade count, the fir
 underlyings and target field, issuer terminal/valid-reply counts, ranking version and ready image
 count. It never returns another user's RFQ or raw email content.
 
-Artifacts are keyed to an exact persisted ranking quote (ADR 0007): each `artifacts[]` entry
-carries `tradeCode`, `quoteId`, `issuer`, `rank`, `isDefault`, `status`, `downloadUrl`, and
-`previewUrl` (`?preview=1` renders inline). `GET /status` also returns `tradeCode` and `quoteId`.
-The deterministic rank-one artifact is queued at finalization; other top-five rows are optional.
+Artifacts are keyed to an exact current-version quote choice (ADR 0015): each `artifacts[]` entry
+carries `tradeCode`, `quoteId`, `issuer`, `rank`, `isCustom`, `isDefault`, `status`, `downloadUrl`,
+and `previewUrl` (`?preview=1` renders inline). The deterministic rank-one artifact is queued at
+finalization; ranks 1–4 and the server-validated custom-fifth candidate are optional.
 
 While an RFQ is `WAITING`, `PARTIAL`, or `FINALIZING`, `GET /results` returns
 `rfq.isProvisional: true`, `allTradesHaveFiveValidQuotes`, the compatibility field
 `allTradesHaveThreeValidQuotes`, and per-trade
-`validQuoteCount`/`lastUpdatedAt`. These ranks use the final ranking algorithm but are not written
-to `ranking_runs` or `ranking_results`.
+`validQuoteCount`/`lastUpdatedAt`. Each trade returns automatic `rankings` for economic ranks 1–4
+and `alternateQuotes`, containing one best eligible quote per issuer outside those ranks. These
+values use the final ranking algorithm but are not written to `ranking_runs` or `ranking_results`.
+
+Status payloads expose `mailGraceStartsAt`, the actual `deadlineAt`, `hasLateReplies`, and
+`hasUnrankedLateReplies`. At `mailGraceStartsAt` the UI remains provisional for sixty seconds and
+displays **正在等待最後郵件轉送**.
 
 ### Controlled mutation endpoints
 
@@ -127,13 +132,17 @@ to `ranking_runs` or `ranking_results`.
 - `POST /api/v1/admin/quotes/:quoteId/manual-review`
 
 Recalculation creates a new ranking version and never overwrites the previously finalized snapshot.
+The RFQ owner or an `ADMIN` may request it; same-origin and CSRF checks still apply. Only an explicit
+`RECALCULATION` version may admit a finite, trade-matched, non-rejected `LATE_REPLY`.
 
 `POST /api/v1/rfqs/:rfqId/finalize` lets the RFQ owner close the reply window early (see
 [ADR 0004](../adr/0004-user-early-finalize.md)). It is accepted only while the RFQ is `WAITING`
 or `PARTIAL`, requires same-origin + CSRF, is owner-enforced (`404` otherwise), and returns `202`
 with `workflowStatus: "FINALIZING"`. It reuses the `DEADLINE` finalization trigger, so it is
 idempotent with the eventual deadline alarm on the same ranking version; issuers that have not
-replied are excluded from that ranking exactly as at a natural deadline.
+replied are excluded from that ranking exactly as at a natural deadline. Once
+`mailGraceStartsAt` is reached, the endpoint returns `409 RFQ_MAIL_GRACE_ACTIVE`; the approved
+sixty-second transport buffer cannot be bypassed through a direct request.
 
 The trade-artifact endpoint is accepted only for the owner of a finalized `COMPLETED` RFQ and a
 trade with a persisted rank-one winner. It requires same-origin + CSRF, returns the existing
@@ -361,7 +370,9 @@ Ranking is independent for each RFQ trade and compares only quotes matched to th
 | KO Barrier | Ascending |
 | KI Barrier | Ascending |
 
-Quotes with null, non-finite, rejected, error, unmatched, ambiguous, timeout, late, or unconfirmed-unit targets are excluded.
+Quotes with null, non-finite, rejected, error, unmatched, ambiguous, timeout, late, or
+unconfirmed-unit targets are excluded from normal ranking. An explicit recalculation may include
+a matched `LATE_REPLY` only when its target is finite and it has no rejection reason.
 
 Equal economic values share a rank. Results are displayed deterministically by `receivedAt` and then opaque quote ID. The earliest valid receipt is selected only for a single image winner and does not change the economic tie.
 
@@ -372,17 +383,16 @@ Every finalized result records:
 - eligible/excluded quote IDs and reasons
 - top five economic ranks, including all ties at rank five
 - deterministic image winner
-- finalized time and trigger (`ALL_TERMINAL` or `DEADLINE`)
+- finalized time and trigger (`ALL_TERMINAL`, `DEADLINE`, or `RECALCULATION`)
 
 ## Artifact contract
 
-Generated quote images are based only on a finalized ranking snapshot. The deterministic
-`is_image_winner = 1` quote is queued automatically for each trade. The owner may request an
-additional image by exact `quoteId` only when that quote belongs to the trade and current
-persisted top-five snapshot. Rejected, invalid, unmatched, late, timed-out and outside-top-five
-quotes remain unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's
-theme. An artifact response exposes `tradeCode`, `quoteId`, authenticated preview/download
-endpoints and metadata, never the private R2 object key or a permanent public URL.
+Generated quote images are tied to a finalized ranking version. The deterministic
+`is_image_winner = 1` quote is queued automatically for each trade. The owner may request an image
+for an exact rank 1–4 quote or for one server-returned custom-fifth candidate. A custom candidate
+must belong to the same trade, be the issuer's best eligible quote, and come from an issuer absent
+from ranks 1–4. Arbitrary, rejected, invalid, unmatched or unrecalculated-late quote IDs remain
+unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's theme.
 
 A failed artifact can be re-requested by its owner through the same idempotent ranked-quote
 endpoint. The existing artifact/job is reset and re-enqueued; no duplicate artifact is created.

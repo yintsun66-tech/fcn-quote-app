@@ -94,6 +94,9 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
    or bank outage.
 4. Use the per-RFQ cards below the summary to locate the affected workflow. The page intentionally
    excludes raw mail, subjects, correlation tokens, quote values, message IDs and R2 paths.
+5. A completed RFQ with a late reply not covered by its current recalculation version shows
+   **納入晚到報價重新排名**. Confirming it creates a new immutable ranking version and records the
+   ADMIN actor; it never overwrites the earlier result.
 
 ## When an RFQ has no result
 
@@ -101,10 +104,12 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
 2. Confirm the bank mailbox received the outbound request.
 3. Confirm issuer replies were forwarded to `rfq@yintsun66.com`.
 4. Interpret the issuer status precisely:
-   - **`TIMEOUT`**: no terminal reply reached that expected issuer before the fifteen-minute hard
-     deadline. It does not prove that the issuer or bank never received the request.
-   - **`LATE_REPLY`**: a correlated reply arrived after the hard deadline. It is preserved but does
-     not overwrite finalized results automatically.
+   - **`TIMEOUT`**: no terminal reply reached that expected issuer before the fifteen-minute reply
+     window plus sixty-second mail-transport grace ended. It does not prove that the issuer or bank
+     never received the request.
+   - **`LATE_REPLY`**: a correlated reply arrived after the grace deadline. It is preserved but
+     does not overwrite finalized results automatically. The RFQ owner or ADMIN may request a
+     versioned recalculation; only finite, matched, non-rejected late values can then participate.
    - **`PARSE_ERROR` / `INVALID_VALUE`**: a reply arrived, but its table, unit or values could not
      be safely normalized. This is not a timeout.
    - **`ISSUER_REJECTED` / `NO_QUOTE`**: the issuer replied and declined or returned an explicit

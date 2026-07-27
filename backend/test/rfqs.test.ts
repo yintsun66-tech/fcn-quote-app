@@ -325,5 +325,57 @@ describe("RFQ API", () => {
       method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
     });
     expect(wrongState.status).toBe(409);
+
+    const graceCreated = await createRfq(userA, [trade({ underlyings: ["GRACE UW"] })]);
+    const graceId = (await graceCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const graceSentAt = new Date(Date.now() - 15 * 60_000 - 10_000).toISOString();
+    const graceDeadline = new Date(Date.parse(graceSentAt) + 16 * 60_000).toISOString();
+    await testEnv.DB.prepare(
+      "UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING', sent_at = ?, deadline_at = ? WHERE id = ?"
+    ).bind(graceSentAt, graceDeadline, graceId).run();
+    const graceFinalize = await api(`/api/v1/rfqs/${graceId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(graceFinalize.status).toBe(409);
+    expect(await graceFinalize.json()).toMatchObject({ error: { code: "RFQ_MAIL_GRACE_ACTIVE" } });
+  });
+
+  it("lets an owner or ADMIN request a versioned recalculation, but not another user", async () => {
+    const ownerCreated = await createRfq(userA, [trade()]);
+    const ownerRfqId = (await ownerCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.prepare(
+      `UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING',
+              workflow_status = 'COMPLETED', current_ranking_version = 1,
+              finalized_at = ? WHERE id = ?`
+    ).bind(new Date().toISOString(), ownerRfqId).run();
+
+    const foreign = await api(`/api/v1/rfqs/${ownerRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(foreign.status).toBe(404);
+    const owner = await api(`/api/v1/rfqs/${ownerRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(owner.status).toBe(202);
+    expect(await owner.json()).toMatchObject({ rfq: { requestedVersion: 2 } });
+
+    const adminTarget = await createRfq(userA, [trade({ underlyings: ["ADMIN TARGET UW"] })]);
+    const adminRfqId = (await adminTarget.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING',
+                workflow_status = 'COMPLETED', current_ranking_version = 1,
+                finalized_at = ? WHERE id = ?`
+      ).bind(new Date().toISOString(), adminRfqId),
+      testEnv.DB.prepare("UPDATE users SET role = 'ADMIN' WHERE username_normalized = 'rfquserb'")
+    ]);
+    const admin = await api(`/api/v1/rfqs/${adminRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(admin.status).toBe(202);
+    const audit = await testEnv.DB.prepare(
+      "SELECT safe_metadata_json FROM audit_events WHERE action = 'RFQ_RECALCULATION_REQUESTED' AND entity_id = ?"
+    ).bind(adminRfqId).first<{ safe_metadata_json: string }>();
+    expect(JSON.parse(audit?.safe_metadata_json ?? "{}")).toMatchObject({ requestedByAdmin: true });
   });
 });

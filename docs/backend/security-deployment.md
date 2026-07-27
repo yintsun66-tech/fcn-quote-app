@@ -195,7 +195,7 @@ has produced correlated issuer replies. Remaining operational work is:
 2. Confirm and document the Cloudflare Access policy for infrastructure diagnostics and any
    separately protected administration boundary.
 3. Load-test 50 concurrent users, 20 trades per RFQ, eleven expected issuers, the seven-minute
-   reminder and the fifteen-minute hard deadline.
+   reminder, fifteen-minute reply window and sixty-second transport grace.
 4. Continue observing Queue/Browser Rendering capacity and DLQs under real completion bursts.
 5. Complete the structured-record/audit retention and deletion policy.
 6. Keep incident response, backup/export and rollback procedures current as resources change.

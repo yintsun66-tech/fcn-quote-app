@@ -280,8 +280,9 @@ Key fields:
 - `expires_at`
 
 Artifacts are unique by `(ranking_run_id, trade_code, quote_id)`. The deterministic rank-one
-artifact is queued automatically; another persisted top-five quote is created only after an
-owner-scoped request.
+artifact is queued automatically; ranks 1–4 or a server-validated custom-fifth quote are created
+only after an owner-scoped request. A custom quote can be outside persisted `ranking_results`, but
+must belong to the exact current ranking run's RFQ/trade and approved issuer candidate set.
 
 ### `jobs`
 

@@ -22,6 +22,35 @@ documentation commit follows that implementation head. The branch is not merged 
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
+## Local approved implementation pending commit/deploy
+
+The working tree contains an approved but still uncommitted and undeployed RFQ finalization/ranking
+change. Production remains on Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`.
+
+- The existing 900-second quote window is followed by a configurable 60-second mail-transport
+  grace period. The UI keeps the 15-minute result experience, then displays
+  `正在等待最後郵件轉送` until the 960-second hard deadline. Direct early finalization is disabled
+  during that grace period.
+- Late replies remain stored. An RFQ owner or ADMIN can explicitly create a new immutable
+  recalculation version that includes eligible late replies; the existing finalized version is
+  never overwritten.
+- The public result table now contains economic ranks 1–4 plus a user-selected fifth issuer that
+  is not already represented in the top four. The fifth selector offers the best eligible quote
+  from each remaining issuer and supports the same owner-authorized image workflow.
+- The backend still persists up to five economic results for compatibility/audit history, but
+  public automatic ranking and custom-fifth authorization are derived server-side from the new
+  ranking policy.
+- No D1 migration, dependency, lockfile, secret, mail format, authentication rule, Cloudflare
+  binding type, or R2 visibility change is included. `RFQ_MAIL_GRACE_SECONDS=60` is a new
+  non-secret Worker variable in `backend/wrangler.jsonc`.
+- Local verification passed: `node --check backend-client.js`, `pnpm run typecheck`,
+  `pnpm test` (16 files / 102 tests), and `pnpm run build` (Wrangler dry run). The build had to be
+  rerun outside the filesystem sandbox after the sandbox could not read the Worker entry point.
+  The in-app browser could not reach the host-only localhost server, so an authenticated visual
+  walkthrough of the result dialog remains unverified.
+- Preserve the untracked user-owned `.claude/` directory. The smallest next step is a complete diff
+  review followed by commit/push/deploy only after an explicit user request.
+
 ## Production snapshot
 
 - Application: `https://app.yintsun66.com`

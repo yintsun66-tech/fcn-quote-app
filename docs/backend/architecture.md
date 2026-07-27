@@ -30,7 +30,7 @@ The existing root-level static site remains unchanged during the backend build. 
 | Test fixtures | Anonymous fixtures are allowed in a private repository |
 | Correlation token | Allowed, but never use `##` |
 | Generated subject prefixes | Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes |
-| Quote images | Rank 1 is queued automatically per trade; the owner may request another persisted top-five quote image (ADR 0007) |
+| Quote images | Rank 1 is queued automatically; ranks 1–4 and a server-validated custom fifth issuer may be requested (ADR 0015) |
 
 Mail systems may add reply or forwarding prefixes to inbound messages. The inbound parser must normalize such prefixes for matching while retaining the raw subject. The application itself must never add them to an outbound subject.
 
@@ -53,7 +53,7 @@ flowchart LR
     Q2 --> D
     Q2 --> O[RFQ Durable Object]
     O --> Q3[Ranking queue]
-    O -->|15-minute hard alarm| Q3
+    O -->|15-minute window + 60-second grace| Q3
     Q3 --> D
     U -->|request another ranked quote image| A
     A --> Q4[Image render queue]
@@ -142,7 +142,8 @@ batch-wait latency without creating unbounded parallel work.
 ### Durable Object per RFQ
 
 - Coordinates issuer completion state for one RFQ.
-- Exposes a seven-minute soft reminder to the UI and sets one hard alarm at `sent_at + 15 minutes`.
+- Exposes a seven-minute soft reminder, a fifteen-minute reply-window marker, and sets the hard
+  alarm after an additional sixty-second mail-transport grace.
 - Requests finalization when all expected issuers are terminal or the alarm fires.
 - Treats alarm and queue delivery as at-least-once operations.
 - Uses a finalization idempotency key and ranking version to prevent duplicate results or images.
@@ -160,7 +161,7 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 - Renders an internal deterministic quote-card route from a finalized ranking snapshot.
 - Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
 - Creates a mobile-portrait image for the deterministic rank-one winner immediately after
-  finalization. The owner can request another persisted top-five quote image (ADR 0007).
+  finalization. The owner can request a rank 1–4 or custom-fifth quote image (ADR 0015).
   A trade with no valid quote produces no image.
 - Uses the same issuer-specific color palette as the compatibility frontend, themed by each trade's winning issuer.
 - Uses the request trade date and displays the same complete `[RFQ:<10-character-code>]` reference carried by the outbound email subject. The displayed code is informational and is never accepted as authorization evidence.
@@ -209,12 +210,14 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 Finalization begins at the earlier of:
 
 - all expected issuers reaching a terminal state; or
-- the fifteen-minute hard deadline.
+- the sixteen-minute finalization deadline (fifteen-minute reply window plus sixty-second
+  mail-transport grace).
 
 Ranking occurs independently for every trade. Only valid, comparable quotes are considered. The
-first five economic ranks are persisted as a versioned snapshot; all quotes tied at rank five are
-retained. Late replies are stored as `LATE_REPLY` and do not overwrite a finalized result without
-an explicit recalculation.
+first five economic ranks remain persisted for compatibility/audit, while the public result view
+shows ranks 1–4 plus a user-selected issuer outside those ranks. Late replies are stored as
+`LATE_REPLY` and do not overwrite a finalized result. An explicit owner/ADMIN recalculation creates
+a new version and may admit only finite, matched, non-rejected late values.
 
 ### 5. Results and images
 
@@ -224,12 +227,14 @@ an explicit recalculation.
   provisional quote-version state are unchanged, the backend skips full quote loading/ranking and
   the UI keeps its last rendered data.
 - The user result page loads only RFQs owned by that authenticated user. During
-  `WAITING`/`PARTIAL`/`FINALIZING`, it computes a non-persistent provisional top five with the
-  exact production ranking function.
-- It shows issuer status, top-five quotes, invalid/no-quote reasons, countdown/final status, and artifacts.
-- Each trade's deterministic rank-one image is queued automatically. Every other persisted
-  top-five quote offers an explicit **產出此發行機構報價圖** action that creates or reuses one
-  idempotent, owner-scoped image job for that exact quote.
+  `WAITING`/`PARTIAL`/`FINALIZING`, it computes non-persistent ranks 1–4 and custom-fifth
+  candidates with the exact production ranking function.
+- At fifteen minutes the page remains provisional and displays **正在等待最後郵件轉送** until the
+  sixty-second grace ends.
+- It shows issuer status, the first four economic ranks, a fifth issuer selector, invalid/no-quote
+  reasons, countdown/final status, and artifacts.
+- Each trade's deterministic rank-one image is queued automatically. Ranks 1–4 and the selected
+  fifth issuer can create or reuse one idempotent, owner-scoped image job for that exact quote.
 - A failed image exposes an owner-only **重新產圖** action. Reusing the same endpoint resets and
   re-enqueues the existing idempotent job; Browser Rendering failures retain only a safe
   request/HTTP category and never the response body.

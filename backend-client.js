@@ -12,6 +12,11 @@
     snapshotVersion: null,
     pollDelayMs: 4000,
     pollContext: null,
+    latestStatus: null,
+    inMailGrace: false,
+    latestResultsRfq: null,
+    artifactByQuote: {},
+    customFifthSelections: {},
     hasRankings: false,
     rfqListScope: "active",
     rfqListCursor: null,
@@ -54,7 +59,7 @@
     </dialog>
     <dialog id="backendProgress" class="backend-dialog backend-results-dialog">
       <section class="backend-panel">
-        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="backendBackToRfqs" type="button" class="secondary">我的詢價</button><button id="closeBackendProgress" type="button" class="secondary">返回輸入</button></div></div>
+        <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="backendRecalculate" type="button" class="secondary" hidden>納入晚到報價重新排名</button><button id="backendBackToRfqs" type="button" class="secondary">我的詢價</button><button id="closeBackendProgress" type="button" class="secondary">返回輸入</button></div></div>
         <p id="backendCountdown" class="backend-countdown"></p>
         <div id="backendIssuerStates" class="backend-issuer-grid"></div>
         <div id="backendRankings" class="backend-rankings"></div>
@@ -145,6 +150,7 @@
   const authDialog = document.querySelector("#backendAuth");
   const progressDialog = document.querySelector("#backendProgress");
   const finalizeButton = document.querySelector("#backendFinalizeNow");
+  const recalculateButton = document.querySelector("#backendRecalculate");
   const issuerPickerDialog = document.querySelector("#backendIssuerPicker");
   const issuerPickerForm = document.querySelector("#backendIssuerPickerForm");
   const issuerPickAll = document.querySelector("#issuerPickAll");
@@ -287,6 +293,10 @@
       return rfq.finalizedAt ? `完成於 ${formatDateTime(rfq.finalizedAt)}` : `建立於 ${formatDateTime(rfq.createdAt)}`;
     }
     if (!rfq.deadlineAt) return `建立於 ${formatDateTime(rfq.createdAt)}`;
+    const graceStartsAt = rfq.mailGraceStartsAt ? Date.parse(rfq.mailGraceStartsAt) : null;
+    if (Number.isFinite(graceStartsAt) && Date.now() >= graceStartsAt && Date.now() < Date.parse(rfq.deadlineAt)) {
+      return "正在等待最後郵件轉送";
+    }
     const remaining = Date.parse(rfq.deadlineAt) - Date.now();
     if (!Number.isFinite(remaining) || remaining <= 0) return "已達回覆截止，正在完成比價";
     return `回覆截止剩餘 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}`;
@@ -378,6 +388,11 @@
     state.snapshotVersion = null;
     state.pollDelayMs = 4000;
     state.pollContext = null;
+    state.latestStatus = null;
+    state.latestResultsRfq = null;
+    state.artifactByQuote = {};
+    state.customFifthSelections = {};
+    state.inMailGrace = false;
     if (rfqHistoryDialog.open) rfqHistoryDialog.close();
     state.rfqId = rfqId;
     state.hasRankings = false;
@@ -396,6 +411,11 @@
     state.snapshotVersion = null;
     state.pollDelayMs = 4000;
     state.pollContext = null;
+    state.latestStatus = null;
+    state.latestResultsRfq = null;
+    state.artifactByQuote = {};
+    state.customFifthSelections = {};
+    state.inMailGrace = false;
     if (progressDialog.open) progressDialog.close();
     if (updateUrl) updateRfqUrl(null);
     void refreshRfqBadge();
@@ -562,6 +582,12 @@
         <p>外寄 ${record.outbound.sent}/${record.outbound.total}｜回信 ${record.inbound.total}（已解析 ${record.inbound.parsed}、逾時 ${record.inbound.late}、待人工 ${record.inbound.manualReview}、未配對 ${record.inbound.unmatched}）｜圖片 ${record.artifacts.ready}/${record.artifacts.total}</p>
         <div class="backend-timeline-issuers">${record.issuerStates.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${escapeHtml(item.issuer)}</b>${escapeHtml(item.status)}</span>`).join("")}</div>
         <small>建立 ${escapeHtml(formatDateTime(record.timestamps.createdAt))}｜寄完 ${escapeHtml(formatDateTime(record.timestamps.sentAt))}｜截止 ${escapeHtml(formatDateTime(record.timestamps.deadlineAt))}</small>
+        ${record.inbound.late > 0
+          && ["COMPLETED", "NO_VALID_QUOTE"].includes(record.workflowStatus)
+          && (record.finalizationTrigger !== "RECALCULATION"
+            || Date.parse(record.timestamps.lastInboundAt) > Date.parse(record.timestamps.finalizedAt))
+          ? `<button type="button" class="secondary admin-rfq-recalculate" data-admin-recalculate-rfq="${escapeHtml(record.rfqId)}">納入晚到報價重新排名</button>`
+          : ""}
       </article>`).join("");
   }
 
@@ -791,6 +817,11 @@
       state.snapshotVersion = null;
       state.pollDelayMs = 4000;
       state.pollContext = null;
+      state.latestStatus = null;
+      state.latestResultsRfq = null;
+      state.artifactByQuote = {};
+      state.customFifthSelections = {};
+      state.inMailGrace = false;
       state.hasRankings = false;
       updateRfqUrl(rfqId);
       statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
@@ -810,16 +841,41 @@
   function renderStatus(payload) {
     const deadline = payload.rfq.deadlineAt ? Date.parse(payload.rfq.deadlineAt) : null;
     const softDeadline = payload.rfq.softDeadlineAt ? Date.parse(payload.rfq.softDeadlineAt) : null;
+    const graceStartsAt = payload.rfq.mailGraceStartsAt ? Date.parse(payload.rfq.mailGraceStartsAt) : null;
+    const now = Date.now();
     const remaining = deadline ? Math.max(0, deadline - Date.now()) : 0;
-    const softReminder = softDeadline && Date.now() >= softDeadline && remaining > 0
-      ? "｜已達 7 分鐘，可查看暫定前五名或提早結束"
+    const inMailGrace = Boolean(
+      Number.isFinite(graceStartsAt)
+      && deadline
+      && now >= graceStartsAt
+      && now < deadline
+      && ["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus)
+    );
+    state.inMailGrace = inMailGrace;
+    const softReminder = softDeadline && now >= softDeadline && remaining > 0 && !inMailGrace
+      ? "｜已達 7 分鐘，可查看暫定前四名與自選候選或提早結束"
       : "";
     document.querySelector("#backendCountdown").textContent = ["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
-      : `狀態：${payload.rfq.workflowStatus}｜詢價流程剩餘時間 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}${softReminder}`;
+      : inMailGrace
+        ? `正在等待最後郵件轉送｜${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")} 後正式排名`
+        : `狀態：${payload.rfq.workflowStatus}｜詢價流程剩餘時間 ${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0")}${softReminder}`;
     document.querySelector("#backendIssuerStates").innerHTML = payload.issuers.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${item.issuer}</b>${item.status}</span>`).join("");
-    // Offer early close only while the reply window is still open.
-    finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus);
+    // Do not offer an early close during the final transport grace period.
+    finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus) || inMailGrace;
+    recalculateButton.hidden = !["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
+      || !payload.rfq.hasUnrankedLateReplies;
+    updateProvisionalBanner();
+  }
+
+  function updateProvisionalBanner() {
+    const banner = document.querySelector("#backendProvisionalBanner");
+    if (!banner || !state.latestResultsRfq?.isProvisional) return;
+    banner.textContent = state.inMailGrace
+      ? "正在等待最後郵件轉送；以下仍為暫定前四名與可自選候選，60 秒緩衝結束後才會建立正式排名與報價圖。"
+      : state.latestResultsRfq.allTradesHaveFiveValidQuotes
+        ? "每筆交易均已有至少五家有效報價，可提早結束並產生正式前四名與自選第五名。"
+        : "以下為暫定前四名與可自選候選，回覆期間內仍可能變動，不會建立正式排名或報價圖。";
   }
 
   function artifactLinkHtml(artifact, tradeCode, quoteId, isImageWinner, provisional) {
@@ -840,12 +896,34 @@
 
   function renderResults(payload, artifactByQuote = {}) {
     state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
+    state.latestResultsRfq = payload.rfq;
+    state.artifactByQuote = artifactByQuote;
     const provisional = Boolean(payload.rfq.isProvisional);
     finalizeButton.classList.toggle("attention", Boolean(payload.rfq.allTradesHaveFiveValidQuotes));
     const banner = provisional
-      ? `<p class="backend-provisional">${payload.rfq.allTradesHaveFiveValidQuotes ? "每筆交易均已有至少五家有效報價，可提早結束並產生正式結果。" : "以下為暫定前五名，回覆期間內仍可能變動，不會建立正式排名或報價圖。"}</p>`
+      ? "<p id=\"backendProvisionalBanner\" class=\"backend-provisional\"></p>"
       : "";
     document.querySelector("#backendRankings").innerHTML = banner + payload.trades.map(trade => {
+      const alternates = Array.isArray(trade.alternateQuotes) ? trade.alternateQuotes : [];
+      const previousSelection = state.customFifthSelections[trade.tradeCode];
+      const selectedAlternate = alternates.find(item => item.quoteId === previousSelection) || alternates[0] || null;
+      if (selectedAlternate) state.customFifthSelections[trade.tradeCode] = selectedAlternate.quoteId;
+      const customRow = selectedAlternate
+        ? `<tr class="custom-fifth-row">
+            <td>5（自選）</td>
+            <td><select data-custom-fifth-select="${escapeHtml(trade.tradeCode)}" aria-label="${escapeHtml(trade.tradeCode)} 自選第五名發行機構">
+              ${alternates.map(item => `<option value="${escapeHtml(item.quoteId)}" data-value="${escapeHtml(item.value)}" data-received="${escapeHtml(item.receivedAt)}"${item.quoteId === selectedAlternate.quoteId ? " selected" : ""}>${escapeHtml(item.issuerDisplayName)}</option>`).join("")}
+            </select></td>
+            <td data-custom-fifth-value="${escapeHtml(trade.tradeCode)}">${escapeHtml(selectedAlternate.value)}%</td>
+            <td><span data-custom-fifth-time="${escapeHtml(trade.tradeCode)}">${new Date(selectedAlternate.receivedAt).toLocaleTimeString("zh-TW")}</span><span data-custom-fifth-action="${escapeHtml(trade.tradeCode)}">${artifactLinkHtml(
+              artifactByQuote[selectedAlternate.quoteId],
+              trade.tradeCode,
+              selectedAlternate.quoteId,
+              false,
+              provisional
+            )}</span></td>
+          </tr>`
+        : `<tr class="custom-fifth-row"><td>5（自選）</td><td colspan="3">目前沒有前四名以外的有效發行機構報價。</td></tr>`;
       return `
       <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}｜${provisional ? `有效 ${trade.validQuoteCount} 家${trade.lastUpdatedAt ? `｜更新 ${escapeHtml(formatDateTime(trade.lastUpdatedAt))}` : ""}` : "正式結果"}</small></h3>
       ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => {
@@ -857,21 +935,44 @@
           provisional
         );
         return `<tr><td>${item.rank}${item.tie ? "（同價）" : ""}</td><td>${escapeHtml(item.issuerDisplayName)}${link}</td><td>${item.value}%</td><td>${new Date(item.receivedAt).toLocaleTimeString("zh-TW")}</td></tr>`;
-      }).join("")}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
+      }).join("")}${customRow}</tbody></table>` : "<p>目前沒有有效報價。</p>"}
     </section>`;
     }).join("");
+    updateProvisionalBanner();
+  }
+
+  function updateCustomFifthSelection(select) {
+    const tradeCode = select.dataset.customFifthSelect;
+    const option = select.selectedOptions[0];
+    if (!tradeCode || !option) return;
+    state.customFifthSelections[tradeCode] = option.value;
+    const row = select.closest(".custom-fifth-row");
+    const value = row?.querySelector(`[data-custom-fifth-value="${tradeCode}"]`);
+    const time = row?.querySelector(`[data-custom-fifth-time="${tradeCode}"]`);
+    const action = row?.querySelector(`[data-custom-fifth-action="${tradeCode}"]`);
+    if (value) value.textContent = `${option.dataset.value}%`;
+    if (time) time.textContent = new Date(option.dataset.received).toLocaleTimeString("zh-TW");
+    if (action) {
+      action.innerHTML = artifactLinkHtml(
+        state.artifactByQuote[option.value],
+        tradeCode,
+        option.value,
+        false,
+        Boolean(state.latestResultsRfq?.isProvisional)
+      );
+    }
   }
 
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">第一名會自動產圖；其他前五名可在發行機構旁另行產圖。</p>"
+        ? "<p class=\"artifact-pending\">第一名會自動產圖；前四名及自選第五名可在發行機構旁另行產圖。</p>"
         : "";
       return;
     }
     artifactContainer.innerHTML = `<section class="backend-artifact-list">
       <h3>各交易報價圖</h3>
-      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜第 ${escapeHtml(item.rank)} 名｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名自動產圖）" : ""}：${item.status === "READY"
+      <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜${item.isCustom ? "第 5 名（自選）" : `第 ${escapeHtml(item.rank)} 名`}｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名自動產圖）" : ""}：${item.status === "READY"
         ? `<a class="artifact-link" href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noopener">預覽</a> · <a class="artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 PNG</a>`
         : item.status === "FAILED"
           ? `<button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(item.tradeCode)}" data-artifact-quote="${escapeHtml(item.quoteId)}">重新產圖</button>`
@@ -921,6 +1022,7 @@
         const status = snapshot.status;
         const results = snapshot.results;
         const artifacts = Array.isArray(snapshot.artifacts) ? snapshot.artifacts : [];
+        state.latestStatus = status;
         renderStatus(status);
         if (results) {
           renderResults(results, Object.fromEntries(artifacts.map(item => [item.quoteId, item])));
@@ -932,6 +1034,8 @@
           isProvisional: Boolean(results?.rfq?.isProvisional),
           hasPendingArtifacts: artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")
         };
+      } else if (state.latestStatus) {
+        renderStatus(state.latestStatus);
       }
       if (shouldContinueResultPolling()) scheduleResultRefresh(nextResultPollDelay(snapshot.changed));
     } catch (error) {
@@ -986,6 +1090,10 @@
     }
   }
   document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);
+  document.querySelector("#backendRankings").addEventListener("change", event => {
+    const select = event.target.closest("[data-custom-fifth-select]");
+    if (select) updateCustomFifthSelection(select);
+  });
   artifactContainer.addEventListener("click", requestArtifactFromButton);
   loginForm.addEventListener("submit", async event => {
     event.preventDefault();
@@ -1059,6 +1167,22 @@
       finalizeButton.disabled = false;
     }
   });
+  recalculateButton.addEventListener("click", async () => {
+    if (!state.rfqId) return;
+    if (!window.confirm("確定要把已保存的晚到報價納入新的排名版本嗎？原本的正式結果會保留。")) return;
+    recalculateButton.disabled = true;
+    try {
+      await request(`/rfqs/${state.rfqId}/recalculate`, { method: "POST", body: "{}" });
+      recalculateButton.hidden = true;
+      state.snapshotVersion = null;
+      document.querySelector("#backendCountdown").textContent = "正在建立包含晚到報價的新排名版本…";
+      await refreshResults();
+    } catch (error) {
+      document.querySelector("#backendCountdown").textContent = error.message;
+    } finally {
+      recalculateButton.disabled = false;
+    }
+  });
   adminRegistrationsButton.addEventListener("click", openAdminRegistrationReview);
   document.querySelector("#closeBackendRegistrationReview").addEventListener("click", () => adminRegistrationReviewDialog.close());
   adminRegistrationReviewList.addEventListener("click", event => {
@@ -1073,6 +1197,22 @@
   });
   adminTimelinesButton.addEventListener("click", openAdminRfqTimelines);
   document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
+  adminTimelinesList.addEventListener("click", async event => {
+    const button = event.target.closest("[data-admin-recalculate-rfq]");
+    if (!button || state.user?.role !== "ADMIN") return;
+    if (!window.confirm("確定要以管理者身份將晚到報價納入新的排名版本嗎？")) return;
+    button.disabled = true;
+    try {
+      await request(`/rfqs/${encodeURIComponent(button.dataset.adminRecalculateRfq)}/recalculate`, {
+        method: "POST",
+        body: "{}"
+      });
+      await openAdminRfqTimelines();
+    } catch (error) {
+      adminTimelinesError.textContent = error.message;
+      button.disabled = false;
+    }
+  });
   adminAccountsButton.addEventListener("click", openAdminAccounts);
   document.querySelector("#closeBackendAccounts").addEventListener("click", () => adminAccountsDialog.close());
   accountLookupBtn.addEventListener("click", lookupAccountByEmployee);

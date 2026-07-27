@@ -3,9 +3,25 @@ import {
   quoteArtifactIdempotencyKey,
   RENDER_PROFILE_VERSION
 } from "./artifacts";
+import {
+  isQuoteRankEligible,
+  quoteTargetValue,
+  rankValidQuotes,
+  rankingDirection,
+  type QuoteRankRow,
+  type RankedQuote
+} from "./ranking-policy";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, TargetField } from "./types";
 
-const RULES_VERSION = "ranking-v2-top-five";
+export {
+  quoteTargetValue,
+  rankValidQuotes,
+  rankingDirection,
+  type QuoteRankRow,
+  type RankedQuote
+} from "./ranking-policy";
+
+const RULES_VERSION = "ranking-v3-late-recalculation";
 const LEASE_MILLISECONDS = 2 * 60 * 1000;
 
 interface RankJobRow {
@@ -20,66 +36,6 @@ interface TradeTargetRow {
   id: string;
   trade_code: string;
   target_field: TargetField;
-}
-
-export interface QuoteRankRow {
-  id: string;
-  trade_id: string | null;
-  issuer: string;
-  status: string;
-  received_at: string;
-  strike_pct: number | null;
-  ko_barrier_pct: number | null;
-  coupon_pa_pct: number | null;
-  comparable_price_pct: number | null;
-  ki_barrier_pct: number | null;
-}
-
-export interface RankedQuote {
-  quote: QuoteRankRow;
-  economicRank: number;
-  displayOrder: number;
-  value: number;
-  tieGroup: string;
-}
-
-export function rankingDirection(field: TargetField): "ASC" | "DESC" {
-  return field === "COUPON" ? "DESC" : "ASC";
-}
-
-export function quoteTargetValue(quote: QuoteRankRow, field: TargetField): number | null {
-  if (field === "COUPON") return quote.coupon_pa_pct;
-  if (field === "PRICE") return quote.comparable_price_pct;
-  if (field === "STRIKE") return quote.strike_pct;
-  if (field === "KO_BARRIER") return quote.ko_barrier_pct;
-  return quote.ki_barrier_pct;
-}
-
-export function rankValidQuotes(quotes: QuoteRankRow[], field: TargetField): RankedQuote[] {
-  const sortable = quotes.flatMap(quote => {
-    const value = quoteTargetValue(quote, field);
-    return quote.status === "VALID" && value !== null && Number.isFinite(value) ? [{ quote, value }] : [];
-  });
-  const multiplier = rankingDirection(field) === "ASC" ? 1 : -1;
-  sortable.sort((left, right) => {
-    const economic = multiplier * (left.value - right.value);
-    if (Math.abs(economic) > 1e-9) return economic;
-    return left.quote.received_at.localeCompare(right.quote.received_at) || left.quote.id.localeCompare(right.quote.id);
-  });
-  let economicRank = 0;
-  let previous: number | null = null;
-  return sortable.flatMap((entry, index) => {
-    if (previous === null || Math.abs(entry.value - previous) > 1e-9) economicRank += 1;
-    previous = entry.value;
-    if (economicRank > 5) return [];
-    return [{
-      quote: entry.quote,
-      economicRank,
-      displayOrder: index + 1,
-      value: entry.value,
-      tieGroup: `${field}:${entry.value.toFixed(8)}`
-    }];
-  });
 }
 
 async function claimJob(env: AppEnv, requested: QuoteRankJob): Promise<RankJobRow | null> {
@@ -135,7 +91,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   ).bind(job.rfq_id).all<TradeTargetRow>();
   const quotes = await env.DB.prepare(
     `SELECT id, trade_id, issuer, status, received_at, strike_pct, ko_barrier_pct,
-            coupon_pa_pct, comparable_price_pct, ki_barrier_pct
+            coupon_pa_pct, comparable_price_pct, ki_barrier_pct, rejection_reason
        FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
@@ -144,7 +100,8 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
   let validResultCount = 0;
   for (const trade of trades.results) {
     const tradeQuotes = quotes.results.filter(quote => quote.trade_id === trade.id);
-    const ranked = rankValidQuotes(tradeQuotes, trade.target_field);
+    const rankOptions = { includeLateReplies: job.trigger === "RECALCULATION" };
+    const ranked = rankValidQuotes(tradeQuotes, trade.target_field, rankOptions);
     validResultCount += ranked.length;
     const firstRank = ranked.filter(result => result.economicRank === 1);
     const imageWinnerId = firstRank[0]?.quote.id ?? null;
@@ -235,7 +192,7 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
     }
     for (const quote of tradeQuotes.filter(candidate => !ranked.some(result => result.quote.id === candidate.id))) {
       const value = quoteTargetValue(quote, trade.target_field);
-      const reason = quote.status !== "VALID"
+      const reason = !isQuoteRankEligible(quote, trade.target_field, rankOptions)
         ? quote.status
         : value === null || !Number.isFinite(value)
           ? "INVALID_TARGET_VALUE"

@@ -4,8 +4,13 @@ import { sha256Text, stableStringify } from "./crypto";
 import { insertAudit } from "./db";
 import { AppError } from "./errors";
 import { jsonResponse, requestId, requireSameOrigin } from "./http";
-import { quoteTargetValue, rankingDirection, rankValidQuotes, type QuoteRankRow } from "./ranking";
-import { rfqSoftDeadlineAt } from "./rfq-timing";
+import {
+  customFifthCandidates,
+  rankingDirection,
+  rankValidQuotes,
+  type QuoteRankRow
+} from "./ranking-policy";
+import { rfqMailGraceStartsAt, rfqSoftDeadlineAt } from "./rfq-timing";
 import type { AppEnv, SessionContext, TargetField } from "./types";
 
 interface OwnedWorkflow {
@@ -22,6 +27,7 @@ interface OwnedWorkflow {
 interface ProvisionalQuoteRow extends QuoteRankRow {
   issuer_display_name: string;
   normalization_warnings_json: string;
+  rejection_reason: string | null;
 }
 
 async function ownedWorkflow(env: AppEnv, userId: string, rfqId: string): Promise<OwnedWorkflow> {
@@ -44,6 +50,18 @@ async function loadRfqStatus(
     `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
       WHERE rfq_id = ? ORDER BY issuer`
   ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>();
+  const lateReplies = await env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE
+              WHEN run.trigger = 'RECALCULATION'
+               AND run.completed_at >= COALESCE(message.normalized_at, message.received_at)
+              THEN 0 ELSE 1 END) AS unranked
+       FROM inbound_messages message
+       JOIN rfqs rfq ON rfq.id = message.rfq_id
+       LEFT JOIN ranking_runs run
+         ON run.rfq_id = rfq.id AND run.version = rfq.current_ranking_version
+      WHERE message.rfq_id = ? AND message.status = 'LATE_REPLY'`
+  ).bind(rfqId).first<{ total: number; unranked: number | null }>();
   const artifacts = rfq.current_ranking_version > 0 ? await env.DB.prepare(
     `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
       WHERE rfq_id = ? AND ranking_run_id = (
@@ -54,8 +72,11 @@ async function loadRfqStatus(
     rfq: {
       id: rfq.id, workflowStatus: rfq.workflow_status, createdAt: rfq.created_at,
       sentAt: rfq.sent_at, softDeadlineAt: rfqSoftDeadlineAt(env, rfq.sent_at),
+      mailGraceStartsAt: rfqMailGraceStartsAt(env, rfq.sent_at),
       deadlineAt: rfq.deadline_at, finalizedAt: rfq.finalized_at,
-      finalizationTrigger: rfq.finalization_trigger, rankingVersion: rfq.current_ranking_version
+      finalizationTrigger: rfq.finalization_trigger, rankingVersion: rfq.current_ranking_version,
+      hasLateReplies: Number(lateReplies?.total ?? 0) > 0,
+      hasUnrankedLateReplies: Number(lateReplies?.unranked ?? 0) > 0
     },
     issuers: issuers.results.map(row => ({ issuer: row.issuer, status: row.status, terminalAt: row.terminal_at, reason: row.terminal_reason })),
     artifacts: artifacts.results.map(row => ({
@@ -124,6 +145,13 @@ async function loadRfqResultsPayload(
        FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
   ).bind(rfqId).all<Record<string, unknown>>();
   const isProvisional = rfq.current_ranking_version === 0 && ["WAITING", "PARTIAL", "FINALIZING"].includes(rfq.workflow_status);
+  const currentRun = rfq.current_ranking_version > 0 ? await env.DB.prepare(
+    "SELECT trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
+  ).bind(rfqId, rfq.current_ranking_version).first<{ trigger: string }>() : null;
+  const rankOptions = {
+    includeLateReplies: currentRun?.trigger === "RECALCULATION",
+    maxEconomicRank: Number.MAX_SAFE_INTEGER
+  };
   const results = rfq.current_ranking_version > 0 ? await env.DB.prepare(
     `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
             r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
@@ -139,11 +167,11 @@ async function loadRfqResultsPayload(
        JOIN ranking_runs run ON run.id = e.ranking_run_id
       WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
-  const provisionalQuotes = isProvisional ? await env.DB.prepare(
+  const candidateQuotes = isProvisional || rfq.current_ranking_version > 0 ? await env.DB.prepare(
     `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
-            strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
-            ki_barrier_pct, normalization_warnings_json
-       FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
+             strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
+             ki_barrier_pct, normalization_warnings_json, rejection_reason
+        FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
   ).bind(rfqId).all<ProvisionalQuoteRow>() : { results: [] as ProvisionalQuoteRow[] };
   const provisionalByTrade = new Map<string, ReturnType<typeof rankValidQuotes>>();
   const provisionalValidCounts = new Map<string, number>();
@@ -152,19 +180,24 @@ async function loadRfqResultsPayload(
     for (const trade of trades.results) {
       const tradeId = String(trade.id);
       const targetField = String(trade.target_field) as TargetField;
-      const tradeQuotes = provisionalQuotes.results.filter(quote => quote.trade_id === tradeId);
-      provisionalByTrade.set(tradeId, rankValidQuotes(tradeQuotes, targetField));
-      provisionalValidCounts.set(tradeId, new Set(tradeQuotes.filter(quote => {
-        const value = quoteTargetValue(quote, targetField);
-        return quote.status === "VALID" && value !== null && Number.isFinite(value);
-      }).map(quote => quote.issuer)).size);
+      const tradeQuotes = candidateQuotes.results.filter(quote => quote.trade_id === tradeId);
+      const ranked = rankValidQuotes(tradeQuotes, targetField, rankOptions);
+      provisionalByTrade.set(tradeId, ranked);
+      provisionalValidCounts.set(tradeId, new Set(ranked.map(result => result.quote.issuer)).size);
       provisionalLastUpdated.set(tradeId, tradeQuotes.at(-1)?.received_at ?? null);
     }
   }
   const tradePayloads = trades.results.map(trade => {
     const tradeId = String(trade.id);
     const targetField = String(trade.target_field) as TargetField;
-    const provisionalRankings = provisionalByTrade.get(tradeId) ?? [];
+    const allRankedQuotes = isProvisional
+      ? provisionalByTrade.get(tradeId) ?? []
+      : rankValidQuotes(
+        candidateQuotes.results.filter(quote => quote.trade_id === tradeId),
+        targetField,
+        rankOptions
+      );
+    const provisionalRankings = allRankedQuotes.filter(result => result.economicRank <= 4);
     const rankings = isProvisional
       ? provisionalRankings.map(result => {
         const quote = result.quote as ProvisionalQuoteRow;
@@ -182,7 +215,7 @@ async function loadRfqResultsPayload(
           warnings: JSON.parse(quote.normalization_warnings_json || "[]") as unknown
         };
       })
-      : results.results.filter(result => result.trade_id === trade.id).map(result => ({
+      : results.results.filter(result => result.trade_id === trade.id && Number(result.economic_rank) <= 4).map(result => ({
         quoteId: result.quote_id, rank: result.economic_rank, displayOrder: result.display_order,
         issuer: result.issuer, issuerDisplayName: result.issuer_display_name,
         value: result.normalized_value, direction: result.direction,
@@ -190,15 +223,28 @@ async function loadRfqResultsPayload(
         tie: results.results.filter(candidate => candidate.trade_id === trade.id && candidate.tie_group === result.tie_group).length > 1,
         receivedAt: result.received_at, warnings: JSON.parse(String(result.normalization_warnings_json ?? "[]")) as unknown
       }));
+    const alternateQuotes = customFifthCandidates(allRankedQuotes).map(result => {
+      const quote = result.quote as ProvisionalQuoteRow;
+      return {
+        quoteId: quote.id,
+        issuer: quote.issuer,
+        issuerDisplayName: quote.issuer_display_name,
+        value: result.value,
+        receivedAt: quote.received_at,
+        warnings: JSON.parse(quote.normalization_warnings_json || "[]") as unknown
+      };
+    });
+    const validIssuerCount = new Set(allRankedQuotes.map(result => result.quote.issuer)).size;
     return {
       id: trade.id, sequence: trade.sequence, tradeCode: trade.trade_code, product: trade.product,
       currency: trade.currency, targetField: trade.target_field,
       underlyings: JSON.parse(String(trade.underlyings_json ?? "[]")) as unknown,
-      validQuoteCount: isProvisional ? provisionalValidCounts.get(tradeId) ?? 0 : rankings.length,
+      validQuoteCount: isProvisional ? provisionalValidCounts.get(tradeId) ?? 0 : validIssuerCount,
       lastUpdatedAt: isProvisional ? provisionalLastUpdated.get(tradeId) ?? null : rfq.finalized_at,
       rankings,
+      alternateQuotes,
       exclusions: isProvisional
-        ? provisionalQuotes.results
+        ? candidateQuotes.results
           .filter(quote => quote.trade_id === tradeId && quote.status !== "VALID")
           .map(quote => ({ issuer: quote.issuer, reason: quote.status }))
         : exclusions.results.filter(exclusion => exclusion.trade_id === trade.id).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
@@ -234,18 +280,22 @@ async function loadRfqArtifactsPayload(
   const rfq = loadedRfq ?? await ownedWorkflow(env, session.user.id, rfqId);
   const artifacts = await env.DB.prepare(
     `SELECT a.id, a.trade_code, a.quote_id, a.issuer, a.content_type, a.byte_size,
-            a.status, a.completed_at, a.expires_at, result.economic_rank,
-            result.is_image_winner
-       FROM generated_artifacts a
-       JOIN ranking_runs r ON r.id = a.ranking_run_id
-       JOIN ranking_results result
-         ON result.ranking_run_id = a.ranking_run_id AND result.quote_id = a.quote_id
-      WHERE a.rfq_id = ? AND r.version = ?
-      ORDER BY a.trade_code, result.economic_rank, result.display_order`
+             a.status, a.completed_at, a.expires_at, result.economic_rank,
+             result.is_image_winner
+        FROM generated_artifacts a
+        JOIN ranking_runs r ON r.id = a.ranking_run_id
+        LEFT JOIN ranking_results result
+          ON result.ranking_run_id = a.ranking_run_id AND result.quote_id = a.quote_id
+       WHERE a.rfq_id = ? AND r.version = ?
+       ORDER BY a.trade_code,
+                CASE WHEN result.economic_rank BETWEEN 1 AND 4 THEN result.economic_rank ELSE 5 END,
+                result.display_order, a.created_at`
   ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>();
   return { artifacts: artifacts.results.map(row => ({
     id: row.id, tradeCode: row.trade_code, quoteId: row.quote_id, issuer: row.issuer,
-    rank: row.economic_rank, isDefault: row.is_image_winner === 1,
+    rank: Number(row.economic_rank) >= 1 && Number(row.economic_rank) <= 4 ? row.economic_rank : 5,
+    isCustom: row.economic_rank === null || Number(row.economic_rank) > 4,
+    isDefault: row.is_image_winner === 1,
     contentType: row.content_type, byteSize: row.byte_size,
     status: row.status, completedAt: row.completed_at, expiresAt: row.expires_at,
     downloadUrl: row.status === "READY" ? `/api/v1/artifacts/${row.id}/download` : null,
@@ -282,10 +332,21 @@ export async function downloadArtifact(request: Request, env: AppEnv, session: S
 export async function recalculateRfq(request: Request, env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
   requireSameOrigin(request);
   await requireCsrf(request, session);
-  const rfq = await ownedWorkflow(env, session.user.id, rfqId);
+  const rfq = session.user.role === "ADMIN"
+    ? await env.DB.prepare(
+      `SELECT id, workflow_status, created_at, sent_at, deadline_at, finalized_at,
+              finalization_trigger, current_ranking_version
+         FROM rfqs WHERE id = ?`
+    ).bind(rfqId).first<OwnedWorkflow>()
+    : await ownedWorkflow(env, session.user.id, rfqId);
+  if (!rfq) throw new AppError(404, "RFQ_NOT_FOUND", "找不到此詢價，或您沒有權限查看。 ");
   if (!["COMPLETED", "NO_VALID_QUOTE"].includes(rfq.workflow_status)) {
     throw new AppError(409, "RFQ_NOT_FINALIZED", "只有已完成的詢價可以重新計算。 ");
   }
+  await insertAudit(env, "RFQ_RECALCULATION_REQUESTED", "RFQ", rfqId, session.user.id, requestId(request), {
+    fromVersion: rfq.current_ranking_version,
+    requestedByAdmin: session.user.role === "ADMIN"
+  });
   await requestFinalization(env, rfqId, "RECALCULATION");
   return jsonResponse({ rfq: { id: rfqId, workflowStatus: "FINALIZING", requestedVersion: rfq.current_ranking_version + 1 } }, 202);
 }
@@ -299,6 +360,12 @@ export async function finalizeRfqNow(request: Request, env: AppEnv, session: Ses
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
   if (!["WAITING", "PARTIAL"].includes(rfq.workflow_status)) {
     throw new AppError(409, "RFQ_NOT_WAITING", "只有等待報價中的詢價可以提早結束。 ");
+  }
+  const graceStartsAt = rfqMailGraceStartsAt(env, rfq.sent_at);
+  if (graceStartsAt && rfq.deadline_at
+    && Date.now() >= Date.parse(graceStartsAt)
+    && Date.now() < Date.parse(rfq.deadline_at)) {
+    throw new AppError(409, "RFQ_MAIL_GRACE_ACTIVE", "正在等待最後郵件轉送，緩衝期結束後會自動完成排名。 ");
   }
   await insertAudit(env, "RFQ_EARLY_FINALIZE_REQUESTED", "RFQ", rfqId, session.user.id, requestId(request), {
     fromStatus: rfq.workflow_status

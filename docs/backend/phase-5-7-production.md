@@ -10,16 +10,19 @@ Branch: `feature/subject-branch-correlation`
 3. Send creates only the outbound batches required by the selected issuers and snapshots those
    expected issuers. An absent selection preserves the original eight-batch/eleven-issuer default;
    BMJB remains one shared batch for BNP/MS/JPM/BARCLAYS.
-4. The final successful outbound batch starts one named RFQ Durable Object and sets the
-   fifteen-minute hard alarm; the seven-minute point is a UI reminder only.
+4. The final successful outbound batch starts one named RFQ Durable Object. Seven minutes is a UI
+   reminder, fifteen minutes starts the mail-transport grace, and the hard alarm fires sixty
+   seconds later.
 5. Inbound MIME is stored privately, parsed, normalized through an issuer profile and matched to a trade.
 6. All-terminal or deadline finalization enqueues a versioned ranking run.
 7. The deterministic rank-one quote for each trade is automatically rendered into a private R2
    mobile-portrait PNG artifact.
-8. The owner polls status/results and may explicitly request an idempotent image for another
-   persisted top-five quote, then previews or downloads it through the authenticated Worker.
+8. The owner polls status/results and may explicitly request an idempotent image for ranks 1–4 or
+   a server-validated custom fifth issuer, then previews or downloads it through the authenticated
+   Worker.
 
-Late replies are stored but do not overwrite a finalized run. Recalculation creates a new version.
+Late replies are stored but do not overwrite a finalized run. Owner/ADMIN recalculation creates a
+new version and admits only finite, matched, non-rejected late values.
 
 ## Ranking rules
 
@@ -31,7 +34,10 @@ Late replies are stored but do not overwrite a finalized run. Recalculation crea
 | KO Barrier | lowest first |
 | KI Barrier | lowest first |
 
-Only `VALID` finite normalized values participate. Equal values retain the same economic rank; receipt time then opaque quote ID determines display order. The earliest rank-one receipt is the deterministic image winner while the UI still labels the tie.
+Only `VALID` finite normalized values participate normally. An explicit recalculation may also use
+finite, matched, non-rejected `LATE_REPLY` rows. Equal values retain the same economic rank; receipt
+time then opaque quote ID determines display order. The public UI shows ranks 1–4 and lets the user
+choose a fifth issuer outside those ranks.
 
 ## Production resources
 
@@ -69,7 +75,7 @@ Do not put secrets in `wrangler.jsonc`. `EMPLOYEE_DATA_KEY` and `EMPLOYEE_LOOKUP
 - Queue delivery is idempotent and may retry.
 - The cron re-enqueues due finalization and queued ranking/image work.
 - A failed issuer is terminal after the retry budget and cannot block the deadline.
-- A late reply requires an explicit owner recalculation; the previous ranking run remains immutable.
+- A late reply requires an explicit owner/ADMIN recalculation; the previous ranking run remains immutable.
 - If Browser Rendering is unavailable, the artifact remains failed/queued independently of the completed ranking.
   The owner can retry a failed artifact from the result page without creating a duplicate; the
   stored safe error distinguishes request failure from an HTTP status such as 429.

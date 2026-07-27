@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { sha256Text } from "../src/crypto";
 import { outboundArchiveKey } from "../src/admin-outbound";
 import { processOutboundEmailJob, sendRfq } from "../src/outbound";
+import { getRfqStatus } from "../src/results";
 import type { AppEnv, OutboundEmailJob, SessionContext } from "../src/types";
 import { EMAIL_INSTITUTIONS, branchSubjectLabel } from "../shared/email-formats.js";
 
@@ -122,7 +123,7 @@ describe("outbound RFQ email workflow", () => {
     expect(counts).toEqual({ issuer_count: 11, batch_count: 8, job_count: 8 });
   });
 
-  it("sends all eight formats and moves the RFQ to the ten-minute waiting window", async () => {
+  it("sends all eight formats and moves the RFQ to the fifteen-minute window plus grace", async () => {
     const uniqueJobs = new Map(queued.map(job => [job.jobId, job]));
     expect(uniqueJobs.size).toBe(8);
     for (const job of uniqueJobs.values()) await processOutboundEmailJob(appEnv, job);
@@ -140,8 +141,14 @@ describe("outbound RFQ email workflow", () => {
       "SELECT dispatch_status, sent_at, deadline_at, correlation_token_hash FROM rfqs WHERE id = ?"
     ).bind(RFQ_ID).first<{ dispatch_status: string; sent_at: string; deadline_at: string; correlation_token_hash: string }>();
     expect(rfq?.dispatch_status).toBe("WAITING");
-    expect(Date.parse(rfq?.deadline_at ?? "") - Date.parse(rfq?.sent_at ?? "")).toBe(15 * 60 * 1000);
+    expect(Date.parse(rfq?.deadline_at ?? "") - Date.parse(rfq?.sent_at ?? "")).toBe(16 * 60 * 1000);
     expect(rfq?.correlation_token_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const status = await (await getRfqStatus(appEnv, session, RFQ_ID)).json<{
+      rfq: { sentAt: string; mailGraceStartsAt: string; deadlineAt: string; hasUnrankedLateReplies: boolean };
+    }>();
+    expect(Date.parse(status.rfq.mailGraceStartsAt) - Date.parse(status.rfq.sentAt)).toBe(15 * 60 * 1000);
+    expect(Date.parse(status.rfq.deadlineAt) - Date.parse(status.rfq.mailGraceStartsAt)).toBe(60 * 1000);
+    expect(status.rfq.hasUnrankedLateReplies).toBe(false);
     const batches = await testEnv.DB.prepare(
       "SELECT status, provider_message_id, content_hash FROM outbound_email_batches WHERE rfq_id = ?"
     ).bind(RFQ_ID).all<{ status: string; provider_message_id: string; content_hash: string }>();

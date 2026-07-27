@@ -14,7 +14,7 @@ const LOOKUP_KEY = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 describe("versioned ranking persistence", () => {
   beforeAll(async () => applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS));
 
-  it("shows five ranks, auto-creates rank one, and creates another ranked quote image on request", async () => {
+  it("shows four economic ranks plus a custom issuer, and creates either quote image", async () => {
     const suffix = crypto.randomUUID();
     const userId = `usr_${suffix}`;
     const rfqId = `rfq_${crypto.randomUUID()}`;
@@ -102,7 +102,11 @@ describe("versioned ranking persistence", () => {
         allTradesHaveThreeValidQuotes: boolean;
         allTradesHaveFiveValidQuotes: boolean;
       };
-      trades: Array<{ validQuoteCount: number; rankings: Array<{ rank: number; value: number }> }>;
+      trades: Array<{
+        validQuoteCount: number;
+        rankings: Array<{ rank: number; value: number }>;
+        alternateQuotes: Array<{ quoteId: string; issuer: string; value: number }>;
+      }>;
     }>();
     expect(provisional.rfq).toMatchObject({
       isProvisional: true,
@@ -115,8 +119,11 @@ describe("versioned ranking persistence", () => {
       [1, 14],
       [2, 12],
       [3, 10],
-      [4, 8],
-      [5, 6]
+      [4, 8]
+    ]);
+    expect(provisional.trades[0]?.alternateQuotes.map(item => [item.issuer, item.value])).toEqual([
+      ["CITI", 6],
+      ["DBS", 4]
     ]);
     expect(await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM ranking_runs WHERE rfq_id = ?").bind(rfqId).first<{ count: number }>()).toEqual({ count: 0 });
 
@@ -205,24 +212,26 @@ describe("versioned ranking persistence", () => {
       "T01",
       quoteIds[3]
     )).status).toBe(202);
-    await expect(requestTradeArtifact(
+    expect((await requestTradeArtifact(
       alternateRequest.clone(),
       appEnv,
       session,
       rfqId,
       "T01",
       quoteIds[6]
-    )).rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
+    )).status).toBe(202);
     expect(imageJobs.map(imageJob => [imageJob.tradeCode, imageJob.quoteId, imageJob.issuer])).toEqual([
       ["T01", quoteIds[0], "BNP"],
-      ["T01", quoteIds[3], "CA"]
+      ["T01", quoteIds[3], "CA"],
+      ["T01", quoteIds[6], "DBS"]
     ]);
     const storedArtifacts = await testEnv.DB.prepare(
       "SELECT trade_code, quote_id, issuer, render_profile_version FROM generated_artifacts WHERE rfq_id = ? ORDER BY created_at, issuer"
     ).bind(rfqId).all<{ trade_code: string; quote_id: string; issuer: string; render_profile_version: string }>();
     expect(storedArtifacts.results).toEqual([
       { trade_code: "T01", quote_id: quoteIds[0], issuer: "BNP", render_profile_version: "quote-card-reference-v3" },
-      { trade_code: "T01", quote_id: quoteIds[3], issuer: "CA", render_profile_version: "quote-card-reference-v3" }
+      { trade_code: "T01", quote_id: quoteIds[3], issuer: "CA", render_profile_version: "quote-card-reference-v3" },
+      { trade_code: "T01", quote_id: quoteIds[6], issuer: "DBS", render_profile_version: "quote-card-reference-v3" }
     ]);
     const artifactList = await (await listRfqArtifacts(testEnv, session, rfqId)).json<{
       artifacts: Array<{
@@ -231,6 +240,7 @@ describe("versioned ranking persistence", () => {
         quoteId: string;
         issuer: string;
         rank: number;
+        isCustom: boolean;
         isDefault: boolean;
         previewUrl: string | null;
       }>;
@@ -240,10 +250,12 @@ describe("versioned ranking persistence", () => {
       item.quoteId,
       item.issuer,
       item.rank,
+      item.isCustom,
       item.isDefault
     ])).toEqual([
-      ["T01", quoteIds[0], "BNP", 1, true],
-      ["T01", quoteIds[3], "CA", 3, false]
+      ["T01", quoteIds[0], "BNP", 1, false, true],
+      ["T01", quoteIds[3], "CA", 3, false, false],
+      ["T01", quoteIds[6], "DBS", 5, true, false]
     ]);
 
     let renderedHtml = "";
@@ -263,6 +275,9 @@ describe("versioned ranking persistence", () => {
     expect(renderedHtml).toContain("14%");
     expect(renderedHtml).toContain("報價日期：21-Jul-26");
     expect(renderedHtml).toContain(`RFQ 編號：[RFQ:${await rfqCorrelationCode(LOOKUP_KEY, rfqId)}]`);
+    await processImageRenderJob(renderEnv, imageJobs[2]!);
+    expect(renderedHtml).toContain("4%");
+    expect(renderedHtml).toContain("DBS");
 
     const bnpArtifact = artifactList.artifacts.find(item => item.issuer === "BNP")!;
     const objectKey = `quote-images/v3/${rfqId}/test/T01.png`;
@@ -303,5 +318,42 @@ describe("versioned ranking persistence", () => {
     const rfq = await testEnv.DB.prepare("SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ?")
       .bind(rfqId).first<{ workflow_status: string; current_ranking_version: number }>();
     expect(rfq).toEqual({ workflow_status: "COMPLETED", current_ranking_version: 1 });
+
+    const lateQuoteId = `quo_${crypto.randomUUID()}`;
+    const recalculationJobId = `rnkjob_${crypto.randomUUID()}`;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO issuer_quotes
+          (id, rfq_id, trade_id, inbound_message_id, issuer, issuer_display_name,
+           product, currency, tenor_months, guaranteed_periods_months, underlyings_json,
+           strike_pct, ko_type, ko_barrier_pct, coupon_pa_pct, raw_price_value,
+           raw_price_label, price_semantics, comparable_price_pct, barrier_type,
+           observation_frequency_months, otc, received_at, parser_profile, parser_version,
+           source_table_index, source_row_index, raw_values_json, validation_errors_json,
+           status, created_at)
+         VALUES (?, ?, ?, ?, 'MS', 'MS（OBU不得承做）', 'FCN', 'USD', 6, 1, '["AAA UW"]',
+                 80, 'Daily Memory', 100, 16, 98, 'NotePrice', 'NOTE_PRICE', 98, 'NONE',
+                 1, 'Note', ?, 'TEST', 'v1', 0, 8, '[]', '["RFQ_DEADLINE_PASSED"]',
+                 'LATE_REPLY', ?)`
+      ).bind(lateQuoteId, rfqId, tradeId, inboundId, new Date(Date.parse(now) + 16 * 60_000).toISOString(), now),
+      testEnv.DB.prepare(
+        `INSERT INTO quote_rank_jobs
+          (id, rfq_id, trigger, requested_version, idempotency_key, status,
+           available_at, created_at, updated_at)
+         VALUES (?, ?, 'RECALCULATION', 2, ?, 'QUEUED', ?, ?, ?)`
+      ).bind(recalculationJobId, rfqId, `ranking:${rfqId}:v2`, now, now, now)
+    ]);
+    await processQuoteRankJob(appEnv, {
+      jobId: recalculationJobId,
+      rfqId,
+      trigger: "RECALCULATION",
+      requestedVersion: 2
+    });
+    const recalculated = await (await getRfqResults(testEnv, session, rfqId)).json<{
+      rfq: { rankingVersion: number };
+      trades: Array<{ rankings: Array<{ quoteId: string; rank: number }> }>;
+    }>();
+    expect(recalculated.rfq.rankingVersion).toBe(2);
+    expect(recalculated.trades[0]?.rankings[0]).toMatchObject({ quoteId: lateQuoteId, rank: 1 });
   });
 });

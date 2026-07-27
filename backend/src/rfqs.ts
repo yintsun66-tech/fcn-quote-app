@@ -5,6 +5,7 @@ import { jsonResponse, readJson, requestId, requireIdempotencyKey, requireSameOr
 import type { AppEnv, NormalizedTrade, SessionContext } from "./types";
 import { normalizeRfqInput } from "./validation";
 import { requireCsrf } from "./auth";
+import { rfqMailGraceStartsAt } from "./rfq-timing";
 
 interface IdempotencyRow {
   request_hash: string;
@@ -211,6 +212,7 @@ export async function listRfqs(request: Request, env: AppEnv, session: SessionCo
       tradeCount: row.trade_count,
       createdAt: row.created_at,
       sentAt: row.sent_at,
+      mailGraceStartsAt: rfqMailGraceStartsAt(env, row.sent_at),
       deadlineAt: row.deadline_at,
       finalizedAt: row.finalized_at,
       rankingVersion: row.current_ranking_version,

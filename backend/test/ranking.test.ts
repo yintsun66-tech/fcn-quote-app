@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { quoteTargetValue, rankValidQuotes } from "../src/ranking";
+import { customFifthCandidates } from "../src/ranking-policy";
 
 function quote(id: string, value: number | null, receivedAt: string, status = "VALID") {
   return {
@@ -59,5 +60,26 @@ describe("quote ranking", () => {
       ["e", 5],
       ["f", 5]
     ]);
+  });
+
+  it("includes finite late replies only in an explicit recalculation", () => {
+    const late = quote("late", 16, "2026-07-21T00:16:01Z", "LATE_REPLY");
+    expect(rankValidQuotes([late], "COUPON")).toEqual([]);
+    expect(rankValidQuotes([late], "COUPON", { includeLateReplies: true })[0]?.value).toBe(16);
+    const rejectedLate = { ...late, id: "late-rejected", rejection_reason: "Issuer rejected" };
+    expect(rankValidQuotes([rejectedLate], "COUPON", { includeLateReplies: true })).toEqual([]);
+  });
+
+  it("offers one best quote per issuer outside the first four economic ranks", () => {
+    const ranked = rankValidQuotes([
+      quote("a", 15, "2026-07-21T00:00:01Z"),
+      quote("b", 14, "2026-07-21T00:00:02Z"),
+      quote("c", 13, "2026-07-21T00:00:03Z"),
+      quote("d", 12, "2026-07-21T00:00:04Z"),
+      { ...quote("e-best", 11, "2026-07-21T00:00:05Z"), issuer: "E" },
+      { ...quote("e-other", 10, "2026-07-21T00:00:06Z"), issuer: "E" },
+      quote("f", 9, "2026-07-21T00:00:07Z")
+    ], "COUPON", { maxEconomicRank: Number.MAX_SAFE_INTEGER });
+    expect(customFifthCandidates(ranked).map(item => item.quote.id)).toEqual(["e-best", "f"]);
   });
 });

@@ -4,7 +4,8 @@ import { rfqCorrelationCode } from "./crypto";
 import { AppError } from "./errors";
 import { jsonResponse, requestId, requireSameOrigin } from "./http";
 import { renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
-import type { AppEnv, ImageRenderJob, SessionContext } from "./types";
+import { customFifthCandidates, rankValidQuotes, type QuoteRankRow } from "./ranking-policy";
+import type { AppEnv, ImageRenderJob, SessionContext, TargetField } from "./types";
 
 const LEASE_MILLISECONDS = 3 * 60 * 1000;
 export const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
@@ -56,6 +57,12 @@ interface ArtifactRequestQuote {
   issuer: string;
 }
 
+interface CurrentRankingRun {
+  id: string;
+  version: number;
+  trigger: string;
+}
+
 interface RequestedArtifact {
   id: string;
   ranking_run_id: string;
@@ -98,15 +105,39 @@ export async function requestTradeArtifact(
   if (rfq.workflow_status !== "COMPLETED" || rfq.current_ranking_version < 1) {
     throw new AppError(409, "RFQ_NOT_FINALIZED", "詢價完成且有有效第一名後，才能產出報價圖。 ");
   }
-  const rankedQuote = quoteId ? await env.DB.prepare(
-    `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
-       FROM ranking_runs run
-       JOIN ranking_results result ON result.ranking_run_id = run.id
-       JOIN rfq_trades trade ON trade.id = result.trade_id
-       JOIN issuer_quotes q ON q.id = result.quote_id
-      WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ? AND q.id = ?
-      LIMIT 1`
-  ).bind(rfqId, rfq.current_ranking_version, tradeCode, quoteId).first<ArtifactRequestQuote>() : await env.DB.prepare(
+  const currentRun = await env.DB.prepare(
+    "SELECT id, version, trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
+  ).bind(rfqId, rfq.current_ranking_version).first<CurrentRankingRun>();
+  if (!currentRun) throw new AppError(409, "RANKING_RUN_NOT_FOUND", "找不到目前的正式排名版本。 ");
+
+  let rankedQuote: ArtifactRequestQuote | null = null;
+  if (quoteId) {
+    const trade = await env.DB.prepare(
+      "SELECT id, target_field FROM rfq_trades WHERE rfq_id = ? AND trade_code = ? LIMIT 1"
+    ).bind(rfqId, tradeCode).first<{ id: string; target_field: TargetField }>();
+    if (trade) {
+      const quotes = await env.DB.prepare(
+        `SELECT id, trade_id, issuer, status, received_at, strike_pct, ko_barrier_pct,
+                coupon_pa_pct, comparable_price_pct, ki_barrier_pct, rejection_reason
+           FROM issuer_quotes WHERE rfq_id = ? AND trade_id = ? ORDER BY received_at, id`
+      ).bind(rfqId, trade.id).all<QuoteRankRow>();
+      const ranked = rankValidQuotes(quotes.results, trade.target_field, {
+        includeLateReplies: currentRun.trigger === "RECALCULATION",
+        maxEconomicRank: Number.MAX_SAFE_INTEGER
+      });
+      const allowedQuote = ranked.find(result => result.economicRank <= 4 && result.quote.id === quoteId)
+        ?? customFifthCandidates(ranked).find(result => result.quote.id === quoteId);
+      if (allowedQuote) {
+        rankedQuote = {
+          ranking_run_id: currentRun.id,
+          ranking_version: currentRun.version,
+          quote_id: allowedQuote.quote.id,
+          issuer: allowedQuote.quote.issuer
+        };
+      }
+    }
+  } else {
+    rankedQuote = await env.DB.prepare(
     `SELECT run.id AS ranking_run_id, run.version AS ranking_version, q.id AS quote_id, q.issuer
        FROM ranking_runs run
        JOIN ranking_results result ON result.ranking_run_id = run.id AND result.is_image_winner = 1
@@ -114,12 +145,13 @@ export async function requestTradeArtifact(
        JOIN issuer_quotes q ON q.id = result.quote_id
       WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
       LIMIT 1`
-  ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestQuote>();
+    ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestQuote>();
+  }
   if (!rankedQuote) {
     throw new AppError(
       404,
       quoteId ? "RANKED_QUOTE_NOT_FOUND" : "RANK_ONE_QUOTE_NOT_FOUND",
-      quoteId ? "此報價不在這筆交易目前的前五名結果中。" : "此筆交易沒有可產圖的第一名報價。"
+      quoteId ? "此報價不在目前的前四名或自選第五名候選中。" : "此筆交易沒有可產圖的第一名報價。"
     );
   }
 
@@ -262,12 +294,11 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
             t.trade_date, q.tenor_months, q.guaranteed_periods_months, q.underlyings_json,
             q.coupon_pa_pct, q.strike_pct, q.ko_barrier_pct, q.ko_type, q.barrier_type,
             q.ki_barrier_pct, q.comparable_price_pct
-       FROM ranking_results r
-       JOIN rfq_trades t ON t.id = r.trade_id
-       JOIN issuer_quotes q ON q.id = r.quote_id
-      WHERE r.ranking_run_id = ? AND t.trade_code = ? AND r.quote_id = ?
+       FROM rfq_trades t
+       JOIN issuer_quotes q ON q.trade_id = t.id
+      WHERE t.rfq_id = ? AND t.trade_code = ? AND q.id = ?
       ORDER BY t.sequence`
-  ).bind(job.ranking_run_id, job.trade_code, job.quote_id).all<QuoteCardRow>();
+  ).bind(job.rfq_id, job.trade_code, job.quote_id).all<QuoteCardRow>();
   if (!rows.results.length) throw new Error("IMAGE_RENDER_NO_RANKED_QUOTES");
   const trades: QuoteCardTrade[] = rows.results.map(row => ({
     sequence: row.sequence, tradeCode: row.trade_code, product: row.product, currency: row.currency,

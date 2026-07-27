@@ -1,6 +1,6 @@
 # Project handoff
 
-Updated: 2026-07-25 (Asia/Taipei)
+Updated: 2026-07-27 (Asia/Taipei)
 
 Current branch: `feature/subject-branch-correlation`
 
@@ -13,10 +13,10 @@ Worker `cc633dcb-b7fc-4b36-aa76-7b5783f3efa5` deployed 2026-07-25 from `0bbe159`
 Previous: `364a345e-...` from `fd7a380` (duplicate-registration visibility);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
-Branch state when this handoff was written: `feature/subject-branch-correlation` is at `0bbe159`
-locally and on `origin` (they match). Recent commits: `0913f16` PS tier (+2026-07-25 doc
-alignment) → `482ccdd` PS deploy record → `fd7a380` duplicate-registration visibility → `0bbe159`
-employee-number lookup. The branch is not merged to `main`.
+Branch state when this handoff was written: `feature/subject-branch-correlation` is at `92e4b07`
+locally and on `origin` (they match). Production implementation remains `0bbe159`; subsequent
+commits through `92e4b07` are deployment/handback documentation. The branch is not merged to
+`main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
@@ -46,6 +46,76 @@ The separate untracked `.claude/settings.local.json` remains user-owned and must
 
 A successful Worker deployment does not prove that GitHub, the bank mailbox, forwarding rules,
 or issuer replies are healthy. Verify each boundary separately.
+
+## Read-only production RFQ audit (reviewed 2026-07-27)
+
+This audit used aggregate/read-only D1 queries. No RFQ, quote, job, mail, artifact, user, secret or
+Cloudflare resource was changed. No raw mail, account identifier, RFQ ID, full subject, correlation
+code or real quote value was copied into the repository.
+
+- D1 contains 43 RFQs created from 2026-07-21 through 2026-07-24: 31 `COMPLETED` and 12
+  `NO_VALID_QUOTE`. There is no RFQ currently stuck in `DRAFT`, `VALIDATED`, `QUEUED`, `SENDING`,
+  `WAITING`, `PARTIAL` or `FINALIZING`, and no workflow-level `FAILED` RFQ. There is no RFQ record
+  after 2026-07-24 10:45 UTC.
+- All 344 outbound batches (43 RFQs × 8 profiles) are `SENT`, each in one attempt; all 344 outbound
+  jobs completed. Therefore the observed incomplete outcomes are not caused by an outbound Queue
+  or Worker send failure. `SENT` still proves provider acceptance, not bank inbox delivery.
+- The first 10 `NO_VALID_QUOTE` RFQs used the former 10-minute deadline and received zero linked
+  inbound messages. Separately, 45 early messages on 2026-07-22 are `UNMATCHED_RFQ`; every one
+  lacks an RFQ tag/hash in the normalized subject and cannot be uniquely correlated from preserved
+  thread headers. They must not be guessed/reassigned to historical RFQs.
+- The remaining two `NO_VALID_QUOTE` RFQs used the 15-minute deadline and received 9 and 8
+  correlated issuer messages. They contained no finite valid target quote: issuer evidence
+  included out-of-range/rejection responses, blank target values, `*Price Unavailable`, and
+  `Pls see below`. Their economic outcome is genuinely no valid quote, although several terminal
+  labels should be made more accurate.
+- SG replies use `At Maturity` for an EKI-style barrier. The current `barrier()` alias set does not
+  recognize it, so two out-of-range SG replies became `PARSE_ERROR`/`AMBIGUOUS_TRADE_MATCH` rather
+  than issuer rejection/no quote. DBS `*Price Unavailable` and BARCLAYS `Pls see below` are not in
+  the current invalid/rejection vocabulary, producing `INVALID_VALUE` instead of a precise
+  no-quote/rejection status.
+- Forwarded original request tables create large non-quote row noise. Exactly 50% of stored
+  BARCLAYS, DBS, JPM and CA rows, and 35.1% of MS rows, are `AMBIGUOUS_TRADE_MATCH`; the dominant
+  pattern is a valid/rejected reply table followed by the quoted original request table. Issuer
+  profiles should select/exclude tables before trade matching rather than rely on row-consumption
+  side effects.
+- Across 315 inbound messages, 228 are on-time parsed, 42 are linked late replies and 45 are the
+  early untagged unmatched messages. No GS inbound message has ever been observed. CA has only two
+  linked late replies and two early unmatched messages; no on-time parsed CA reply is present.
+- Under the current 15-minute cohort (18 RFQs), valid-reply counts are BNP/MS 15 each, DBS 14,
+  JPM 13, UBS 12, NOMURA 10, SG 9, CITI 8, BARCLAYS 7, and CA/GS 0. Keep the 15-minute deadline
+  while measuring current CA behavior; a longer global deadline should not be chosen from the
+  old 10-minute cohort alone.
+- Ranking is not stuck: all 43 rank jobs completed. Image rendering is the remaining terminal
+  workflow defect: 93 artifacts are `READY`, while 9 artifacts across 6 RFQs/9 trades are
+  `FAILED` with `BROWSER_RENDER_FAILED`; none of those trades currently has a ready alternative
+  artifact. The stored error loses the Browser Rendering HTTP/error category, so capacity,
+  transient service failure and render-content failure cannot yet be distinguished.
+
+## Local production-audit repairs (uncommitted and not deployed)
+
+The following minimal repairs are present in the working tree only. They do not add a migration,
+dependency, lockfile, binding, environment variable or deployment-setting change:
+
+- `issuer-fcn-v4` maps SG `At Maturity` to `EKI`; treats DBS `*Price Unavailable` and BARCLAYS
+  `Pls see below` as no-quote target values unless separate issuer error detail proves rejection;
+  and excludes exact known forwarded-original BMJB/DBS/CA request header signatures before trade
+  matching. It deliberately preserves otherwise identical completed response rows.
+- Browser Rendering failures now retain a safe request/HTTP category, add retry jitter and write
+  safe retry/failure audit events. The existing owner-authorized idempotent retry endpoint was
+  reused rather than recreated; the result UI now exposes **重新產圖** for a failed artifact.
+- The existing ADMIN RFQ timeline response/UI now includes a safe seven-day issuer health
+  aggregate and alerts for zero inbound, parse error, timeout, unmatched/manual-review mail and
+  failed artifacts. It contains no raw mail, subject, token, quote value, message ID or R2 key.
+- Verification completed locally: `node --check backend-client.js`; `pnpm run typecheck`;
+  targeted Vitest (3 files / 23 tests); full `pnpm test` (16 files / 90 tests); and
+  `pnpm run build` (Wrangler dry-run) all passed. The sandboxed Vitest run emitted the known
+  non-fatal Worker static-analysis access warning; all tests still passed. A localhost desktop
+  and 390×844 mobile browser smoke check loaded the current shell without console errors; the
+  mobile page reported no horizontal overflow. The ADMIN-only populated health panel was not
+  exercised against production credentials.
+- No commit, push, D1 mutation, Cloudflare deployment or production replay/reclassification has
+  been performed. Existing historical quote/status rows remain unchanged.
 
 ## Deployed feature: PS tier + account management (committed `0913f16`, migrated, deployed)
 
@@ -364,6 +434,17 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   R2 content, or unredacted personal data.
 
 ## Safe next steps
+
+Production-audit repair order:
+
+- Review and commit the local production-audit repairs above, then deploy only after explicit user
+  authorization. After deployment, run a new controlled RFQ; historical rows are intentionally
+  not re-parsed or rewritten automatically.
+- Use the ADMIN seven-day health panel to verify whether current GS/CA replies reach the inbound
+  route and whether Browser Rendering HTTP failures recur. Do not infer bank delivery from `SENT`.
+- MS forwarded-original-table noise remains unproven at a safe header-signature level. Do not add
+  a broad table-index or duplicate-row filter without a synthetic fixture derived from a
+  production-observed, anonymized MS layout.
 
 1. Start by reading `AGENTS.md`, this file, the relevant ADR/contracts, current branch/status, and
    the exact entry point/tests for the requested task.

@@ -58,6 +58,14 @@ Registration review requires the protected administration boundary and an effect
 
 The `PS` tier is an effective role derived server-side from `users.is_privileged_support` (migration 0010); the stored `role` column stays `USER`/`ADMIN`. `promote`/`demote`/`disable` guard on the target being a plain `USER` (`role='USER'` plus the flag) in SQL, so an `ADMIN` or `PS` target changes zero rows and returns `409 ACCOUNT_NOT_ELIGIBLE`; `disable` also rejects a self-target with `422`. All three are same-origin + CSRF protected and audited. Removal is soft because `rfqs.user_id` is `ON DELETE RESTRICT`.
 
+### Administrative RFQ diagnostics
+
+`GET /api/v1/admin/rfq-timelines?limit=...` remains `ADMIN`-only. It returns the recent safe RFQ
+timelines plus a seven-day `health` aggregate. The aggregate contains issuer counts/rates,
+unmatched/manual-review inbound counts, failed-artifact counts and machine-readable alerts. It
+never returns raw subjects, requester markers, correlation tokens, quote values, mail bodies,
+private R2 keys or message IDs.
+
 ## RFQ API
 
 ### `POST /api/v1/rfqs`
@@ -315,11 +323,17 @@ Special parser invariants:
 
 - UBS Quote Id metadata cannot consume or remove the previous formal cell.
 - CA must exclude the repeated original blank request table.
+- Forwarded original request tables with the exact known BMJB, DBS or CA outbound header
+  signatures are excluded before trade matching. Completed response rows are not deduplicated
+  merely because their values are identical.
 - SG supports vertical/plain-text blocks and multiple quote rows.
+- SG `At Maturity` is normalized to `EKI`.
 - NOMURA tolerates blank lines and wrapped cells.
 - GS preserves rejection remarks and excludes `N/A`/rejected quotes.
 - JPM does not depend on fixed Excel row offsets.
 - MS FCN and MS DRA remain separate parser profiles.
+- `*Price Unavailable` and `Pls see below` are explicit no-quote target values unless an attached
+  issuer comment/error table supplies a distinct rejection reason.
 
 ## Price normalization contract
 
@@ -365,6 +379,11 @@ persisted top-five snapshot. Rejected, invalid, unmatched, late, timed-out and o
 quotes remain unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's
 theme. An artifact response exposes `tradeCode`, `quoteId`, authenticated preview/download
 endpoints and metadata, never the private R2 object key or a permanent public URL.
+
+A failed artifact can be re-requested by its owner through the same idempotent ranked-quote
+endpoint. The existing artifact/job is reset and re-enqueued; no duplicate artifact is created.
+Browser Rendering failures preserve a safe request/HTTP category such as
+`BROWSER_RENDER_REQUEST_FAILED` or `BROWSER_RENDER_HTTP_429`, without storing response content.
 
 The quote-card footer displays the complete outbound subject reference as `[RFQ:<10-character-code>]`, derived with the same server-side correlation helper used by outbound email. It is a display/reference value only; ownership continues to be enforced by the authenticated RFQ/artifact join.
 

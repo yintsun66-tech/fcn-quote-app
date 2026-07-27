@@ -96,7 +96,23 @@ describe("administrator RFQ timeline", () => {
   it("returns safe timing and status aggregates without raw email or token data", async () => {
     const response = await api(ADMIN_TOKEN);
     expect(response.status).toBe(200);
-    const payload = await response.json<{ records: Array<Record<string, unknown>> }>();
+    const payload = await response.json<{
+      health: {
+        windowDays: number;
+        issuers: Array<Record<string, unknown>>;
+        alerts: Array<Record<string, unknown>>;
+      };
+      records: Array<Record<string, unknown>>;
+    }>();
+    expect(payload.health.windowDays).toBe(7);
+    expect(payload.health.issuers).toContainEqual(expect.objectContaining({
+      issuer: "BNP",
+      expected: 1,
+      validReply: 1,
+      inbound: 1,
+      validRatePct: 100
+    }));
+    expect(payload.health.alerts).toEqual([]);
     expect(payload.records).toContainEqual(expect.objectContaining({
       rfqId: RFQ_ID,
       tradeCount: 2,

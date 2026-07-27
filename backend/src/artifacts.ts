@@ -283,13 +283,18 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
     trades,
     await rfqCorrelationCode(env.EMPLOYEE_LOOKUP_KEY, job.rfq_id)
   );
-  const response = await env.BROWSER.quickAction("screenshot", {
-    html,
-    viewport: { width: 720, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
-    screenshotOptions: { type: "png", fullPage: true },
-    gotoOptions: { waitUntil: "networkidle0" }
-  });
-  if (!response.ok) throw new Error("BROWSER_RENDER_FAILED");
+  let response: Response;
+  try {
+    response = await env.BROWSER.quickAction("screenshot", {
+      html,
+      viewport: { width: 720, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
+      screenshotOptions: { type: "png", fullPage: true },
+      gotoOptions: { waitUntil: "networkidle0" }
+    });
+  } catch {
+    throw new Error("BROWSER_RENDER_REQUEST_FAILED");
+  }
+  if (!response.ok) throw new Error(`BROWSER_RENDER_HTTP_${response.status}`);
   const bytes = await response.arrayBuffer();
   const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.trade_code}/${job.quote_id}.png`;
   await env.RAW_MAIL_BUCKET.put(objectKey, bytes, {
@@ -335,7 +340,19 @@ async function markFailure(env: AppEnv, job: ImageRenderJob, terminal: boolean, 
     ).bind(terminal ? "FAILED" : "QUEUED", code, now, job.jobId),
     env.DB.prepare(
       `UPDATE generated_artifacts SET status = ?, last_error_code = ? WHERE id = ? AND status != 'READY'`
-    ).bind(terminal ? "FAILED" : "QUEUED", code, job.artifactId)
+    ).bind(terminal ? "FAILED" : "QUEUED", code, job.artifactId),
+    env.DB.prepare(
+      `INSERT INTO audit_events
+        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+       VALUES (?, NULL, ?, 'ARTIFACT', ?, ?, ?, ?)`
+    ).bind(
+      newId("aud"),
+      terminal ? "QUOTE_IMAGE_FAILED" : "QUOTE_IMAGE_RETRY_SCHEDULED",
+      job.artifactId,
+      `queue:${job.jobId}`,
+      JSON.stringify({ issuer: job.issuer, tradeCode: job.tradeCode, errorCode: code }),
+      now
+    )
   ]);
 }
 
@@ -371,7 +388,9 @@ export async function consumeImageRender(batch: MessageBatch<unknown>, env: AppE
       }
       const terminal = message.attempts >= 4;
       await markFailure(env, message.body, terminal, errorCode(error));
-      message.retry({ delaySeconds: Math.min(300, 15 * 2 ** Math.max(0, message.attempts - 1)) });
+      const baseDelay = Math.min(300, 15 * 2 ** Math.max(0, message.attempts - 1));
+      const jitter = Math.floor(Math.random() * Math.max(1, Math.ceil(baseDelay * 0.2)));
+      message.retry({ delaySeconds: Math.min(300, baseDelay + jitter) });
     }
   }
 }

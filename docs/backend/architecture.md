@@ -195,8 +195,13 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 4. Parser correlates the short RFQ code, message thread evidence, and D1 ownership. If forwarding
    removed the subject tag, exactly one matching tag in sanitized body content may be used;
    conflicting tags require manual review.
-5. Parsed rows are matched to immutable trade IDs and normalized into canonical quotes.
-6. Unknown, conflicting, or ambiguous evidence is quarantined for manual review and excluded from ranking.
+5. Before trade matching, the parser excludes forwarded original request tables only when their
+   header matches a known outbound BMJB/DBS/CA signature; it does not deduplicate completed quote
+   rows merely because their values are identical.
+6. Parsed rows are matched to immutable trade IDs and normalized into canonical quotes. Known
+   issuer aliases include SG `At Maturity` → `EKI`; explicit unavailable phrases remain no-quote
+   values unless separate issuer error detail proves rejection.
+7. Unknown, conflicting, or ambiguous evidence is quarantined for manual review and excluded from ranking.
 
 ### 4. Finalization and ranking
 
@@ -224,6 +229,9 @@ an explicit recalculation.
 - Each trade's deterministic rank-one image is queued automatically. Every other persisted
   top-five quote offers an explicit **產出此發行機構報價圖** action that creates or reuses one
   idempotent, owner-scoped image job for that exact quote.
+- A failed image exposes an owner-only **重新產圖** action. Reusing the same endpoint resets and
+  re-enqueues the existing idempotent job; Browser Rendering failures retain only a safe
+  request/HTTP category and never the response body.
 - Server-rendered quote cards use a fixed portrait viewport so browser zoom and scroll do not affect the PNG.
 - Ties retain the same economic rank; the earliest valid receipt is selected only where a single deterministic image winner is required.
 

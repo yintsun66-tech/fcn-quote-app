@@ -288,6 +288,18 @@ describe("versioned ranking persistence", () => {
       bnpArtifact.id
     );
     expect(download.headers.get("content-disposition")).toContain("attachment");
+    const failingRenderEnv = {
+      DB: testEnv.DB,
+      RAW_MAIL_BUCKET: testEnv.RAW_MAIL_BUCKET,
+      EMPLOYEE_LOOKUP_KEY: LOOKUP_KEY,
+      BROWSER: {
+        async quickAction() {
+          return new Response("capacity", { status: 429 });
+        }
+      }
+    } as unknown as AppEnv;
+    await expect(processImageRenderJob(failingRenderEnv, imageJobs[1]!))
+      .rejects.toThrow("BROWSER_RENDER_HTTP_429");
     const rfq = await testEnv.DB.prepare("SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ?")
       .bind(rfqId).first<{ workflow_status: string; current_ranking_version: number }>();
     expect(rfq).toEqual({ workflow_status: "COMPLETED", current_ranking_version: 1 });

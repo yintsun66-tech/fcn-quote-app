@@ -121,6 +121,7 @@
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>RFQ 處理時間軸</h2></div><button id="closeBackendRfqTimelines" type="button" class="secondary">關閉</button></div>
         <p class="backend-archive-note">僅顯示安全的處理狀態與耗時統計，不顯示郵件全文、RFQ token 或私人 R2 路徑。</p>
         <p id="backendRfqTimelinesError" class="backend-error" role="alert"></p>
+        <div id="backendRfqHealth" class="backend-rfq-health"></div>
         <div id="backendRfqTimelinesList" class="backend-timeline-list"></div>
       </section>
     </dialog>
@@ -185,6 +186,7 @@
   const adminTimelinesDialog = document.querySelector("#backendRfqTimelines");
   const adminTimelinesList = document.querySelector("#backendRfqTimelinesList");
   const adminTimelinesError = document.querySelector("#backendRfqTimelinesError");
+  const adminRfqHealth = document.querySelector("#backendRfqHealth");
   const artifactContainer = document.querySelector("#backendArtifacts");
 
   function cookie(name) {
@@ -563,15 +565,49 @@
       </article>`).join("");
   }
 
+  function renderAdminRfqHealth(health) {
+    if (!health?.issuers?.length) {
+      adminRfqHealth.innerHTML = "";
+      return;
+    }
+    const alertLabels = {
+      ISSUER_ZERO_INBOUND: "完全未收信",
+      ISSUER_PARSE_ERROR: "解析錯誤",
+      ISSUER_TIMEOUT: "逾時",
+      UNMATCHED_INBOUND: "未配對來信",
+      INBOUND_MANUAL_REVIEW: "待人工檢查",
+      FAILED_ARTIFACT: "報價圖失敗"
+    };
+    const alerts = health.alerts?.length
+      ? `<div class="backend-health-alerts">${health.alerts.map(alert => `<span><b>${escapeHtml(alert.issuer || "系統")}</b>${escapeHtml(alertLabels[alert.code] || alert.code)} ${escapeHtml(alert.count)}</span>`).join("")}</div>`
+      : "<p class=\"backend-health-ok\">目前沒有偵測到彙總異常。</p>";
+    adminRfqHealth.innerHTML = `
+      <section class="backend-health-panel">
+        <header><h3>近 ${escapeHtml(health.windowDays)} 天發行機構健康狀態</h3><small>僅為彙總，不含郵件內容與報價數值</small></header>
+        <div class="backend-health-grid">${health.issuers.map(item => `
+          <article>
+            <b>${escapeHtml(item.issuer)}</b>
+            <strong>${item.validRatePct === null ? "—" : `${escapeHtml(item.validRatePct)}%`}</strong>
+            <small>有效 ${escapeHtml(item.validReply)}/${escapeHtml(item.expected)}｜收信 ${escapeHtml(item.inbound)}｜逾時 ${escapeHtml(item.timeout)}｜解析 ${escapeHtml(item.parseError)}｜晚到 ${escapeHtml(item.lateReply)}</small>
+          </article>`).join("")}
+        </div>
+        ${alerts}
+      </section>`;
+  }
+
   async function openAdminRfqTimelines() {
     if (state.user?.role !== "ADMIN") return;
     adminTimelinesError.textContent = "";
+    adminRfqHealth.innerHTML = "";
     adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">正在載入 RFQ 時間軸…</p>";
     if (!adminTimelinesDialog.open) adminTimelinesDialog.showModal();
     try {
-      renderAdminRfqTimelines((await request("/admin/rfq-timelines?limit=50")).records);
+      const payload = await request("/admin/rfq-timelines?limit=50");
+      renderAdminRfqHealth(payload.health);
+      renderAdminRfqTimelines(payload.records);
     } catch (error) {
       adminTimelinesError.textContent = error.message;
+      adminRfqHealth.innerHTML = "";
       adminTimelinesList.innerHTML = "";
     }
   }
@@ -796,6 +832,9 @@
       const href = artifact.previewUrl || artifact.downloadUrl;
       return ` <a class="artifact-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">查看報價圖</a>`;
     }
+    if (artifact.status === "FAILED") {
+      return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}" data-artifact-quote="${escapeHtml(quoteId)}">重新產圖</button>`;
+    }
     return ` <span class="artifact-pending">（報價圖${escapeHtml(artifact.status)}）</span>`;
   }
 
@@ -834,7 +873,9 @@
       <h3>各交易報價圖</h3>
       <ul>${artifacts.map(item => `<li>${escapeHtml(item.tradeCode)}｜第 ${escapeHtml(item.rank)} 名｜${escapeHtml(item.issuer)}${item.isDefault ? "（第一名自動產圖）" : ""}：${item.status === "READY"
         ? `<a class="artifact-link" href="${escapeHtml(item.previewUrl)}" target="_blank" rel="noopener">預覽</a> · <a class="artifact-link" href="${escapeHtml(item.downloadUrl)}">下載 PNG</a>`
-        : `<span class="artifact-pending">${escapeHtml(item.status)}</span>`}</li>`).join("")}</ul>
+        : item.status === "FAILED"
+          ? `<button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(item.tradeCode)}" data-artifact-quote="${escapeHtml(item.quoteId)}">重新產圖</button>`
+          : `<span class="artifact-pending">${escapeHtml(item.status)}</span>`}</li>`).join("")}</ul>
     </section>`;
   }
 
@@ -926,9 +967,10 @@
     issuerPickerDialog.close();
     submitRfq(selected);
   });
-  document.querySelector("#backendRankings").addEventListener("click", async event => {
+  async function requestArtifactFromButton(event) {
     const target = event.target.closest("[data-artifact-trade]");
     if (!target || !state.rfqId || !target.dataset.artifactQuote) return;
+    const originalLabel = target.textContent;
     target.disabled = true;
     target.textContent = "建立中…";
     try {
@@ -939,10 +981,12 @@
       await refreshResults();
     } catch (error) {
       target.disabled = false;
-      target.textContent = "重試產圖";
+      target.textContent = originalLabel;
       document.querySelector("#backendCountdown").textContent = error.message;
     }
-  });
+  }
+  document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);
+  artifactContainer.addEventListener("click", requestArtifactFromButton);
   loginForm.addEventListener("submit", async event => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(loginForm));

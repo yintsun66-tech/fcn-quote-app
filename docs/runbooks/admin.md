@@ -84,6 +84,17 @@ The note reports only counts, the colliding field, and timestamps — never the 
 
 The archive is in private R2. It is available to ADMIN through authenticated Worker endpoints, not through a public R2 URL. An archived record proves what the Worker prepared; a `SENT` status proves Cloudflare provider acceptance, not delivery to the bank mailbox.
 
+## Review RFQ and issuer health
+
+1. Log in as an ADMIN and choose **RFQ 處理時間軸**.
+2. The top panel summarizes the last seven days by issuer: expected requests, valid replies,
+   inbound count, timeouts, parse errors and late replies.
+3. Orange alerts identify zero-inbound issuers, parser errors, timeouts, unmatched/manual-review
+   mail and failed quote images. These are investigation signals, not automatic proof of an issuer
+   or bank outage.
+4. Use the per-RFQ cards below the summary to locate the affected workflow. The page intentionally
+   excludes raw mail, subjects, correlation tokens, quote values, message IDs and R2 paths.
+
 ## When an RFQ has no result
 
 1. Check the RFQ status and issuer status in the application.
@@ -106,6 +117,10 @@ The archive is in private R2. It is available to ADMIN through authenticated Wor
 7. Escalate parser/forwarding failures with the RFQ ID, timestamps, and safe error codes. Do not
    copy raw mail, full subjects, correlation codes, employee numbers or quote data into public chat
    or Git.
+8. If a quote image is `FAILED`, the RFQ owner can open the result and choose **重新產圖**. The
+   request reuses the existing idempotent artifact job. Repeated failure codes such as
+   `BROWSER_RENDER_HTTP_429` indicate Browser Rendering capacity/service behavior and should be
+   investigated before changing Queue concurrency.
 
 Completed RFQs move out of the active waiting list. Use the completed filter and open the
 owner-authorized result view; the ADMIN outbound archive shows what was prepared for sending but is

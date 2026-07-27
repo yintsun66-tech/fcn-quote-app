@@ -71,6 +71,8 @@ Do not put secrets in `wrangler.jsonc`. `EMPLOYEE_DATA_KEY` and `EMPLOYEE_LOOKUP
 - A failed issuer is terminal after the retry budget and cannot block the deadline.
 - A late reply requires an explicit owner recalculation; the previous ranking run remains immutable.
 - If Browser Rendering is unavailable, the artifact remains failed/queued independently of the completed ranking.
+  The owner can retry a failed artifact from the result page without creating a duplicate; the
+  stored safe error distinguishes request failure from an HTTP status such as 429.
 
 ## Live verification status
 

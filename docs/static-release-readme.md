@@ -17,8 +17,8 @@
 
 - 靜態同步來源：`yintsun66-tech/fcn-quote-app`
 - 來源分支：`feature/subject-branch-correlation`
-- 來源文件 HEAD：`21ca68e`
-- 正式靜態程式基線：Cloudflare 功能 commit `481c220`
+- 來源功能 HEAD：`98d969c`
+- 正式靜態程式基線：Cloudflare 功能 commit `98d969c`
 - 同步日期：2026-07-27（Asia/Taipei）
 
 ## 重要邊界

@@ -31,14 +31,14 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   requires explicit user authorization.
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
-- Production code is implementation commit `481c220`, deployed as Worker
-  `68c62104-aa1d-48b9-b391-ff03695224f6` on 2026-07-27. Resolve the current branch HEAD from Git
+- Production code is implementation commit `98d969c`, deployed as Worker
+  `a485a90c-56b9-4902-9192-e7b4b7f56eea` on 2026-07-27. Resolve the current branch HEAD from Git
   rather than copying a historical handoff hash. The current verification baseline is 16 test
-  files / 102 tests. A deployment record is evidence of Worker/static-asset publication, not
+  files / 103 tests. A deployment record is evidence of Worker/static-asset publication, not
   evidence that real bank mail was delivered.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
-  published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; initial static
-  program commit `2d13926` mirrors the approved public asset set. It contains no Cloudflare
+  published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
+  program commit `3ae50b7` mirrors the approved public asset set with ZAR support. It contains no Cloudflare
   backend or data. Future static syncs must copy only the allowlisted files from
   `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
   whole backend directory.

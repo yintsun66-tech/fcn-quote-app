@@ -5,13 +5,15 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`481c220 feat(ranking): add mail grace and custom fifth issuer`
+`98d969c feat(currency): add ZAR quote support`
 
 Production deployment record:
-Worker `68c62104-aa1d-48b9-b391-ff03695224f6` deployed 2026-07-27 from `481c220`
-(60-second mail grace, owner/ADMIN versioned late-reply recalculation, and economic top four plus
-custom fifth issuer/image). No D1 migration, secret, dependency or lockfile change.
-Previous: `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
+Worker `a485a90c-56b9-4902-9192-e7b4b7f56eea` deployed 2026-07-27 from `98d969c`
+(ZAR frontend option and server-side RFQ validation). No D1 migration, secret, dependency,
+lockfile, mail format or binding change.
+Previous: `68c62104-...` from `481c220` (mail grace, versioned late-reply recalculation, and
+economic top four plus custom fifth issuer/image);
+`6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
 `566c7456-...` from `bdd66c1` (first-trade product label);
 `02311666-...` from `477b3c9` + `0d77eac` (parser/operations diagnostics);
 `cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
@@ -19,11 +21,27 @@ Previous: `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `481c220`, pushed to `origin`. The deployment-record
-documentation commits `ec0e489` and `21ca68e` follow that implementation head. Resolve the current
-branch HEAD from Git before making changes. The branch is not merged to `main`.
+`feature/subject-branch-correlation` at `98d969c`, pushed to `origin`. A deployment-record
+documentation commit follows that implementation head. Resolve the current branch HEAD from Git
+before making changes. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
+
+## Deployed ZAR currency support
+
+Commit `98d969c` is pushed and deployed as Worker
+`a485a90c-56b9-4902-9192-e7b4b7f56eea`.
+
+- The frontend currency selector now offers `ZAR` after `AUD`; the default remains `USD`.
+- Server-side RFQ validation accepts `ZAR`, so the Cloudflare application does not reject a
+  currency that the browser can select.
+- No email table layout, issuer parser, ranking rule, database schema, migration, secret,
+  dependency, lockfile or Cloudflare binding changed.
+- Local verification passed: `node --check app.js`, `pnpm run typecheck`, `pnpm test`
+  (16 files / 103 tests), and `pnpm run build` (Wrangler dry run).
+- Post-deploy verification passed: API health and live `app.js` returned HTTP 200; both
+  `https://app.yintsun66.com/` and `https://yintsun66-tech.github.io/fcnV2/` exposed `ZAR` in the
+  rendered currency selector while retaining `USD` as the initial selection.
 
 ## Deployed mail-grace, late-recalculation, and custom-fifth implementation
 
@@ -63,11 +81,11 @@ Commit `481c220` is pushed and deployed as Worker
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `68c62104-aa1d-48b9-b391-ff03695224f6` (mail grace, late-reply recalculation, top four plus
-  custom fifth issuer/image, and all earlier behavior, deployed 2026-07-27). Post-deploy
-  verification: `GET /api/v1/health` returned HTTP 200; cache-busted live frontend assets contain
-  the new grace, recalculation, custom-fifth, and styling markers.
-  Previous verified versions: `6520b77d-...` from `4095b51`;
+  `a485a90c-56b9-4902-9192-e7b4b7f56eea` (ZAR support and all earlier behavior, deployed
+  2026-07-27). Post-deploy verification: `GET /api/v1/health` returned HTTP 200; cache-busted live
+  `app.js` and rendered selector both contain `ZAR`, with `USD` unchanged as the default.
+  Previous verified versions: `68c62104-...` from `481c220`;
+  `6520b77d-...` from `4095b51`;
   `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
   `cc633dcb-...` from `0bbe159`;
   `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
@@ -93,16 +111,15 @@ or issuer replies are healthy. Verify each boundary separately.
 - Deployment source: `main` branch, repository root; Pages status verified `built`.
 - Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
   (`feat: publish FCN V2 static snapshot`).
-- Current static repository HEAD after recording that baseline in the status page:
-  `827df5aa7396a58f664690ebdbebfcf62bedd4d4`.
+- Current static program commit:
+  `3ae50b78fb90ae9563c649ce2c1206a0591cf154`.
 - Snapshot source: the allowlisted public assets prepared from
-  `feature/subject-branch-correlation` at handoff baseline `21ca68e`; deployed application program
-  baseline remains `481c220`.
+  `feature/subject-branch-correlation` at implementation baseline `98d969c`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
   `guide.html`, `version-status.html`, `交易所查詢0715.csv`,
   `backend/shared/email-formats.js`, and a static-only `README.md`.
-- All eight browser assets returned HTTP 200 after the first Pages build. Browser checks loaded
-  the version page and static input page with no console errors; the static host did not activate
+- The updated `app.js` returned HTTP 200 after the Pages build. A rendered browser check confirmed
+  the static currency selector includes `ZAR`, keeps `USD` selected, and does not activate
   `backendAuth`.
 - GitHub Pages is not a backend migration. It has no authentication, D1, Queue, Email Worker, R2,
   ranking, automatic mail, or private artifact service. Never copy secrets, raw mail, D1/R2

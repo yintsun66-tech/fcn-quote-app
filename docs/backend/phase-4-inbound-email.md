@@ -55,3 +55,9 @@ RFQ. All eight correlated; seven normalized to valid quotes, while BARCLAYS was 
 as `ISSUER_REJECTED` because its own COMET response rejected Product=`DAC`. SG fixed-period mapping
 and the UBS VMRAN alias were proven on this path. This evidence is intentionally anonymized and
 does not replace tests or prove behavior for issuer templates that did not reply.
+
+Parser profile version `issuer-fcn-v4` additionally normalizes SG `At Maturity` as `EKI`, treats
+`*Price Unavailable` / `Pls see below` as explicit no-quote target values unless separate issuer
+error detail proves rejection, and excludes exact known forwarded-original BMJB/DBS/CA request
+table signatures before trade matching. It intentionally does not deduplicate otherwise identical
+completed quote rows.

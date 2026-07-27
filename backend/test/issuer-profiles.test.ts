@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseIssuerTables } from "../src/issuer-profiles";
+import { invalidQuoteValue, parseIssuerTables } from "../src/issuer-profiles";
 import type { Issuer } from "../src/inbound-parser";
 
 function cells(length: number, values: Record<number, string | number | boolean>): string[] {
@@ -171,6 +171,27 @@ describe("issuer parser profiles", () => {
     expect(parsed[1]?.couponPaPct).toBeCloseTo(14.47);
   });
 
+  it("maps SG At Maturity to EKI", () => {
+    const headers = [
+      "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",
+      "Underlying 1", "No. of Periods", "Settlement Frequency", "Currency",
+      "Coupon p.a.", "Fixed Coupons", "Non-Call (m)", "Put Strike",
+      "AutoCall", "KO Type", "KI Type", "KI", "Offer Price", "Comment"
+    ];
+    const row = cells(headers.length, {
+      4: "AAA UW", 5: 6, 6: "Monthly", 7: "USD", 8: "N/A",
+      9: "All Periods", 10: 1, 11: "85%", 12: "100%",
+      13: "Daily Memory", 14: "At Maturity", 15: "70%", 16: "98%",
+      17: "Out of range"
+    });
+    const parsed = parseIssuerTables("SG", { tables: [{ index: 0, rows: [headers, row] }] });
+    expect(parsed[0]).toMatchObject({
+      barrierType: "EKI",
+      kiBarrierPct: 70,
+      rejectionReason: "Out of range"
+    });
+  });
+
   it("maps SG fixed-coupon periods to DAC without accepting arbitrary text", () => {
     const headers = [
       "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",
@@ -268,14 +289,94 @@ describe("issuer parser profiles", () => {
         }
       ]
     });
-    expect(parsed).toHaveLength(3);
+    expect(parsed).toHaveLength(2);
     expect(parsed[0]).toMatchObject({
       parserProfile: "BARCLAYS_FCN_V2",
       rejectionReason: "Comet Email Parser Errors : Incorrect product name in \"Product\" column for Fixed Coupon Note",
       warnings: ["BARCLAYS_COMET_ERROR"]
     });
     expect(parsed[1]).toMatchObject({ couponPaPct: 12.5, rejectionReason: null });
-    expect(parsed[2]?.rejectionReason).toBeNull();
+  });
+
+  it("treats unavailable target phrases as no quote unless a separate rejection reason exists", () => {
+    const dbs = cells(23, {
+      0: "FCN", 1: "USD", 2: 1, 3: "AAA UW", 7: 0.8, 8: "Daily",
+      9: 1, 10: "*Price Unavailable", 11: 0.98, 12: 6, 13: "NONE",
+      15: 1, 16: "Note"
+    });
+    const dbsParsed = parseIssuerTables("DBS", { tables: [{ index: 0, rows: [dbs] }] })[0];
+    expect(dbsParsed).toMatchObject({ couponPaPct: null, rejectionReason: null });
+    expect(invalidQuoteValue(dbsParsed?.rawTargetValues.coupon ?? "")).toBe(true);
+
+    const barclays = cells(21, {
+      0: "FCN", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily",
+      10: 100, 11: "Pls see below&nbsp;", 12: 98, 13: 6, 14: "NONE",
+      16: 1, 17: "Note", 18: 7
+    });
+    const barclaysParsed = parseIssuerTables("BARCLAYS", { tables: [{ index: 0, rows: [barclays] }] })[0];
+    expect(barclaysParsed).toMatchObject({ couponPaPct: null, rejectionReason: null });
+    expect(invalidQuoteValue(barclaysParsed?.rawTargetValues.coupon ?? "")).toBe(true);
+  });
+
+  it("excludes forwarded original request tables for known noisy issuer layouts", () => {
+    const bmjbHeader = [
+      "Product", "Currency", "Guaranteed Periods (m)", "BBG Code 1", "BBG Code 2",
+      "BBG Code 3", "BBG Code 4", "BBG Code 5", "Strike (%)", "KO Type",
+      "KO Barrier (%)", "Coupon p.a. (%)", "Upfront / NotePrice (%)", "Tenor (m)",
+      "Barrier Type", "KI Barrier (%)", "Observation Frequency (m)", "OTC",
+      "Effective Date Offset (Calendar Days)", "Trade Date"
+    ];
+    const jpmQuote = cells(25, {
+      0: "FCN", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily",
+      10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note"
+    });
+    const bmjbRequest = cells(20, {
+      0: "FCN", 1: "USD", 2: 1, 3: "AAA UW", 8: 80, 9: "Daily",
+      10: 100, 11: 12.5, 12: 98, 13: 6, 14: "NONE", 16: 1, 17: "Note",
+      18: 7, 19: "27-Jul-26"
+    });
+    expect(parseIssuerTables("JPM", {
+      tables: [
+        { index: 0, rows: [jpmQuote] },
+        { index: 1, rows: [bmjbHeader, bmjbRequest] }
+      ]
+    })).toHaveLength(1);
+
+    const dbsHeader = [
+      "Product", "Currency", "Guaranteed Periods (m)", "BBG Code 1", "BBG Code 2",
+      "BBG Code 3", "BBG Code 4", "Strike (%)", "KO Type", "KO Barrier (%)",
+      "Coupon p.a. (%)", "Upfront / NotePrice (%)", "Tenor (m)", "Barrier Type",
+      "KI Barrier (%)", "Observation Frequency (m)", "OTC", "Funding Spread (bps)",
+      "Issue Date Lag"
+    ];
+    const dbsQuote = cells(23, {
+      0: "FCN", 1: "USD", 2: 1, 3: "AAA UW", 7: 0.8, 8: "Daily",
+      9: 1, 10: 0.125, 11: 0.98, 12: 6, 13: "NONE", 15: 1, 16: "Note"
+    });
+    expect(parseIssuerTables("DBS", {
+      tables: [
+        { index: 0, rows: [dbsQuote] },
+        { index: 1, rows: [dbsHeader, cells(19, { 0: "FCN", 1: "USD", 2: 1, 3: "AAA UW" })] }
+      ]
+    })).toHaveLength(1);
+
+    const caHeader = [
+      "Product", "Currency", "BBG Code 1", "BBG Code 2", "BBG Code 3",
+      "BBG Code 4", "Strike (%)", "KO Type", "Guaranteed Periods (m)",
+      "KO Barrier (%)", "Coupon p.a. (%)", "Upfront / NotePrice (%)", "Tenor (m)",
+      "Barrier Type", "KI Barrier (%)", "Observation Frequency (m)", "OTC",
+      "Funding Spread (bps)", "Remarks"
+    ];
+    const caQuote = cells(21, {
+      0: "FCN", 1: "USD", 2: "AAA UW", 6: 80, 7: "Daily", 8: 1,
+      9: 100, 10: 12.5, 11: 98, 12: 6, 13: "NONE", 15: 1, 16: "Note"
+    });
+    expect(parseIssuerTables("CA", {
+      tables: [
+        { index: 0, rows: [caQuote] },
+        { index: 1, rows: [caHeader, cells(19, { 0: "FCN", 1: "USD", 2: "AAA UW" })] }
+      ]
+    })).toHaveLength(1);
   });
 
   it("converts CITI Upfront to comparable Note Price and derives KO type", () => {

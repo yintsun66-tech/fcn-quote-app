@@ -1,6 +1,6 @@
 import type { Issuer } from "./inbound-parser";
 
-export const ISSUER_PROFILE_VERSION = "issuer-fcn-v3";
+export const ISSUER_PROFILE_VERSION = "issuer-fcn-v4";
 
 export type QuoteStatus =
   | "VALID"
@@ -160,8 +160,22 @@ const STANDARD_PROFILES: Partial<Record<Issuer, StandardProfile>> = Object.freez
   }
 });
 
-const INVALID_VALUES = /^(?:N\/?A|NA|DNW|NO\s*QUOTE|NOT\s*AVAILABLE|ERROR|-+)$/iu;
-const REJECTION_TEXT = /(?:REJECT|LIMIT|PLEASE\s+CONTACT\s+SALES|NOT\s+AVAILABLE|超過限制|不報價|無法報價)/iu;
+const INVALID_VALUES = /^(?:N\/?A|NA|DNW|NO\s*QUOTE|NOT\s+AVAILABLE|PRICE\s+UNAVAILABLE|PLS\s+SEE\s+BELOW|ERROR|-+)$/iu;
+const REJECTION_TEXT = /(?:REJECT|LIMIT|OUT\s+OF\s+RANGE|PLEASE\s+CONTACT\s+SALES|EXCEED|INCORRECT|超過限制|不報價|無法報價)/iu;
+
+function signalText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/&nbsp;|&#160;/giu, " ")
+    .replace(/^\s*\*+\s*/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function unavailableValue(value: string): boolean {
+  const normalized = signalText(value);
+  return !normalized || INVALID_VALUES.test(normalized);
+}
 
 function text(row: readonly string[], index: number | undefined): string {
   if (index === undefined) return "";
@@ -175,7 +189,7 @@ function optionalText(row: readonly string[], index: number | undefined): string
 
 function rawNumber(value: string): number | null {
   const normalized = value.replace(/,/g, "").replace(/%/g, "").trim();
-  if (!normalized || INVALID_VALUES.test(normalized)) return null;
+  if (unavailableValue(normalized)) return null;
   const result = Number(normalized);
   return Number.isFinite(result) ? result : null;
 }
@@ -215,14 +229,14 @@ function currency(value: string): string | null {
 
 function underlying(value: string): string | null {
   const normalized = value.normalize("NFKC").trim().toUpperCase().replace(/\s+/gu, " ");
-  if (!normalized || INVALID_VALUES.test(normalized)) return null;
+  if (unavailableValue(normalized)) return null;
   return normalized;
 }
 
 function barrier(value: string): "NONE" | "EKI" | "AKI" | null {
   const normalized = value.normalize("NFKC").trim().toUpperCase();
   if (!normalized || normalized === "NA" || normalized === "N/A" || normalized === "NONE" || normalized === "-") return "NONE";
-  if (normalized.includes("EUROPEAN") || normalized === "EKI") return "EKI";
+  if (normalized.includes("EUROPEAN") || normalized === "EKI" || normalized === "AT MATURITY") return "EKI";
   if (normalized.includes("DAILY") || normalized.includes("CONTINUOUS") || normalized === "AKI") return "AKI";
   return null;
 }
@@ -250,13 +264,13 @@ function targetRaw(row: readonly string[], strike: number, koBarrier: number, co
 }
 
 function rejection(comment: string | null, rawTargets: ParsedIssuerRow["rawTargetValues"], barrierType: string | null): string | null {
-  if (comment && REJECTION_TEXT.test(comment)) return comment.slice(0, 1_000);
+  if (comment && REJECTION_TEXT.test(signalText(comment))) return comment.slice(0, 1_000);
   // KI barrier is legitimately "NA"/"-" when there is no knock-in (barrier type NONE); scanning it
   // there made normal NONE-barrier quotes (e.g. MS) look ISSUER_REJECTED. Only scan it when a KI applies.
   const scan = [rawTargets.strike, rawTargets.koBarrier, rawTargets.coupon, rawTargets.price];
   if (barrierType !== "NONE") scan.push(rawTargets.kiBarrier);
-  const invalid = scan.find(value => INVALID_VALUES.test(value));
-  return invalid ? invalid : null;
+  const rejected = scan.find(value => REJECTION_TEXT.test(signalText(value)));
+  return rejected ? rejected : null;
 }
 
 function comparablePrice(raw: number | null, semantics: PriceSemantics): number | null {
@@ -274,6 +288,37 @@ function normalizedHeader(value: string): string {
 function findHeaderIndex(headers: readonly string[], aliases: readonly string[]): number {
   const normalizedAliases = new Set(aliases.map(normalizedHeader));
   return headers.findIndex(header => normalizedAliases.has(normalizedHeader(header)));
+}
+
+function hasHeaders(headers: readonly string[], aliases: readonly string[]): boolean {
+  return aliases.every(alias => findHeaderIndex(headers, [alias]) >= 0);
+}
+
+function isForwardedOriginalRequestTable(issuer: Issuer, table: TableLike): boolean {
+  for (const headers of table.rows) {
+    if (["BNP", "MS", "JPM", "BARCLAYS"].includes(issuer)
+      && headers.length === 20
+      && hasHeaders(headers, [
+        "Product",
+        "BBG Code 1",
+        "Upfront / NotePrice (%)",
+        "Effective Date Offset (Calendar Days)",
+        "Trade Date"
+      ])) {
+      return true;
+    }
+    if (issuer === "DBS"
+      && headers.length === 19
+      && hasHeaders(headers, ["Product", "BBG Code 1", "Funding Spread (bps)", "Issue Date Lag"])) {
+      return true;
+    }
+    if (issuer === "CA"
+      && headers.length === 19
+      && hasHeaders(headers, ["Product", "BBG Code 1", "Funding Spread (bps)", "Remarks"])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function barclaysQuoteHeaderIndex(rows: readonly string[][]): number {
@@ -562,6 +607,7 @@ export function parseIssuerTables(issuer: Issuer, document: ParsedTablesDocument
     ? barclaysCometErrors(document)
     : new Map<number, Map<number, string>>();
   for (const table of document.tables ?? []) {
+    if (isForwardedOriginalRequestTable(issuer, table)) continue;
     const detectedSgColumns = issuer === "SG" ? sgColumns(table.rows) : null;
     const barclaysHeaderIndex = issuer === "BARCLAYS" ? barclaysQuoteHeaderIndex(table.rows) : -1;
     for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) {
@@ -607,5 +653,5 @@ export function targetValueFor(row: ParsedIssuerRow, target: "COUPON" | "PRICE" 
 }
 
 export function invalidQuoteValue(value: string): boolean {
-  return !value.trim() || INVALID_VALUES.test(value.trim());
+  return unavailableValue(value);
 }

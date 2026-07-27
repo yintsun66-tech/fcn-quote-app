@@ -5,27 +5,29 @@ Updated: 2026-07-27 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`4095b51 fix(outbound): use issuer-specific DRA subject labels`
+`481c220 feat(ranking): add mail grace and custom fifth issuer`
 
 Production deployment record:
-Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384` deployed 2026-07-27 from `4095b51`
-(no D1 migration, secret or binding change; issuer-specific `DAC(T+7)` / `DRA(T+7)` labels).
-Previous: `566c7456-...` from `bdd66c1` (first-trade product label);
+Worker `68c62104-aa1d-48b9-b391-ff03695224f6` deployed 2026-07-27 from `481c220`
+(60-second mail grace, owner/ADMIN versioned late-reply recalculation, and economic top four plus
+custom fifth issuer/image). No D1 migration, secret, dependency or lockfile change.
+Previous: `6520b77d-...` from `4095b51` (issuer-specific DAC/DRA labels);
+`566c7456-...` from `bdd66c1` (first-trade product label);
 `02311666-...` from `477b3c9` + `0d77eac` (parser/operations diagnostics);
 `cc633dcb-...` from `0bbe159` (ADMIN-only employee-number lookup);
 `364a345e-...` from `fd7a380` (duplicate-registration visibility);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `4095b51`, pushed to `origin`. The deployment-record
+`feature/subject-branch-correlation` at `481c220`, pushed to `origin`. The deployment-record
 documentation commit follows that implementation head. The branch is not merged to `main`.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
 
-## Local approved implementation pending commit/deploy
+## Deployed mail-grace, late-recalculation, and custom-fifth implementation
 
-The working tree contains an approved but still uncommitted and undeployed RFQ finalization/ranking
-change. Production remains on Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`.
+Commit `481c220` is pushed and deployed as Worker
+`68c62104-aa1d-48b9-b391-ff03695224f6`.
 
 - The existing 900-second quote window is followed by a configurable 60-second mail-transport
   grace period. The UI keeps the 15-minute result experience, then displays
@@ -48,20 +50,24 @@ change. Production remains on Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`.
   rerun outside the filesystem sandbox after the sandbox could not read the Worker entry point.
   The in-app browser could not reach the host-only localhost server, so an authenticated visual
   walkthrough of the result dialog remains unverified.
-- Preserve the untracked user-owned `.claude/` directory. The smallest next step is a complete diff
-  review followed by commit/push/deploy only after an explicit user request.
+- Post-deploy verification passed: API health returned HTTP 200; cache-busted live
+  `backend-client.js` contains `backendRecalculate`, `inMailGrace`, `data-custom-fifth-select`, and
+  `alternateQuotes`; live `styles.css` contains `custom-fifth-row`.
+- Preserve the untracked user-owned `.claude/` directory. The smallest remaining verification is
+  an authenticated walkthrough of the grace-state countdown, late-recalculation action, custom
+  fifth selector, and custom quote image.
 
 ## Production snapshot
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
 - Latest verified Cloudflare Worker version:
-  `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384` (issuer-specific DAC/DRA subject labels and all
-  earlier behavior, deployed 2026-07-27). Post-deploy verification: `GET /api/v1/health`
-  returned HTTP 200; live `index.html` and `app.js` contain `issuer-product-subject-v3`; live
-  `backend/shared/email-formats.js` contains exactly five `dacSubjectProduct: "DRA"` profiles,
-  recognizes the DRA anchor and calls `institution.dacSubjectProduct`.
-  Previous verified versions: `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
+  `68c62104-aa1d-48b9-b391-ff03695224f6` (mail grace, late-reply recalculation, top four plus
+  custom fifth issuer/image, and all earlier behavior, deployed 2026-07-27). Post-deploy
+  verification: `GET /api/v1/health` returned HTTP 200; cache-busted live frontend assets contain
+  the new grace, recalculation, custom-fifth, and styling markers.
+  Previous verified versions: `6520b77d-...` from `4095b51`;
+  `566c7456-...` from `bdd66c1`; `02311666-...` from `0d77eac`;
   `cc633dcb-...` from `0bbe159`;
   `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
   `2de5b070-...` from `23c084e`.
@@ -72,7 +78,7 @@ change. Production remains on Worker `6520b77d-c8a7-4d9d-94d8-37a5a0e6f384`.
 - Private R2 bucket: `fcn-quote-private`
 - Outbound sender and inbound Email Worker address: `rfq@yintsun66.com`
 - Fixed outbound recipient: `i14053@firstbank.com.tw`
-- Soft reminder / hard deadline: 420 / 900 seconds.
+- Soft reminder / quote window / mail grace / hard deadline: 420 / 900 / 60 / 960 seconds.
 - The live `backend-client.js` and `styles.css` were read back after the latest deployment and
   contain the recoverable RFQ workspace markers.
 

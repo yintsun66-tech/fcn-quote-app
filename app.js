@@ -1,7 +1,7 @@
 import {
   MAIL_INSTITUTION_ORDER as SHARED_MAIL_INSTITUTION_ORDER,
   buildInstitutionEmail as buildSharedInstitutionEmail,
-} from "./backend/shared/email-formats.js?v=first-trade-subject-v2";
+} from "./backend/shared/email-formats.js?v=issuer-product-subject-v3";
 
 (() => {
   "use strict";

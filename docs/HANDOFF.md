@@ -403,6 +403,20 @@ the deployment (see "Safe next steps"). Treat that as the smallest remaining UI 
   passed. No real RFQ was sent as a deployment test, so bank/issuer module routing under the new
   title still requires one separately authorized controlled RFQ.
 
+## Local issuer-specific DAC/DRA subject labels (uncommitted and not deployed)
+
+- ADR 0014 preserves first-row routing and FCN=`FCN(T+7)`, but maps DAC-family subjects by
+  outbound batch: NOMURA/DBS/SG/GS/CA use `DRA(T+7)`; BMJB/UBS/CITI keep `DAC(T+7)`.
+- The mapping is stored in the shared email institution profiles, so browser/manual and
+  Worker/automatic mail use the same rule. `outbound.ts` snapshots the configured label; the
+  Queue consumer still preserves an existing subject snapshot.
+- Mail body Product mappings, recipient/sender, branch label, correlation tags, inbound parsing,
+  schema, dependencies, lockfile, secrets and Cloudflare bindings are unchanged.
+- Verification passes: JavaScript syntax checks; backend source/test typecheck; targeted
+  email-format/outbound tests (2 files / 26 tests); full suite (16 files / 99 tests); and the
+  Cloudflare dry-run build. Vitest emitted the known non-fatal sandbox static-analysis warnings;
+  all tests passed. No commit, push, deployment or real RFQ has occurred.
+
 ## Production gaps and cautions
 
 1. A batch marked `SENT` means Cloudflare accepted it; it is not proof of delivery to the bank

@@ -213,7 +213,7 @@ describe("outbound RFQ email workflow", () => {
     const branch = branchSubjectLabel(session.user.branchName);
     expect(batches.results).toEqual([
       { batch_code: "BMJB", base_subject: `BMJB[詢價]FCBKTPE: DAC(T+7) ${branch}` },
-      { batch_code: "SG", base_subject: `SG[詢價]FCBKTPE: DAC(T+7) ${branch}` }
+      { batch_code: "SG", base_subject: `SG[詢價]FCBKTPE: DRA(T+7) ${branch}` }
     ]);
   });
 });

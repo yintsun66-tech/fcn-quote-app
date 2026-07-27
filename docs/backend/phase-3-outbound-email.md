@@ -1,8 +1,9 @@
 # Phase 3 Outbound Email
 
 Status: implemented and deployed as of 2026-07-27. Queue producers, consumers and dead-letter
-queues are attached. The prior marker rule was exercised in production; ADR 0013's first-trade
-product label is deployed but has not yet been verified by sending a new real RFQ.
+queues are attached. The prior marker rule was exercised in production; ADR 0014's
+issuer-specific first-trade label is implemented locally but not yet deployed or verified by a
+new real RFQ.
 
 ## Implemented scope
 
@@ -11,9 +12,10 @@ product label is deployed but has not yet been verified by sending a new real RF
 - Sending snapshots eleven expected issuers; `BMJB` represents BNP, MS, JPM, and BARCLAYS as four separate expected replies.
 - `POST /api/v1/rfqs/:rfqId/send` requires an authenticated owner, same-origin request, CSRF token, validated RFQ, and `Idempotency-Key`.
 - The sender and recipient are fixed server-side to `rfq@yintsun66.com` and `i14053@firstbank.com.tw`.
-- The first trade selects the product shown in the T+7 segment: FCN uses `FCN(T+7)` and the DAC
-  family uses `DAC(T+7)`. Newly generated subjects do not contain the legacy ` DAC/DRA` marker
-  (ADR 0013).
+- The first trade selects the product shown in the T+7 segment. FCN uses `FCN(T+7)` for every
+  batch. DAC-family requests use `DRA(T+7)` for NOMURA/DBS/SG/GS/CA and `DAC(T+7)` for
+  BMJB/UBS/CITI. Newly generated subjects do not contain the legacy ` DAC/DRA` marker
+  (ADR 0014).
 - Subjects append the deterministic short code `[RFQ:<code>][BATCH:<code>]`. Only its SHA-256
   hash is stored as a dedicated correlation value; the code is reconstructed while composing
   the outbound message.
@@ -97,7 +99,7 @@ pnpm run typecheck
 pnpm run build
 ```
 
-The current repository baseline is 16 test files / 84 tests. Tests cover the eight profile column
-counts, final blank cells, CITI transformations, subject safety and DAC marker order,
-eleven-issuer/eight-batch snapshots, idempotent D1 creation, send completion, and duplicate
-post-`SENT` delivery.
+The current repository baseline is 16 test files / 99 tests. Tests cover the eight profile column
+counts, final blank cells, CITI transformations, subject safety, first-row and issuer-specific
+DAC/DRA labels, eleven-issuer/eight-batch snapshots, idempotent D1 creation, send completion, and
+duplicate post-`SENT` delivery.

@@ -59,6 +59,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
   NOMURA: {
     label: "Nomura",
     subject: "野村[詢價]FCBKTPE: FCN(T+7)",
+    dacSubjectProduct: "DRA",
     columns: [
       productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Non-call Periods", "guaranteedPeriods"),
       { label: "Guaranteed Coupon Periods", value: record => productForIssuer(record, "", recordValue(record, "guaranteedPeriods")) },
@@ -76,6 +77,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
   DBS: {
     label: "DBS",
     subject: "DBS[詢價]FCBKTPE: FCN(T+7)",
+    dacSubjectProduct: "DRA",
     columns: [
       productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), { label: "Issue Date Lag", value: record => numberOffset(recordValue(record, "effectiveDateOffset"), -2, "BD") },
     ],
@@ -83,6 +85,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
   SG: {
     label: "SG",
     subject: "SG[詢價]FCBKTPE: FCN(T+7)",
+    dacSubjectProduct: "DRA",
     columns: [
       sourceColumn("Trade Date", "tradeDate"), productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), { label: "OTC", value: () => "Note" }, blankColumn("Funding Spread (bps)"), { label: "Effective Date Offset(Calendar Days)", value: () => "7" },
     ],
@@ -99,6 +102,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
   GS: {
     label: "GS",
     subject: "GS[詢價]FCBKTPE: FCN(T+7)",
+    dacSubjectProduct: "DRA",
     columns: [
       productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("Non-call Periods (m)", "guaranteedPeriods"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("BBG Code 5", "bbgCode5"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Cost (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("Strike Date", "tradeDate"), sourceColumn("Issue Date (T + ?)", "effectiveDateOffset"),
     ],
@@ -106,6 +110,7 @@ export const EMAIL_INSTITUTIONS = Object.freeze({
   CA: {
     label: "CA",
     subject: "CA[詢價]FCBKTPE: FCN(T+7)",
+    dacSubjectProduct: "DRA",
     columns: [
       productColumn("Product", "FCN", "DRA"), sourceColumn("Currency", "currency"), sourceColumn("BBG Code 1", "bbgCode1"), sourceColumn("BBG Code 2", "bbgCode2"), sourceColumn("BBG Code 3", "bbgCode3"), sourceColumn("BBG Code 4", "bbgCode4"), sourceColumn("Strike (%)", "strike"), sourceColumn("KO Type", "koType"), sourceColumn("Guaranteed Periods (m)", "guaranteedPeriods"), sourceColumn("KO Barrier (%)", "koBarrier"), sourceColumn("Coupon p.a. (%)", "coupon"), sourceColumn("Upfront / NotePrice (%)", "upfront"), sourceColumn("Tenor (m)", "tenor"), sourceColumn("Barrier Type", "barrierType"), sourceColumn("KI Barrier (%)", "kiBarrier"), sourceColumn("Observation Frequency (m)", "observationFrequency"), sourceColumn("OTC", "otc"), blankColumn("Funding Spread (bps)"), blankColumn("Remarks"),
     ],
@@ -164,27 +169,28 @@ export function buildCorrelatedSubject(baseSubject, rfqToken, batchCode) {
   return `${baseSubject} [RFQ:${rfqToken}][BATCH:${batchCode}]`;
 }
 
-export function buildProductAwareSubject(baseSubject, records) {
+export function buildProductAwareSubject(baseSubject, records, dacSubjectProduct = "DAC") {
   const firstProduct = recordValue(records[0] ?? {}, "product")
     .normalize("NFKC")
     .replace(/\s+/g, " ")
     .toUpperCase();
   const subjectProduct = ["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(firstProduct)
-    ? "DAC"
+    ? dacSubjectProduct === "DRA" ? "DRA" : "DAC"
     : firstProduct === "FCN" ? "FCN" : "";
   const withoutLegacyMarker = baseSubject.replace(/\s+DAC\/DRA(?=\s|$)/gi, "");
   if (!subjectProduct) return withoutLegacyMarker;
-  if (!/(?:FCN|DAC)\(T\+7\)/.test(withoutLegacyMarker)) {
-    throw new Error("Missing FCN/DAC(T+7) subject anchor.");
+  if (!/(?:FCN|DAC|DRA)\(T\+7\)/.test(withoutLegacyMarker)) {
+    throw new Error("Missing FCN/DAC/DRA(T+7) subject anchor.");
   }
-  return withoutLegacyMarker.replace(/(?:FCN|DAC)\(T\+7\)/, `${subjectProduct}(T+7)`);
+  return withoutLegacyMarker.replace(/(?:FCN|DAC|DRA)\(T\+7\)/, `${subjectProduct}(T+7)`);
 }
 
 export function buildInstitutionEmail(key, records, correlation) {
   const institution = EMAIL_INSTITUTIONS[key];
   if (!institution) throw new Error("Unknown email institution.");
   const dataRows = records.map(record => institution.columns.map(column => String(column.value(record) ?? "")));
-  const subjectBase = correlation?.subjectBase ?? buildProductAwareSubject(institution.subject, records);
+  const subjectBase = correlation?.subjectBase
+    ?? buildProductAwareSubject(institution.subject, records, institution.dacSubjectProduct);
   return {
     key,
     label: institution.label,

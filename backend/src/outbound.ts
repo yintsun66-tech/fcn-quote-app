@@ -203,7 +203,7 @@ export async function sendRfq(
       batchCode,
       env.OUTBOUND_FROM,
       env.OUTBOUND_TO,
-      `${buildProductAwareSubject(profile.subject, mailRecords)}${branchSuffix}`,
+      `${buildProductAwareSubject(profile.subject, mailRecords, profile.dacSubjectProduct)}${branchSuffix}`,
       tokenHash,
       queuedAt
     ));

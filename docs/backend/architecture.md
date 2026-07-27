@@ -98,8 +98,9 @@ The application recognizes three effective roles: `USER`, `PS` (privileged suppo
 - Sends all request emails to `i14053@firstbank.com.tw` from `rfq@yintsun66.com` after Cloudflare verification.
 - Appends a deterministic 10-character correlation code without personal data, for example
   `[RFQ:K7P2R9QTBM][BATCH:BMJB]`; only its hash is stored as the dedicated correlation value.
-- Uses the first trade's product for the T+7 label: `FCN(T+7)` for FCN or `DAC(T+7)` for the
-  DAC family. It never appends the legacy ` DAC/DRA` marker (ADR 0013).
+- Uses the first trade's product for the T+7 label: FCN always uses `FCN(T+7)`; DAC-family
+  requests use `DRA(T+7)` for NOMURA/DBS/SG/GS/CA and `DAC(T+7)` for BMJB/UBS/CITI. It never
+  appends the legacy ` DAC/DRA` marker (ADR 0014).
 - Never adds `##` or a reply/forward prefix to the generated subject.
 - Records a content hash and idempotency key before sending.
 
@@ -246,7 +247,8 @@ an explicit recalculation.
 - Preserve the current 1-to-20 trade limit.
 - Preserve current field defaults, fixed values, and email-time validation.
 - Preserve the eight issuer-specific prefixes and column orders. First-trade product label,
-  branch label and correlation tags must follow ADR 0013 and the subject contract.
+  institution naming, branch label and correlation tags must follow ADR 0014 and the subject
+  contract.
 - BMJB is shared by BNP, MS, JPM and BARCLAYS. Do not change its table Product value globally to
   solve one issuer's module-routing rule without separately proving the other three remain valid.
 - Preserve the trailing empty HTML email cell workaround.

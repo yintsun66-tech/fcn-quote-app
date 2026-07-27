@@ -1,7 +1,10 @@
 # ADR 0013: First-trade product label in outbound subjects
 
-Status: Accepted
+Status: Superseded by ADR 0014
 Date: 2026-07-27
+
+ADR 0014 preserves the first-trade rule but replaces the single DAC-family display name with an
+issuer-specific `DAC(T+7)` / `DRA(T+7)` mapping.
 
 ## Context
 

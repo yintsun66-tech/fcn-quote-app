@@ -27,8 +27,9 @@ Durable Object、R2 與測試位於 `backend/`。
 - 最新正式 Worker 版本為 `566c7456-7e0f-42ac-9341-823c533ead71`（2026-07-27 部署）。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
   `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0010`。
-- 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 使用 `FCN(T+7)`，DAC 使用
-  `DAC(T+7)`，不再附加舊的 ` DAC/DRA` 文字；規則詳見 ADR 0013。
+- 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
+  家族在野村、DBS、SG、GS、CA 使用 `DRA(T+7)`，BMJB、UBS、CITI 使用
+  `DAC(T+7)`；規則詳見 ADR 0014。
 - Barclays 已回信但拒絕 Product=`DAC`，不是收信或 parser 遺失。Barclays 接受的
   DAC 商品代碼／主旨尚未確認，不可直接修改共用 BMJB 格式或猜成 `DRA`。
 

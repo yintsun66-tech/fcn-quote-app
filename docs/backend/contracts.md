@@ -290,12 +290,13 @@ FCN:
 
 DAC family:
 
-`<issuer prefix> DAC(T+7) <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
+`<issuer prefix> <DAC|DRA>(T+7) <branch label?> [RFQ:<10-character-code>][BATCH:<batch-code>]`
 
 Requirements:
 
-- The first trade alone selects the product label: FCN → `FCN(T+7)`; DAC-family aliases
-  (`DAC`, `DRA`, `WRA`, `Range Accrual`) → `DAC(T+7)`.
+- The first trade alone selects FCN versus the DAC family. FCN always produces `FCN(T+7)`.
+- DAC-family aliases (`DAC`, `DRA`, `WRA`, `Range Accrual`) produce `DRA(T+7)` for
+  NOMURA/DBS/SG/GS/CA and `DAC(T+7)` for BMJB/UBS/CITI.
 - Newly generated subjects never contain the legacy literal segment ` DAC/DRA`.
 - The deterministic short code contains no personal email address or employee number; only its
   hash is stored in the dedicated correlation column.

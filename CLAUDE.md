@@ -32,9 +32,10 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` contains the current backend work and is not automatically
   equivalent to `main`.
 - Production evidence proves DAC replies and ranking for BNP, MS, JPM, NOMURA, UBS, DBS, and SG.
-  The old run used a `DAC/DRA` subject marker; ADR 0013 supersedes that rule so the first trade
-  now selects `FCN(T+7)` or `DAC(T+7)`. Barclays COMET rejected body Product=`DAC`; do not guess
-  its DAC code or change the shared BMJB body globally. Read ADR 0013 and the latest
+  The old run used a `DAC/DRA` subject marker. ADR 0014 keeps the first-trade rule but uses
+  `DRA(T+7)` for NOMURA/DBS/SG/GS/CA and `DAC(T+7)` for BMJB/UBS/CITI. Barclays COMET rejected
+  body Product=`DAC`; do not guess its DAC code or change the shared BMJB body globally. Read
+  ADR 0014 and the latest
   `docs/HANDOFF.md` before proposing any Barclays-specific split.
 - Effective roles are `USER｜PS｜ADMIN` (ADR 0012). `PS` is the `users.is_privileged_support`
   flag (migration `0010`, applied to remote D1), never a stored `role` value — gate on the

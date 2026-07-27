@@ -46,5 +46,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0011: DAC-family subject routing marker](0011-dac-subject-routing-marker.md)
 - [ADR 0012: PS support tier and account management](0012-ps-tier-and-account-management.md)
 - [ADR 0013: First-trade product label in outbound subjects](0013-first-trade-product-subject-label.md)
+- [ADR 0014: Issuer-specific DAC-family subject labels](0014-issuer-specific-dac-subject-label.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

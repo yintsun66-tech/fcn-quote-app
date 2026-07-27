@@ -116,15 +116,22 @@ describe("shared issuer email formats", () => {
     const branch = branchSubjectLabel("002");
     const institutionSubject = EMAIL_INSTITUTIONS.SG?.subject ?? "";
     const dacTrade = { ...trade, product: "DAC" };
-    const subjectBase = `${buildProductAwareSubject(institutionSubject, [dacTrade])} ${branch}`;
+    const subjectBase = `${buildProductAwareSubject(
+      institutionSubject,
+      [dacTrade],
+      EMAIL_INSTITUTIONS.SG?.dacSubjectProduct,
+    )} ${branch}`;
 
     expect(buildInstitutionEmail("SG", [dacTrade]).subject)
-      .toBe("SG[詢價]FCBKTPE: DAC(T+7)");
+      .toBe("SG[詢價]FCBKTPE: DRA(T+7)");
     expect(buildInstitutionEmail("SG", [dacTrade], { rfqToken: code, batchCode: "SG", subjectBase }).subject)
-      .toBe(`SG[詢價]FCBKTPE: DAC(T+7) ${branch} [RFQ:${code}][BATCH:SG]`);
-    expect(buildProductAwareSubject(`${institutionSubject} DAC/DRA ${branch}`, [dacTrade]))
-      .toBe(`SG[詢價]FCBKTPE: DAC(T+7) ${branch}`);
-    expect(buildProductAwareSubject(`SG[詢價]FCBKTPE: DAC(T+7) ${branch}`, [trade]))
+      .toBe(`SG[詢價]FCBKTPE: DRA(T+7) ${branch} [RFQ:${code}][BATCH:SG]`);
+    expect(buildProductAwareSubject(
+      `${institutionSubject} DAC/DRA ${branch}`,
+      [dacTrade],
+      "DRA",
+    )).toBe(`SG[詢價]FCBKTPE: DRA(T+7) ${branch}`);
+    expect(buildProductAwareSubject(`SG[詢價]FCBKTPE: DRA(T+7) ${branch}`, [trade], "DRA"))
       .toBe(`SG[詢價]FCBKTPE: FCN(T+7) ${branch}`);
   });
 
@@ -136,6 +143,23 @@ describe("shared issuer email formats", () => {
         .toBe("UBS[詢價]FCBKTPE: DAC(T+7)");
     }
   );
+
+  it.each([
+    ["BMJB", "DAC"],
+    ["NOMURA", "DRA"],
+    ["UBS", "DAC"],
+    ["DBS", "DRA"],
+    ["SG", "DRA"],
+    ["CITI", "DAC"],
+    ["GS", "DRA"],
+    ["CA", "DRA"],
+  ])("uses %s's configured DAC-family subject name %s", (key, subjectProduct) => {
+    const dacTrade = { ...trade, product: "DAC" };
+    expect(buildInstitutionEmail(key, [dacTrade]).subject)
+      .toContain(`${subjectProduct}(T+7)`);
+    expect(buildInstitutionEmail(key, [trade]).subject)
+      .toContain("FCN(T+7)");
+  });
 
   it("uses only the first trade to choose FCN or DAC for a mixed request", () => {
     const baseSubject = EMAIL_INSTITUTIONS.BMJB?.subject ?? "";

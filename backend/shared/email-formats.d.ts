@@ -33,6 +33,7 @@ export const MAIL_INSTITUTION_ORDER: readonly string[];
 export const EMAIL_INSTITUTIONS: Readonly<Record<string, {
   label: string;
   subject: string;
+  dacSubjectProduct?: "DAC" | "DRA";
   columns: readonly { label: string; value(record: MailTradeRecord): string }[];
 }>>;
 
@@ -40,7 +41,11 @@ export function buildEmailBody(columns: readonly { label: string }[], dataRows: 
 export function buildEmailHtml(columns: readonly { label: string }[], dataRows: readonly (readonly string[])[]): string;
 export function branchSubjectLabel(rawBranchName: string | null | undefined): string;
 export function buildCorrelatedSubject(baseSubject: string, rfqToken: string, batchCode: string): string;
-export function buildProductAwareSubject(baseSubject: string, records: readonly Pick<MailTradeRecord, "product">[]): string;
+export function buildProductAwareSubject(
+  baseSubject: string,
+  records: readonly Pick<MailTradeRecord, "product">[],
+  dacSubjectProduct?: "DAC" | "DRA",
+): string;
 export function buildInstitutionEmail(
   key: string,
   records: readonly MailTradeRecord[],

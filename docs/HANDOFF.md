@@ -5,10 +5,16 @@ Updated: 2026-07-28 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`5d15d08 fix(artifacts): standardize quote-image dimensions`
+`8f34f2f feat(auth): use employee number as login`
 
 Production deployment record:
-Worker `7e67acfd-f0c2-4d7e-8f4e-687e5ad2b2a2` deployed 2026-07-28 from `5d15d08`
+Worker `9a7535fb-0fa2-4e4b-b11d-1e32ce2ead35` deployed 2026-07-28 from `8f34f2f`
+(new registrations use branch name + five-digit employee number + password; the employee number
+is assigned server-side as both login and display identity). Post-deploy: the application asset
+and API health return HTTP 200; the live registration form contains exactly one `branchName`, one
+`employeeNumber`, and one `password` field, contains no `username` or `displayName` field, and
+marks the employee-number input as the browser username field.
+Previous: `7e67acfd-f0c2-4d7e-8f4e-687e5ad2b2a2` deployed 2026-07-28 from `5d15d08`
 (desktop, laptop, tablet, and phone all use the phone-size 1.5-scale / 4M-pixel profile).
 Post-deploy: application index and API health return HTTP 200; the live index references
 `backend-client.js?v=backend-v3`; the live client contains `CARD_OUTPUT_CANVAS_PIXELS = 4e6`
@@ -44,7 +50,7 @@ economic top four plus custom fifth issuer/image);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `5d15d08`, pushed to `origin` (local and remote match before
+`feature/subject-branch-correlation` at `8f34f2f`, pushed to `origin` (local and remote match before
 this deployment-record documentation commit).
 Resolve the current branch HEAD from Git before making changes. The branch is not merged to
 `main`.
@@ -54,6 +60,33 @@ Quote-image work landed in this order — read ADR 0016 then 0017 before touchin
 rasterizer → `7f1dca3` mobile hang fix.
 
 The separate untracked `.claude/settings.local.json` remains user-owned and must stay out of commits.
+
+## Employee-number registration simplification (deployed)
+
+Commit `8f34f2f` and Worker version `9a7535fb-0fa2-4e4b-b11d-1e32ce2ead35` implement:
+
+- New applicants enter only branch name, five-digit employee number, and password.
+- `normalizeRegistrationInput` derives both `username` and `displayName` from the employee number
+  and ignores client-supplied identity fields. This is a server-side rule, not only a hidden form
+  field.
+- The branch remains stored and continues through ADR 0002's sanitized outbound-subject label.
+- Existing account rows and login names are unchanged; no D1 migration is included. A duplicate
+  employee number therefore still resolves through ADMIN's employee-number lookup and the approved
+  recovery process rather than a second registration.
+- The registration-review UI now shows employee number/login plus branch; it still identifies
+  older pending rows whose legacy username differs.
+- ADR 0018 and the authentication contract/admin runbook document the compatibility boundary.
+
+Verification completed locally:
+
+- `node --check backend-client.js`
+- `pnpm run typecheck`
+- `pnpm test` — 16 files, 103 tests passed
+- `pnpm run build` — successful Cloudflare dry-run (required sandbox escalation)
+- `git diff --check`
+
+No production D1 data, binding, secret, dependency, or lockfile changed. Preserve the separate
+untracked `.claude/settings.local.json`.
 
 ## On-demand quote images (ADR 0016) — Browser Rendering capacity
 

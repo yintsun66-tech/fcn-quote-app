@@ -52,7 +52,8 @@ sessions end immediately.
 
 1. Open `https://app.yintsun66.com` and log in as an ADMIN or PS.
 2. In the fixed bottom user bar, choose **使用者申請審核**.
-3. Review the pending application’s time, five-digit employee number, branch, user name, and login account.
+3. Review the pending application’s time, five-digit employee number (also the login account),
+   and branch name. An older pending application may additionally show its legacy login name.
 4. Choose one action:
    - **核准**: confirm the prompt. The account becomes `ACTIVE` and can log in.
    - **拒絕**: enter a reason between 1 and 500 characters. The account becomes `REJECTED` and cannot log in.
@@ -62,17 +63,18 @@ Do not capture screenshots or copy employee numbers outside the approved adminis
 
 ### When a new registration never appears in the pending list
 
-The review screen shows a note like「近 7 天有 N 筆重複申請被系統擋下（… 行編已存在 / 登入帳號已存在 …）」when
-recent duplicate registrations were blocked. A registration whose **login account or employee
-number already exists** is intentionally answered with the same「已受理」message as a new one (to
-avoid revealing which accounts exist) but **creates no account**, so it never reaches the pending
-list. If someone reports a "new" account that is missing:
+The review screen shows a note like「近 7 天有 N 筆重複申請被系統擋下（… 行編已存在 /
+登入帳號已存在 …）」when recent duplicate registrations were blocked. A registration whose
+five-digit employee number already exists is intentionally answered with the same「已受理」
+message as a new one (to avoid revealing which accounts exist) but **creates no account**, so it
+never reaches the pending list. If someone reports a "new" account that is missing:
 
 1. Check the duplicate note for a matching time and which field collided.
-2. If the **employee number (行編)** already exists, that person already has an account — have
-   them log in with it (or use the recovery process); the same 行編 cannot be registered twice.
-3. If the **login account (登入帳號)** already exists, ask them to re-register with a different,
-   unused login account.
+2. Use the ADMIN-only employee-number lookup to identify the existing account. For accounts
+   created under the new flow, the displayed login account is the same five-digit employee number.
+3. An older account may still have a legacy login name. Have the user log in with that stored name
+   or follow the approved recovery process; do not ask them to register the same employee number
+   again.
 
 The note reports only counts, the colliding field, and timestamps — never the attempted value.
 

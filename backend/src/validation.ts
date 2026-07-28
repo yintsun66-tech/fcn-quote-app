@@ -90,8 +90,8 @@ export function normalizeRegistrationInput(value: unknown): RegistrationInput {
   return {
     employeeNumber,
     branchName: text(input.branchName, "branchName", 1, 100),
-    displayName: text(input.displayName, "displayName", 1, 100),
-    username: normalizeUsername(input.username),
+    displayName: employeeNumber,
+    username: employeeNumber,
     password: validatePassword(input.password)
   };
 }

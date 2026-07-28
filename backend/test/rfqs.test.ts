@@ -30,21 +30,21 @@ function authentication(response: Response): { cookie: string; csrf: string } {
   return { cookie: `__Host-fcn_session=${session}; __Host-fcn_csrf=${csrf}`, csrf };
 }
 
-async function createActiveUser(username: string, employeeNumber: string, ip: string): Promise<{ cookie: string; csrf: string }> {
+async function createActiveUser(attemptedUsername: string, employeeNumber: string, ip: string): Promise<{ cookie: string; csrf: string }> {
   await api("/api/v1/auth/register", {
     method: "POST",
     body: JSON.stringify({
       employeeNumber,
       branchName: "RFQ 測試分行",
-      displayName: username,
-      username,
+      displayName: attemptedUsername,
+      username: attemptedUsername,
       password: PASSWORD
     })
   }, ip);
-  await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE' WHERE username_normalized = ?").bind(username).run();
+  await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE' WHERE username_normalized = ?").bind(employeeNumber).run();
   const login = await api("/api/v1/auth/login", {
     method: "POST",
-    body: JSON.stringify({ username, password: PASSWORD })
+    body: JSON.stringify({ username: employeeNumber, password: PASSWORD })
   }, ip);
   if (login.status !== 200) throw new Error(`Unable to log in test user: ${login.status}`);
   return authentication(login);
@@ -374,7 +374,7 @@ describe("RFQ API", () => {
                 workflow_status = 'COMPLETED', current_ranking_version = 1,
                 finalized_at = ? WHERE id = ?`
       ).bind(new Date().toISOString(), adminRfqId),
-      testEnv.DB.prepare("UPDATE users SET role = 'ADMIN' WHERE username_normalized = 'rfquserb'")
+      testEnv.DB.prepare("UPDATE users SET role = 'ADMIN' WHERE username_normalized = '22346'")
     ]);
     const admin = await api(`/api/v1/rfqs/${adminRfqId}/recalculate`, {
       method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }

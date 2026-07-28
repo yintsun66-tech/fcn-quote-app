@@ -1,6 +1,6 @@
 # Backend Contracts
 
-Status: Current implemented HTTP/domain contract baseline (2026-07-25).
+Status: Current implemented HTTP/domain contract baseline (2026-07-28).
 
 ## Contract principles
 
@@ -20,15 +20,21 @@ Request fields:
 
 - `employeeNumber`: exactly five decimal digits
 - `branchName`
-- `displayName`
-- `username`
 - `password`
 
-Response creates a `PENDING_APPROVAL` registration only. It must not reveal whether a sensitive employee number already exists beyond a generic registration response.
+The server derives both `username` and `displayName` from `employeeNumber`; client-supplied
+values for either field are ignored. This makes the five-digit employee number the login account
+for new registrations while retaining `branchName` for the outbound email subject. Existing
+accounts keep their stored login names and require no migration.
+
+Response creates a `PENDING_APPROVAL` registration only. It must not reveal whether a sensitive
+employee number already exists beyond a generic registration response.
 
 ### `POST /api/v1/auth/login`
 
-Accepts username and password. Only `ACTIVE` users may receive a session. Failure responses are generic and rate-limited.
+Accepts username and password. Newly registered users enter their five-digit employee number as
+the username; existing accounts continue to use their existing stored login name. Only `ACTIVE`
+users may receive a session. Failure responses are generic and rate-limited.
 
 ### `POST /api/v1/auth/logout`
 
@@ -55,7 +61,13 @@ Authorization is identical to the artifact endpoints and is enforced by the shar
 
 Registration review requires the protected administration boundary and an effective role of `ADMIN` or `PS`. Approval/rejection records actor, time, and reason.
 
-`GET /api/v1/admin/registrations` also returns a `duplicates` summary of recently blocked duplicate registrations (`{ windowDays, count, latestAt, byField: { employeeNumber, username, unknown } }`). A duplicate registration (re-used login account or employee number) is intentionally answered with the same generic `202` as a new one to preserve anti-enumeration and creates no user row; this summary lets a reviewer see how many were blocked and which unique field collided, without ever exposing the attempted value.
+`GET /api/v1/admin/registrations` also returns a `duplicates` summary of recently blocked
+duplicate registrations (`{ windowDays, count, latestAt, byField: { employeeNumber, username,
+unknown } }`). Because new accounts use the employee number as the username, either uniqueness
+constraint may report the collision. A duplicate registration is intentionally answered with the
+same generic `202` as a new one to preserve anti-enumeration and creates no user row; this summary
+lets a reviewer see how many were blocked and which unique field collided, without ever exposing
+the attempted value.
 
 ### Account management endpoints (ADR 0012)
 

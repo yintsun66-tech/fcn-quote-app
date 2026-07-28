@@ -39,7 +39,7 @@
     <dialog id="backendAuth" class="backend-dialog">
       <form id="backendLogin" class="backend-panel">
         <p class="eyebrow">SECURE QUOTE WORKSPACE</p><h2>登入詢價系統</h2>
-        <label>帳號<input name="username" autocomplete="username" required minlength="5"></label>
+        <label>登入帳號（新申請者為五碼行編）<input name="username" autocomplete="username" required minlength="5"></label>
         <label>密碼<input name="password" type="password" autocomplete="current-password" required></label>
         <p id="backendAuthError" class="backend-error" role="alert"></p>
         <button class="primary" type="submit">登入</button>
@@ -47,11 +47,9 @@
       </form>
       <form id="backendRegistration" class="backend-panel" hidden>
         <p class="eyebrow">APPROVAL REQUIRED</p><h2>申請使用權限</h2>
-        <label>行編（五碼）<input name="employeeNumber" inputmode="numeric" pattern="[0-9]{5}" required></label>
-        <label>分行名稱<input name="branchName" required maxlength="100"></label>
-        <label>使用者名稱<input name="displayName" required maxlength="100"></label>
-        <label>登入帳號<input name="username" required minlength="5" maxlength="50"></label>
-        <label>密碼（至少 12 個字元）<input name="password" type="password" required minlength="12"></label>
+        <label>分行名稱<input name="branchName" autocomplete="organization" required maxlength="100"></label>
+        <label>五碼行編（即登入帳號）<input name="employeeNumber" autocomplete="username" inputmode="numeric" pattern="[0-9]{5}" minlength="5" maxlength="5" required></label>
+        <label>密碼（至少 12 個字元）<input name="password" type="password" autocomplete="new-password" required minlength="12"></label>
         <p id="backendRegistrationError" class="backend-error" role="alert"></p>
         <button class="primary" type="submit">送出審核</button>
         <button id="showLogin" class="link-button" type="button">返回登入</button>
@@ -446,13 +444,11 @@
       adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有待審核的使用者申請。</p>";
       return;
     }
-    adminRegistrationReviewList.innerHTML = `<table><thead><tr><th>申請時間</th><th>行編</th><th>分行</th><th>使用者</th><th>登入帳號</th><th>操作</th></tr></thead><tbody>${registrations.map(registration => `<tr>
+    adminRegistrationReviewList.innerHTML = `<table><thead><tr><th>申請時間</th><th>行編（登入帳號）</th><th>分行</th><th>操作</th></tr></thead><tbody>${registrations.map(registration => `<tr>
       <td>${escapeHtml(formatDateTime(registration.createdAt))}</td>
-      <td>${escapeHtml(registration.employeeNumber)}</td>
+      <td>${escapeHtml(registration.employeeNumber)}${registration.username !== registration.employeeNumber ? `<small>既有申請帳號：${escapeHtml(registration.username)}</small>` : ""}</td>
       <td>${escapeHtml(registration.branchName)}</td>
-      <td>${escapeHtml(registration.displayName)}</td>
-      <td>${escapeHtml(registration.username)}</td>
-      <td class="backend-registration-actions"><button type="button" class="primary" data-registration-action="approve" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.displayName)}">核准</button><button type="button" class="secondary" data-registration-action="reject" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.displayName)}">拒絕</button></td>
+      <td class="backend-registration-actions"><button type="button" class="primary" data-registration-action="approve" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.employeeNumber)}">核准</button><button type="button" class="secondary" data-registration-action="reject" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.employeeNumber)}">拒絕</button></td>
     </tr>`).join("")}</tbody></table>`;
   }
 
@@ -1279,7 +1275,7 @@
     const data = Object.fromEntries(new FormData(registrationForm));
     try {
       await request("/auth/register", { method: "POST", body: JSON.stringify(data) });
-      document.querySelector("#backendRegistrationError").textContent = "申請已送出，請等待管理者核准後登入。";
+      document.querySelector("#backendRegistrationError").textContent = "申請已送出；核准後請以五碼行編登入。";
     } catch (error) { document.querySelector("#backendRegistrationError").textContent = error.message; }
   });
   document.querySelector("#showRegistration").addEventListener("click", () => { loginForm.hidden = true; registrationForm.hidden = false; });

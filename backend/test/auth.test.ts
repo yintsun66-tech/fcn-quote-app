@@ -23,12 +23,12 @@ async function api(path: string, init: RequestInit = {}, ip = "198.51.100.10"): 
   return response;
 }
 
-function registration(username: string, employeeNumber: string): Record<string, string> {
+function registration(attemptedUsername: string, employeeNumber: string): Record<string, string> {
   return {
     employeeNumber,
     branchName: "測試分行",
-    displayName: `測試 ${username}`,
-    username,
+    displayName: `測試 ${attemptedUsername}`,
+    username: attemptedUsername,
     password: "Correct Horse Battery 123!"
   };
 }
@@ -52,16 +52,22 @@ describe("registration and authentication", () => {
     expect(body.error.fieldErrors.employeeNumber).toBeDefined();
   });
 
-  it("stores a pending registration without plaintext employee number", async () => {
+  it("derives the login identity from the employee number and does not store it in plaintext", async () => {
     const response = await api("/api/v1/auth/register", {
       method: "POST",
-      body: JSON.stringify(registration("pending1", "12345"))
+      body: JSON.stringify({
+        employeeNumber: "12345",
+        branchName: "測試分行",
+        password: "Correct Horse Battery 123!"
+      })
     }, "198.51.100.12");
     expect(response.status).toBe(202);
     const row = await testEnv.DB.prepare(
-      "SELECT status, employee_number_ciphertext FROM users WHERE username_normalized = 'pending1'"
-    ).first<{ status: string; employee_number_ciphertext: string }>();
+      "SELECT status, username_normalized, display_name, employee_number_ciphertext FROM users WHERE username_normalized = '12345'"
+    ).first<{ status: string; username_normalized: string; display_name: string; employee_number_ciphertext: string }>();
     expect(row?.status).toBe("PENDING_APPROVAL");
+    expect(row?.username_normalized).toBe("12345");
+    expect(row?.display_name).toBe("12345");
     expect(row?.employee_number_ciphertext).not.toContain("12345");
   });
 
@@ -72,7 +78,7 @@ describe("registration and authentication", () => {
     }, "198.51.100.13");
     const response = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "pending2", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12346", password: "Correct Horse Battery 123!" })
     }, "198.51.100.14");
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({ error: { code: "AUTHENTICATION_FAILED" } });
@@ -83,10 +89,10 @@ describe("registration and authentication", () => {
       method: "POST",
       body: JSON.stringify(registration("admin01", "12347"))
     }, "198.51.100.15");
-    await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE', role = 'ADMIN' WHERE username_normalized = 'admin01'").run();
+    await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE', role = 'ADMIN' WHERE username_normalized = '12347'").run();
     const adminLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, "198.51.100.16");
     expect(adminLogin.status).toBe(200);
     const adminAuth = authentication(adminLogin);
@@ -95,7 +101,7 @@ describe("registration and authentication", () => {
       method: "POST",
       body: JSON.stringify(registration("approved1", "12348"))
     }, "198.51.100.17");
-    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = 'approved1'").first<{ id: string }>();
+    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = '12348'").first<{ id: string }>();
     expect(pending?.id).toBeDefined();
 
     const listResponse = await api("/api/v1/admin/registrations", {
@@ -103,7 +109,7 @@ describe("registration and authentication", () => {
     });
     expect(listResponse.status).toBe(200);
     const list = await listResponse.json<{ registrations: Array<{ username: string; employeeNumber: string }> }>();
-    expect(list.registrations).toContainEqual(expect.objectContaining({ username: "approved1", employeeNumber: "12348" }));
+    expect(list.registrations).toContainEqual(expect.objectContaining({ username: "12348", employeeNumber: "12348" }));
 
     const approveResponse = await api(`/api/v1/admin/registrations/${pending?.id}/approve`, {
       method: "POST",
@@ -113,14 +119,14 @@ describe("registration and authentication", () => {
 
     const userLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "approved1", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12348", password: "Correct Horse Battery 123!" })
     }, "198.51.100.18");
     expect(userLogin.status).toBe(200);
     const userAuth = authentication(userLogin);
 
     const sessionResponse = await api("/api/v1/auth/session", { headers: { cookie: userAuth.cookie } });
     expect(sessionResponse.status).toBe(200);
-    expect(await sessionResponse.json()).toMatchObject({ user: { username: "approved1", role: "USER" } });
+    expect(await sessionResponse.json()).toMatchObject({ user: { username: "12348", role: "USER" } });
 
     const logoutResponse = await api("/api/v1/auth/logout", {
       method: "POST",
@@ -136,12 +142,12 @@ describe("registration and authentication", () => {
       method: "POST",
       body: JSON.stringify(registration("rejected1", "12349"))
     }, "198.51.100.21");
-    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = 'rejected1'").first<{ id: string }>();
+    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = '12349'").first<{ id: string }>();
     expect(pending?.id).toBeDefined();
 
     const adminLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, "198.51.100.22");
     const adminAuth = authentication(adminLogin);
     const rejectResponse = await api(`/api/v1/admin/registrations/${pending?.id}/reject`, {
@@ -179,23 +185,23 @@ describe("registration and authentication", () => {
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr01", "22002")) }, "203.0.113.2");
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr02", "22003")) }, "203.0.113.3");
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr03", "22004")) }, "203.0.113.4");
-    const adminId = await activate("psadm01", "ADMIN");
-    const promoteId = await activate("psusr01");
-    const disableId = await activate("psusr02");
-    const plainId = await activate("psusr03");
+    const adminId = await activate("22001", "ADMIN");
+    const promoteId = await activate("22002");
+    const disableId = await activate("22003");
+    const plainId = await activate("22004");
 
-    const adminAuth = await login("psadm01", "203.0.113.11");
+    const adminAuth = await login("22001", "203.0.113.11");
 
     // ADMIN can list every account with an approximate last-online value.
     const accountsResponse = await api("/api/v1/admin/accounts", { headers: { cookie: adminAuth.cookie } });
     expect(accountsResponse.status).toBe(200);
     const accounts = (await accountsResponse.json<{ accounts: Array<{ id: string; username: string; role: string; status: string; lastSeenAt: string | null }> }>()).accounts;
-    expect(accounts.find(item => item.username === "psusr01")).toMatchObject({ role: "USER", status: "ACTIVE" });
-    expect(accounts.find(item => item.username === "psadm01")).toMatchObject({ role: "ADMIN" });
+    expect(accounts.find(item => item.username === "22002")).toMatchObject({ role: "USER", status: "ACTIVE" });
+    expect(accounts.find(item => item.username === "22001")).toMatchObject({ role: "ADMIN" });
     expect(accounts.some(item => "lastSeenAt" in item)).toBe(true);
 
     // A regular USER cannot reach account management at all.
-    const userAuth = await login("psusr03", "203.0.113.12");
+    const userAuth = await login("22004", "203.0.113.12");
     expect((await api("/api/v1/admin/accounts", { headers: { cookie: userAuth.cookie } })).status).toBe(403);
     expect((await api(`/api/v1/admin/accounts/${disableId}/disable`, {
       method: "POST",
@@ -211,13 +217,13 @@ describe("registration and authentication", () => {
     expect(await promoteResponse.json()).toMatchObject({ userId: promoteId, role: "PS" });
 
     // The promoted account now authenticates as PS.
-    const psAuth = await login("psusr01", "203.0.113.13");
+    const psAuth = await login("22002", "203.0.113.13");
     const psSession = await api("/api/v1/auth/session", { headers: { cookie: psAuth.cookie } });
-    expect(await psSession.json()).toMatchObject({ user: { username: "psusr01", role: "PS" } });
+    expect(await psSession.json()).toMatchObject({ user: { username: "22002", role: "PS" } });
 
     // PS can approve a pending registration.
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("psusr04", "22005")) }, "203.0.113.5");
-    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = 'psusr04'").first<{ id: string }>();
+    const pending = await testEnv.DB.prepare("SELECT id FROM users WHERE username_normalized = '22005'").first<{ id: string }>();
     const pendingId = pending?.id as string;
     const psApprove = await api(`/api/v1/admin/registrations/${pendingId}/approve`, {
       method: "POST",
@@ -234,7 +240,7 @@ describe("registration and authentication", () => {
     expect(await psDisable.json()).toMatchObject({ userId: disableId, status: "DISABLED" });
     const disabledLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "psusr02", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "22003", password: "Correct Horse Battery 123!" })
     }, "203.0.113.14");
     expect(disabledLogin.status).toBe(401);
 
@@ -266,20 +272,22 @@ describe("registration and authentication", () => {
   it("surfaces blocked duplicate registrations to reviewers without creating a user", async () => {
     // First registration creates a pending user.
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase1", "41001")) }, "203.0.113.41");
-    // Same login account, different employee number -> UNIQUE collision on username_normalized.
+    // Client-supplied identity fields are ignored; a different employee number creates its own account.
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase1", "41002")) }, "203.0.113.42");
-    // Same employee number, different login account -> UNIQUE collision on employee_number_lookup_hash.
+    // Re-using an employee number is blocked regardless of client-supplied identity fields.
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("dupbase9", "41001")) }, "203.0.113.43");
 
-    // No extra user rows were created for the two duplicates.
-    const dupbase1Count = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username_normalized = 'dupbase1'").first<{ n: number }>();
-    expect(dupbase1Count?.n).toBe(1);
-    const dupbase9 = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username_normalized = 'dupbase9'").first<{ n: number }>();
-    expect(dupbase9?.n).toBe(0);
+    const accounts = await testEnv.DB.prepare(
+      "SELECT username_normalized, display_name FROM users WHERE username_normalized IN ('41001', '41002') ORDER BY username_normalized"
+    ).all<{ username_normalized: string; display_name: string }>();
+    expect(accounts.results).toEqual([
+      { username_normalized: "41001", display_name: "41001" },
+      { username_normalized: "41002", display_name: "41002" }
+    ]);
 
     const adminLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, "203.0.113.44");
     const adminAuth = authentication(adminLogin);
     const listResponse = await api("/api/v1/admin/registrations", { headers: { cookie: adminAuth.cookie } });
@@ -287,28 +295,27 @@ describe("registration and authentication", () => {
     const body = await listResponse.json<{
       duplicates: { windowDays: number; count: number; latestAt: string | null; byField: { employeeNumber: number; username: number; unknown: number } };
     }>();
-    expect(body.duplicates.count).toBeGreaterThanOrEqual(2);
-    expect(body.duplicates.byField.username).toBeGreaterThanOrEqual(1);
-    expect(body.duplicates.byField.employeeNumber).toBeGreaterThanOrEqual(1);
+    expect(body.duplicates.count).toBeGreaterThanOrEqual(1);
+    expect(body.duplicates.byField.employeeNumber + body.duplicates.byField.username).toBeGreaterThanOrEqual(1);
     expect(body.duplicates.latestAt).toBeTruthy();
   });
 
   it("looks up an existing account by employee number for administrators only", async () => {
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("lookupu1", "51001")) }, "203.0.113.51");
-    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='lookupu1'").run();
+    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='51001'").run();
     await api("/api/v1/auth/register", { method: "POST", body: JSON.stringify(registration("lookupu2", "51002")) }, "203.0.113.52");
-    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='lookupu2'").run();
+    await testEnv.DB.prepare("UPDATE users SET status='ACTIVE' WHERE username_normalized='51002'").run();
 
     const adminLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, "203.0.113.53");
     const adminAuth = authentication(adminLogin);
     const adminHeaders = { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf };
 
     const found = await api("/api/v1/admin/accounts/lookup", { method: "POST", headers: adminHeaders, body: JSON.stringify({ employeeNumber: "51001" }) });
     expect(found.status).toBe(200);
-    expect(await found.json()).toMatchObject({ account: { username: "lookupu1", status: "ACTIVE" } });
+    expect(await found.json()).toMatchObject({ account: { username: "51001", status: "ACTIVE" } });
 
     const missing = await api("/api/v1/admin/accounts/lookup", { method: "POST", headers: adminHeaders, body: JSON.stringify({ employeeNumber: "50000" }) });
     expect(missing.status).toBe(200);
@@ -319,7 +326,7 @@ describe("registration and authentication", () => {
 
     const userLogin = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "lookupu2", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "51002", password: "Correct Horse Battery 123!" })
     }, "203.0.113.54");
     const userAuth = authentication(userLogin);
     const forbidden = await api("/api/v1/admin/accounts/lookup", {
@@ -335,19 +342,19 @@ describe("registration and authentication", () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const failed = await api("/api/v1/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username: "admin01", password: `Wrong Password ${attempt}!` })
+        body: JSON.stringify({ username: "12347", password: `Wrong Password ${attempt}!` })
       }, ip);
       expect(failed.status).toBe(401);
     }
     const limited = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, ip);
     expect(limited.status).toBe(429);
 
     const differentNetwork = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: "admin01", password: "Correct Horse Battery 123!" })
+      body: JSON.stringify({ username: "12347", password: "Correct Horse Battery 123!" })
     }, "198.51.100.20");
     expect(differentNetwork.status).toBe(200);
   });

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, createExecutionContext, type D1Migration } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import {
   cleanupExpiredMarketData,
@@ -113,6 +113,26 @@ describe("official public market context", () => {
     expect(() => normalizeMarketSymbol("AAPL?rfq=private")).toThrowError();
   });
 
+  it("preserves the Cloudflare runtime receiver when using the default fetcher", async () => {
+    const delegate = publicDataFetcher();
+    vi.stubGlobal("fetch", function runtimeAwareFetch(
+      this: typeof globalThis,
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation: function called with incorrect this reference");
+      }
+      return delegate(input, init);
+    });
+    try {
+      const instrument = await fetchSecInstrument(testEnv, "AAPL");
+      expect(instrument.data.ticker).toBe("AAPL");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("normalizes SEC instrument and the latest five supported filings", async () => {
     const instrument = await fetchSecInstrument(testEnv, "AAPL", publicDataFetcher());
     expect(instrument.data).toMatchObject({
@@ -169,6 +189,57 @@ describe("official public market context", () => {
     const secondPayload = await second.json<Record<string, any>>();
     expect(secondPayload.marketContext.sec.data.company.ticker).toBe("AAPL");
     expect(secondPayload.marketContext.fred.data.series).toHaveLength(3);
+  });
+
+  it("keeps FRED available and retains a safe diagnostic when SEC fails", async () => {
+    await testEnv.DB.prepare(
+      "DELETE FROM public_data_cache WHERE cache_key IN ('sec:instrument:v1:NVDA', 'fred:macro:v1')"
+    ).run();
+    const delegate = publicDataFetcher();
+    let fredRequests = 0;
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/company_tickers_exchange.json")) {
+        throw new TypeError("Illegal invocation: function called with incorrect this reference");
+      }
+      if (url.hostname === "api.stlouisfed.org") fredRequests += 1;
+      return delegate(input, init);
+    }) as typeof fetch;
+    const response = await getMarketContext(
+      new Request("https://api.yintsun66.com/api/v1/market/instruments/NVDA/context", {
+        headers: { "cf-connecting-ip": "192.0.2.20" }
+      }),
+      testEnv,
+      {
+        ...session,
+        id: "ses_market_sec_failure",
+        user: { ...session.user, id: "usr_market_sec_failure" }
+      },
+      "NVDA",
+      fetcher
+    );
+    const payload = await response.json<Record<string, any>>();
+    expect(payload.marketContext.sec).toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "UPSTREAM_RUNTIME_INVOCATION",
+      data: null
+    });
+    expect(payload.marketContext.fred.status).toBe("FRESH");
+    expect(payload.marketContext.fred.data.series).toHaveLength(3);
+    expect(fredRequests).toBe(6);
+
+    const beforeCleanup = await testEnv.DB.prepare(
+      `SELECT status, fetched_at, stale_until, updated_at
+         FROM public_data_cache WHERE cache_key = 'sec:instrument:v1:NVDA'`
+    ).first<{ status: string; fetched_at: string | null; stale_until: string; updated_at: string }>();
+    expect(beforeCleanup).toMatchObject({ status: "ERROR", fetched_at: null });
+    expect(Date.parse(beforeCleanup?.stale_until ?? "")).toBeGreaterThan(Date.parse(beforeCleanup?.updated_at ?? ""));
+
+    await cleanupExpiredMarketData(testEnv);
+    const afterCleanup = await testEnv.DB.prepare(
+      "SELECT status FROM public_data_cache WHERE cache_key = 'sec:instrument:v1:NVDA'"
+    ).first<{ status: string }>();
+    expect(afterCleanup?.status).toBe("ERROR");
   });
 
   it("coalesces concurrent cache misses and falls back to stale data", async () => {

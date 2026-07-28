@@ -10,6 +10,7 @@ const SEC_ARCHIVES_ORIGIN = "https://www.sec.gov";
 const FRED_ORIGIN = "https://api.stlouisfed.org";
 const FRED_SERIES = Object.freeze(["DGS10", "FEDFUNDS", "VIXCLS"]);
 const CACHE_LEASE_SECONDS = 30;
+const ERROR_DIAGNOSTIC_SECONDS = 10 * 60;
 const INSTRUMENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SEC_DIRECTORY_BYTES = 5_000_000;
 const MAX_SEC_SUBMISSIONS_BYTES = 5_000_000;
@@ -17,6 +18,8 @@ const MAX_FRED_BYTES = 500_000;
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type SourceName = "SEC" | "FRED";
+
+const runtimeFetch: Fetcher = (input, init) => globalThis.fetch(input, init);
 
 interface CacheRow {
   cache_key: string;
@@ -140,6 +143,12 @@ function safeJson<T>(raw: string): T | null {
 function errorCode(error: unknown): string {
   if (error instanceof AppError) return error.code;
   if (error instanceof DOMException && error.name === "TimeoutError") return "UPSTREAM_TIMEOUT";
+  if (error instanceof Error && /illegal invocation/i.test(error.message)) {
+    return "UPSTREAM_RUNTIME_INVOCATION";
+  }
+  if (error instanceof Error && /network connection lost/i.test(error.message)) {
+    return "UPSTREAM_NETWORK_ERROR";
+  }
   return "UPSTREAM_UNAVAILABLE";
 }
 
@@ -200,7 +209,7 @@ function secHeaders(env: AppEnv): HeadersInit {
 export async function fetchSecInstrument(
   env: AppEnv,
   symbol: string,
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = runtimeFetch
 ): Promise<CacheLoadResult<SecInstrument>> {
   const url = new URL(SEC_TICKER_DIRECTORY_URL);
   const { data, etag } = await fetchJson<SecTickerDirectory>(
@@ -249,7 +258,7 @@ export async function fetchSecInstrument(
 export async function fetchSecFilings(
   env: AppEnv,
   instrument: SecInstrument,
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = runtimeFetch
 ): Promise<CacheLoadResult<SecContext>> {
   const url = new URL(`/submissions/CIK${instrument.cik}.json`, SEC_SUBMISSIONS_ORIGIN);
   const { data, etag } = await fetchJson<SecSubmissions>(
@@ -348,7 +357,7 @@ async function fetchFredSeries(
 
 export async function fetchFredContext(
   env: AppEnv,
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = runtimeFetch
 ): Promise<CacheLoadResult<FredContext>> {
   if (!env.FRED_API_KEY) {
     throw new AppError(503, "FRED_NOT_CONFIGURED", "FRED API 尚未設定。 ");
@@ -370,7 +379,7 @@ async function cacheRow(env: AppEnv, cacheKey: string): Promise<CacheRow | null>
 function cacheEnvelope<T>(row: CacheRow | null, now: string, fallbackError: string | null = null): PublicSourceEnvelope<T> {
   const payload = row ? safeJson<T>(row.normalized_payload_json) : null;
   const fresh = !!row && row.status === "FRESH" && Date.parse(row.expires_at) > Date.parse(now);
-  const stale = !!payload && !!row && Date.parse(row.stale_until) > Date.parse(now);
+  const stale = !!payload && !!row?.fetched_at && Date.parse(row.stale_until) > Date.parse(now);
   if (fresh || stale) {
     return {
       source: row.source,
@@ -477,11 +486,14 @@ async function refreshCache<T>(
     return cacheEnvelope<T>(await cacheRow(env, options.cacheKey), now);
   } catch (error) {
     const code = errorCode(error);
+    const diagnosticUntil = plusSeconds(now, ERROR_DIAGNOSTIC_SECONDS);
     await env.DB.prepare(
       `UPDATE public_data_cache
-          SET status = 'ERROR', last_error_code = ?, refresh_lease_expires_at = NULL, updated_at = ?
+          SET status = 'ERROR', last_error_code = ?,
+              stale_until = CASE WHEN fetched_at IS NULL THEN ? ELSE stale_until END,
+              refresh_lease_expires_at = NULL, updated_at = ?
         WHERE cache_key = ?`
-    ).bind(code, now, options.cacheKey).run();
+    ).bind(code, diagnosticUntil, now, options.cacheKey).run();
     console.warn("market_context_refresh", {
       source: options.source,
       dataType: options.dataType,
@@ -632,7 +644,7 @@ export async function getMarketContext(
   env: AppEnv,
   session: SessionContext,
   rawSymbol: string,
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = runtimeFetch
 ): Promise<Response> {
   if (env.MARKET_CONTEXT_ENABLED !== "1") {
     throw new AppError(503, "MARKET_CONTEXT_DISABLED", "公開市場資料功能目前暫停。 ");
@@ -640,38 +652,20 @@ export async function getMarketContext(
   await enforceRateLimit(request, env, session);
   const symbol = normalizeMarketSymbol(rawSymbol);
   const instrument = await instrumentForSymbol(env, symbol, fetcher);
-  if (!instrument.data) {
-    return jsonResponse({
-      marketContext: {
-        symbol,
-        generatedAt: nowIso(),
-        sec: instrument,
-        fred: {
-          source: "FRED",
-          status: "UNAVAILABLE",
-          sourceAsOf: null,
-          fetchedAt: null,
-          expiresAt: null,
-          isStale: false,
-          errorCode: "INSTRUMENT_UNAVAILABLE",
-          data: null
-        }
-      }
-    });
-  }
-
   const ttlSeconds = positiveInteger(env.MARKET_CACHE_TTL_SECONDS, 86_400);
   const staleSeconds = positiveInteger(env.MARKET_CACHE_STALE_SECONDS, 604_800);
   const [sec, fred] = await Promise.all([
-    getCachedPublicData(env, {
-      cacheKey: `sec:filings:v1:${instrument.data.cik}`,
-      source: "SEC",
-      symbol,
-      dataType: "RECENT_FILINGS",
-      ttlSeconds,
-      staleSeconds,
-      loader: () => fetchSecFilings(env, instrument.data as SecInstrument, fetcher)
-    }),
+    instrument.data
+      ? getCachedPublicData(env, {
+        cacheKey: `sec:filings:v1:${instrument.data.cik}`,
+        source: "SEC",
+        symbol,
+        dataType: "RECENT_FILINGS",
+        ttlSeconds,
+        staleSeconds,
+        loader: () => fetchSecFilings(env, instrument.data as SecInstrument, fetcher)
+      })
+      : Promise.resolve(instrument),
     getCachedPublicData(env, {
       cacheKey: "fred:macro:v1",
       source: "FRED",

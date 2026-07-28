@@ -4,6 +4,37 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+## SEC/FRED first authenticated-load fix (local, not committed or deployed)
+
+The first authenticated production load for `MU` reached the market-context API and rate limiter,
+but D1 recorded `sec:instrument:v1:MU` as `ERROR / UPSTREAM_UNAVAILABLE`. No instrument row or FRED
+cache row was created because the original flow returned before FRED whenever SEC instrument
+lookup failed. A direct request with the same SEC URL and declared identity returned HTTP 200,
+contained `MU`, did not redirect and was well below the five-megabyte limit.
+
+The local fix:
+
+- wraps the runtime-provided global `fetch` and calls it as `globalThis.fetch(...)`, preserving the
+  Cloudflare runtime receiver instead of passing the raw function as a detached default argument;
+- maps safe runtime-invocation and network-connection failures to
+  `UPSTREAM_RUNTIME_INVOCATION` / `UPSTREAM_NETWORK_ERROR`;
+- continues to load FRED even when SEC instrument lookup is unavailable;
+- keeps first-load error diagnostics for ten minutes without treating the placeholder `{}` as
+  stale source data, so scheduled cleanup no longer removes the evidence immediately; and
+- adds regression coverage for the runtime receiver, SEC/FRED failure isolation and diagnostic
+  retention.
+
+Verification completed:
+
+- `pnpm test` — 19 files / 124 tests passed.
+- `pnpm run typecheck` — passed.
+- `pnpm run build` — Cloudflare dry-run passed with 14 static assets and all existing bindings.
+
+This fix is only in the working tree. Production remains Worker
+`88ada066-5770-4417-8dff-66419fb651c4` until the user separately authorizes commit, push and
+deployment. After deployment, repeat the authenticated `MU` load, confirm SEC and FRED are `FRESH`,
+then query only safe cache metadata if either source is still unavailable.
+
 ## Public market analysis Phases 2–4 (committed, pushed and deployed)
 
 Work moved to branch `codex/market-analysis-phase2-4` from deployed Phase 1 commit `c05d48c`.

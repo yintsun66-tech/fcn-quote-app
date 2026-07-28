@@ -4,11 +4,16 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-## Public market analysis Phases 2–4 (local, uncommitted, not deployed)
+## Public market analysis Phases 2–4 (committed, pushed and deployed)
 
 Work moved to branch `codex/market-analysis-phase2-4` from deployed Phase 1 commit `c05d48c`.
 The user approved continuation of Phases 2–4 and requested Yahoo Finance and Google Trends in
 addition to SEC and FRED.
+
+Implementation commit `71b6226` is pushed to `origin/codex/market-analysis-phase2-4`.
+Migration `0011_market_context.sql` was applied to remote D1 `fcn-quote`. Cloudflare Worker version
+`88ada066-5770-4417-8dff-66419fb651c4` was deployed on 2026-07-28 with all custom domains,
+five Queue producers/consumers and the two-minute schedule intact.
 
 Local Phase 2 changes:
 
@@ -61,19 +66,23 @@ Evidence completed:
   The 24-hour D1 counters were 8,228 read queries, 3,416 write queries, 377,492 rows read and
   10,862 rows written.
 
-Read-only production checks:
+Production checks:
 
 - `wrangler secret list` confirms `FRED_API_KEY` now exists as encrypted `secret_text`; its value
   was entered by the user through Wrangler's hidden prompt and was never shown or stored here.
-- `wrangler d1 migrations list fcn-quote --remote` shows `0011_market_context.sql` as pending.
-- No migration, feature commit, push or feature deployment had been performed when this section
-  was recorded.
+- `wrangler d1 migrations list fcn-quote --remote` returns `No migrations to apply`.
+- `https://api.yintsun66.com/api/v1/health` returns HTTP 200 with `{"status":"ok"}`.
+- The live index references `backend-client.js?v=backend-v5`; the live client contains the
+  SEC/FRED load control, FRED attribution notice and ADMIN market-health route.
+- `market-resources.mjs` returns HTTP 200 and contains the strict public-symbol mapper.
+- Unauthenticated `GET /api/v1/market/instruments/AAPL/context` returns HTTP 401 with
+  `AUTHENTICATION_REQUIRED`, confirming the route remains behind application login.
 
 The 2019 article's `yfinance` and `pytrends` examples are research scraping clients, not current
 official production API contracts. Do not add either package or call undocumented endpoints.
-The smallest safe next step is to apply migration `0011`, deploy the reviewed feature commit and
-perform the authorized user/ADMIN smoke checks in the new runbook. Preserve
-`.claude/settings.local.json`; do not commit it.
+The remaining verification is an authenticated normal-user load of one SEC/FRED panel and an
+ADMIN check of the cache-health panel. This requires an application login and must not create or
+send an RFQ. Preserve `.claude/settings.local.json`; do not commit it.
 
 ## FCN market and risk analysis Phase 1 (committed, pushed and deployed)
 

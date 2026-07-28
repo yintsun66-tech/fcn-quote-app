@@ -5,10 +5,15 @@ Updated: 2026-07-28 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`99d7e9a fix(artifacts): harden tablet quote-image rendering`
+`5d15d08 fix(artifacts): standardize quote-image dimensions`
 
 Production deployment record:
-Worker `8f531342-e773-412b-9ba1-c5ffc00730ac` deployed 2026-07-28 from `99d7e9a`
+Worker `7e67acfd-f0c2-4d7e-8f4e-687e5ad2b2a2` deployed 2026-07-28 from `5d15d08`
+(desktop, laptop, tablet, and phone all use the phone-size 1.5-scale / 4M-pixel profile).
+Post-deploy: application index and API health return HTTP 200; the live index references
+`backend-client.js?v=backend-v3`; the live client contains `CARD_OUTPUT_CANVAS_PIXELS = 4e6`
+and `CARD_OUTPUT_MAX_SCALE = 1.5`, with the device-specific scale branch absent.
+Previous: `8f531342-e773-412b-9ba1-c5ffc00730ac` deployed 2026-07-28 from `99d7e9a`
 (bounded client/fallback requests, touch-safe canvas budget, responsive preview, and desktop
 new-page link). Post-deploy: application index and API health return HTTP 200; the live index
 references `backend-client.js?v=backend-v2`; the live client contains
@@ -39,7 +44,7 @@ economic top four plus custom fifth issuer/image);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `99d7e9a`, pushed to `origin` (local and remote match before
+`feature/subject-branch-correlation` at `5d15d08`, pushed to `origin` (local and remote match before
 this deployment-record documentation commit).
 Resolve the current branch HEAD from Git before making changes. The branch is not merged to
 `main`.
@@ -179,15 +184,16 @@ Verification completed locally: `node --check backend-client.js`, `node --check 
 verification remains required. The deployment and live-asset checks succeeded as recorded at the
 top of this document.
 
-### Unified quote-image dimensions — local change awaiting commit/deploy
+### Unified quote-image dimensions — deployed
 
-The current working tree makes desktop, laptop, tablet, and phone client-rendered PNGs use the
+Commit `5d15d08` makes desktop, laptop, tablet, and phone client-rendered PNGs use the
 same phone-size output profile: maximum scale 1.5 and maximum canvas area 4M pixels. The
 server-render fallback already uses device scale factor 1.5 for the normal single-trade card, so
 the normal and fallback outputs now align. Responsive preview sizing is unchanged. `index.html`
 advances the backend-client cache key to `backend-v3`. Local verification passed:
 `node --check backend-client.js`, `node --check app.js`, `pnpm run typecheck`, `pnpm test`
-(16 files / 103 tests), and `pnpm run build`.
+(16 files / 103 tests), and `pnpm run build`. Deployment and live-asset checks succeeded as
+recorded at the top of this document.
 
 ### Self-hosted rasterizer (closes the CDN fallback risk)
 

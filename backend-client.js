@@ -107,7 +107,7 @@
     <dialog id="backendAccounts" class="backend-dialog backend-accounts-dialog">
       <section class="backend-panel">
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>所有帳號列表</h2></div><button id="closeBackendAccounts" type="button" class="secondary">關閉</button></div>
-        <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。管理者可升級／降級 PS 帳號並剔除一般帳號；PS 只能剔除一般帳號。無法剔除管理者或 PS 帳號。</p>
+        <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。管理者可升級／降級 PS 帳號並剔除一般帳號；PS 只能剔除一般帳號。只有 ADMIN 能永久刪除已剔除且從未建立詢價的帳號；管理者、PS 或已有詢價紀錄的帳號不得永久刪除。</p>
         <p id="backendAccountsError" class="backend-error" role="alert"></p>
         <p id="backendAccountsStatus" class="backend-admin-status" role="status"></p>
         <div id="backendAccountLookup" class="backend-account-lookup" hidden>
@@ -660,6 +660,13 @@
       if (account.role === "USER" && account.status !== "DISABLED" && account.id !== selfId) {
         actions.push(`<button type="button" class="secondary" data-account-action="disable" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">剔除</button>`);
       }
+      if (viewer === "ADMIN" && account.role === "USER" && account.status === "DISABLED" && account.id !== selfId) {
+        if (account.rfqCount === 0) {
+          actions.push(`<button type="button" class="danger" data-account-action="delete" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}" data-account-username="${escapeHtml(account.username)}">永久刪除</button>`);
+        } else {
+          actions.push(`<small title="為保留金融與稽核紀錄，此帳號不可永久刪除">保留 ${escapeHtml(account.rfqCount)} 筆詢價</small>`);
+        }
+      }
       return `<tr>
         <td>${escapeHtml(formatDateTime(account.createdAt))}</td>
         <td>${escapeHtml(account.displayName)}<br><small>${escapeHtml(account.username)}</small></td>
@@ -711,24 +718,38 @@
     }
   }
 
-  async function accountAction(userId, action, displayName) {
+  async function accountAction(userId, action, displayName, username = "") {
     if (!isSupportRole()) return;
     const prompts = {
       promote: `確定將「${displayName}」升級為 PS 帳號？PS 可審核申請並剔除一般帳號。`,
       demote: `確定將「${displayName}」降級為一般帳號？`,
       disable: `確定剔除（停用）帳號「${displayName}」？該帳號將立即無法登入。`
     };
-    if (!prompts[action] || !window.confirm(prompts[action])) return;
+    let body = "{}";
+    if (action === "delete") {
+      if (state.user?.role !== "ADMIN") return;
+      if (!window.confirm(`永久刪除「${displayName}」會移除登入資料、加密行編與所有工作階段，且無法復原。確定繼續？`)) return;
+      const confirmation = window.prompt(`請輸入登入帳號「${username}」確認永久刪除：`);
+      if (confirmation === null) return;
+      if (confirmation.trim().toLowerCase() !== username) {
+        adminAccountsError.textContent = "確認文字與登入帳號不符，未執行刪除。";
+        return;
+      }
+      body = JSON.stringify({ confirmation });
+    } else if (!prompts[action] || !window.confirm(prompts[action])) {
+      return;
+    }
     const buttons = [...adminAccountsList.querySelectorAll("button")];
     buttons.forEach(item => { item.disabled = true; });
     adminAccountsError.textContent = "";
-    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…" }[action];
+    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…", delete: "正在永久刪除…" }[action];
     try {
-      await request(`/admin/accounts/${encodeURIComponent(userId)}/${action}`, { method: "POST", body: "{}" });
+      await request(`/admin/accounts/${encodeURIComponent(userId)}/${action}`, { method: "POST", body });
       const done = {
         promote: `已將「${displayName}」升級為 PS。`,
         demote: `已將「${displayName}」降級為一般帳號。`,
-        disable: `已剔除「${displayName}」。`
+        disable: `已剔除「${displayName}」。`,
+        delete: `已永久刪除「${displayName}」，其行編現在可重新申請。`
       };
       await loadAdminAccounts(done[action]);
     } catch (error) {
@@ -1385,7 +1406,7 @@
   });
   adminAccountsList.addEventListener("click", event => {
     const target = event.target.closest("[data-account-action][data-account-id]");
-    if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName);
+    if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName, target.dataset.accountUsername);
   });
   addEventListener("popstate", () => {
     const rfqId = currentRfqFromUrl();

@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-07-25
 
+The hard-deletion boundary in this ADR is partially superseded by ADR 0019. `剔除` remains a
+soft disable, while ADMIN may permanently delete only a disabled plain USER with zero RFQs.
+
 ## Context
 
 Only the single `ADMIN` account could review registrations and there was no way to see the

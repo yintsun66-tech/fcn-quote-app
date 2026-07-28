@@ -4,6 +4,38 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `feature/subject-branch-correlation`
 
+## Guarded permanent deletion of empty accounts (local, not deployed)
+
+Local work after `b3650e3` adds ADR 0019 and an ADMIN-only permanent-delete control for unused
+accounts. It has not been committed, pushed, or deployed.
+
+- `剔除` remains the reversible ADMIN/PS soft-disable operation.
+- `永久刪除` is shown only to ADMIN for a disabled plain USER whose `rfqCount` is zero.
+- The server independently requires ADMIN, same-origin + CSRF, a disabled non-PS USER, zero RFQs,
+  a non-self target, and exact normalized-login confirmation.
+- Successful deletion removes the user row; schema cascades remove sessions/idempotency keys.
+  Employee-number and login uniqueness are released. Financial records are never deleted, and an
+  opaque `ACCOUNT_PERMANENTLY_DELETED` audit event is retained.
+- Regression coverage includes PS rejection, confirmation mismatch, session cascade,
+  re-registration after deletion, and refusal when an RFQ exists.
+
+Read-only production inspection on 2026-07-28 found the disabled regular account
+`9621ewj9s356` has zero RFQs, zero sessions, zero idempotency rows, no users it approved, and no
+actor audit rows. Its five entity audit events contain historical opaque linkage and do not block
+safe deletion. The account therefore qualifies for the guarded operation, but no production
+deletion has been performed yet. Do not bypass the application endpoint with a direct D1 delete.
+
+Verification completed so far:
+
+- `node --check backend-client.js`
+- `pnpm run typecheck`
+- `pnpm test` — 16 files, 103 tests passed
+
+Before release, run `pnpm run build`, inspect the final diff, obtain explicit deployment
+authorization, deploy, authenticate through the ADMIN UI, permanently delete that account, and
+verify both that the login row is absent and that the employee number can submit a fresh
+registration. Preserve `.claude/settings.local.json`.
+
 Latest production implementation commit:
 `8f34f2f feat(auth): use employee number as login`
 

@@ -71,13 +71,25 @@ the attempted value.
 
 ### Account management endpoints (ADR 0012)
 
-- `GET /api/v1/admin/accounts` — all accounts with `id`, `username`, `displayName`, `branchName`, effective `role`, `status`, `createdAt`, and `lastSeenAt` (approximate last-online = `MAX(user_sessions.last_seen_at)`). Employee numbers are intentionally excluded. Requires `ADMIN` or `PS`.
+- `GET /api/v1/admin/accounts` — all accounts with `id`, `username`, `displayName`, `branchName`, effective `role`, `status`, `createdAt`, `lastSeenAt` (approximate last-online = `MAX(user_sessions.last_seen_at)`), and `rfqCount`. Employee numbers are intentionally excluded. Requires `ADMIN` or `PS`.
 - `POST /api/v1/admin/accounts/:id/promote` — upgrade an ACTIVE regular `USER` to `PS`. `ADMIN` only.
 - `POST /api/v1/admin/accounts/:id/demote` — return a `PS` account to `USER`. `ADMIN` only.
 - `POST /api/v1/admin/accounts/:id/disable` — remove (soft-disable) a regular `USER`: set `status='DISABLED'` and revoke sessions. `ADMIN` or `PS`.
+- `POST /api/v1/admin/accounts/:id/delete` — `{ confirmation }` permanently deletes a disabled
+  plain `USER` only when `confirmation` equals the normalized login account and `rfqCount` is zero.
+  `ADMIN` only. Self, ADMIN, PS, non-disabled, or RFQ-owning targets are refused.
 - `POST /api/v1/admin/accounts/lookup` — `{ employeeNumber }` (five digits) → `{ account }` (the single account holding that employee number, with `id`/`username`/`displayName`/`branchName`/effective `role`/`status`/`createdAt`) or `{ account: null }`. **`ADMIN` only** (it maps the employee-number identifier to an account, the linkage kept out of the PS account list). Matched via the keyed lookup hash — no employee number is decrypted, and the queried value is never written to the audit log (only whether a match was found).
 
-The `PS` tier is an effective role derived server-side from `users.is_privileged_support` (migration 0010); the stored `role` column stays `USER`/`ADMIN`. `promote`/`demote`/`disable` guard on the target being a plain `USER` (`role='USER'` plus the flag) in SQL, so an `ADMIN` or `PS` target changes zero rows and returns `409 ACCOUNT_NOT_ELIGIBLE`; `disable` also rejects a self-target with `422`. All three are same-origin + CSRF protected and audited. Removal is soft because `rfqs.user_id` is `ON DELETE RESTRICT`.
+The `PS` tier is an effective role derived server-side from `users.is_privileged_support`
+(migration 0010); the stored `role` column stays `USER`/`ADMIN`. `promote`/`demote`/`disable`
+guard on the target being a plain `USER` (`role='USER'` plus the flag) in SQL, so an `ADMIN` or
+`PS` target changes zero rows and returns `409 ACCOUNT_NOT_ELIGIBLE`; `disable` also rejects a
+self-target with `422`. These mutations are same-origin + CSRF protected and audited.
+
+Per ADR 0019, permanent deletion is a separate ADMIN-only operation after soft disable. It is
+refused when an RFQ exists, so `rfqs.user_id ON DELETE RESTRICT` remains the final database guard.
+Successful deletion cascades sessions/idempotency keys, releases the employee-number/login
+uniqueness, and records `ACCOUNT_PERMANENTLY_DELETED` without personal data.
 
 ### Administrative RFQ diagnostics
 

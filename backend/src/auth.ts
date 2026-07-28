@@ -309,6 +309,7 @@ interface AccountRow {
   status: string;
   created_at: string;
   last_seen_at: string | null;
+  rfq_count: number;
 }
 
 // All accounts plus each account's last-online time (MAX session last_seen_at).
@@ -318,7 +319,8 @@ export async function listAccounts(env: AppEnv, session: SessionContext): Promis
   const result = await env.DB.prepare(
     `SELECT u.id, u.username_normalized, u.display_name, u.branch_name, u.role,
             u.is_privileged_support, u.status, u.created_at,
-            (SELECT MAX(s.last_seen_at) FROM user_sessions s WHERE s.user_id = u.id) AS last_seen_at
+            (SELECT MAX(s.last_seen_at) FROM user_sessions s WHERE s.user_id = u.id) AS last_seen_at,
+            (SELECT COUNT(*) FROM rfqs r WHERE r.user_id = u.id) AS rfq_count
        FROM users u ORDER BY u.created_at ASC LIMIT 500`
   ).all<AccountRow>();
   const accounts = result.results.map(row => ({
@@ -329,7 +331,8 @@ export async function listAccounts(env: AppEnv, session: SessionContext): Promis
     role: effectiveRole(row.role, row.is_privileged_support),
     status: row.status,
     createdAt: row.created_at,
-    lastSeenAt: row.last_seen_at
+    lastSeenAt: row.last_seen_at,
+    rfqCount: row.rfq_count
   }));
   return jsonResponse({ accounts });
 }
@@ -380,6 +383,62 @@ export async function disableAccount(request: Request, env: AppEnv, session: Ses
     .bind(now, userId).run();
   await insertAudit(env, "ACCOUNT_DISABLED", "USER", userId, session.user.id, requestId(request));
   return jsonResponse({ userId, status: "DISABLED" });
+}
+
+// Permanently remove a disabled plain USER that has never created an RFQ. This deliberately
+// preserves financial/audit history by refusing any account referenced by rfqs.user_id.
+// Cascades remove sessions and idempotency keys; other user references become NULL per schema.
+export async function deleteAccountPermanently(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
+  requireAdmin(session);
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  if (userId === session.user.id) throw new AppError(422, "ACCOUNT_SELF_TARGET", "無法永久刪除自己的帳號。 ");
+
+  const body = await readJson(request);
+  const rawConfirmation = body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>).confirmation
+    : undefined;
+  const confirmation = typeof rawConfirmation === "string" ? rawConfirmation.trim().toLowerCase() : "";
+
+  const target = await env.DB.prepare(
+    `SELECT u.username_normalized, u.role, u.is_privileged_support, u.status,
+            (SELECT COUNT(*) FROM rfqs r WHERE r.user_id = u.id) AS rfq_count
+       FROM users u WHERE u.id = ?`
+  ).bind(userId).first<{
+    username_normalized: string;
+    role: "USER" | "ADMIN";
+    is_privileged_support: number;
+    status: string;
+    rfq_count: number;
+  }>();
+  if (!target) throw new AppError(404, "ACCOUNT_NOT_FOUND", "找不到指定帳號。 ");
+  if (target.role !== "USER" || target.is_privileged_support !== 0) {
+    throw new AppError(409, "ACCOUNT_NOT_ELIGIBLE", "不得永久刪除管理者或 PS 帳號。 ");
+  }
+  if (target.status !== "DISABLED") {
+    throw new AppError(409, "ACCOUNT_DELETE_REQUIRES_DISABLED", "請先剔除帳號，再執行永久刪除。 ");
+  }
+  if (target.rfq_count > 0) {
+    throw new AppError(409, "ACCOUNT_HAS_RFQS", "此帳號已有詢價紀錄，為保留金融與稽核資料，不得永久刪除。 ");
+  }
+  if (!confirmation || confirmation !== target.username_normalized) {
+    throw new AppError(422, "ACCOUNT_DELETE_CONFIRMATION_MISMATCH", "永久刪除確認文字與登入帳號不符。 ");
+  }
+
+  await env.DB.prepare(
+    `DELETE FROM users
+      WHERE id = ? AND role = 'USER' AND is_privileged_support = 0 AND status = 'DISABLED'`
+  ).bind(userId).run();
+  const remaining = await env.DB.prepare("SELECT 1 AS present FROM users WHERE id = ?")
+    .bind(userId).first<{ present: number }>();
+  if (remaining) {
+    throw new AppError(409, "ACCOUNT_DELETE_CONFLICT", "帳號狀態已變更，請重新載入後再試。 ");
+  }
+  await insertAudit(env, "ACCOUNT_PERMANENTLY_DELETED", "USER", userId, session.user.id, requestId(request), {
+    previousStatus: "DISABLED",
+    rfqCount: 0
+  });
+  return jsonResponse({ userId, status: "DELETED" });
 }
 
 // Look up which existing account holds a given employee number. ADMIN only, because it maps the

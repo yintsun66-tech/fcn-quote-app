@@ -195,8 +195,8 @@ describe("registration and authentication", () => {
     // ADMIN can list every account with an approximate last-online value.
     const accountsResponse = await api("/api/v1/admin/accounts", { headers: { cookie: adminAuth.cookie } });
     expect(accountsResponse.status).toBe(200);
-    const accounts = (await accountsResponse.json<{ accounts: Array<{ id: string; username: string; role: string; status: string; lastSeenAt: string | null }> }>()).accounts;
-    expect(accounts.find(item => item.username === "22002")).toMatchObject({ role: "USER", status: "ACTIVE" });
+    const accounts = (await accountsResponse.json<{ accounts: Array<{ id: string; username: string; role: string; status: string; lastSeenAt: string | null; rfqCount: number }> }>()).accounts;
+    expect(accounts.find(item => item.username === "22002")).toMatchObject({ role: "USER", status: "ACTIVE", rfqCount: 0 });
     expect(accounts.find(item => item.username === "22001")).toMatchObject({ role: "ADMIN" });
     expect(accounts.some(item => "lastSeenAt" in item)).toBe(true);
 
@@ -232,6 +232,7 @@ describe("registration and authentication", () => {
     expect(psApprove.status).toBe(200);
 
     // PS can remove (soft-disable) a regular USER; that USER can no longer log in.
+    await login("22003", "203.0.113.15");
     const psDisable = await api(`/api/v1/admin/accounts/${disableId}/disable`, {
       method: "POST",
       headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf }
@@ -243,6 +244,48 @@ describe("registration and authentication", () => {
       body: JSON.stringify({ username: "22003", password: "Correct Horse Battery 123!" })
     }, "203.0.113.14");
     expect(disabledLogin.status).toBe(401);
+
+    // Permanent deletion is ADMIN-only, requires exact username confirmation, and releases the
+    // employee-number/login uniqueness only for a disabled account without RFQs.
+    const psDelete = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
+      method: "POST",
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf },
+      body: JSON.stringify({ confirmation: "22003" })
+    });
+    expect(psDelete.status).toBe(403);
+    const wrongConfirmation = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      body: JSON.stringify({ confirmation: "wrong-account" })
+    });
+    expect(wrongConfirmation.status).toBe(422);
+    expect(await wrongConfirmation.json()).toMatchObject({ error: { code: "ACCOUNT_DELETE_CONFIRMATION_MISMATCH" } });
+    const permanentDelete = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      body: JSON.stringify({ confirmation: "22003" })
+    });
+    const permanentDeleteBody = await permanentDelete.json();
+    const deletedUser = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE id = ?").bind(disableId).first<{ n: number }>();
+    expect({ status: permanentDelete.status, body: permanentDeleteBody, deletedUser }).toEqual({
+      status: 200,
+      body: expect.objectContaining({ userId: disableId, status: "DELETED" }),
+      deletedUser: { n: 0 }
+    });
+    const deletedSessions = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM user_sessions WHERE user_id = ?").bind(disableId).first<{ n: number }>();
+    expect(deletedSessions?.n).toBe(0);
+    const deletionAudit = await testEnv.DB.prepare(
+      "SELECT action, actor_user_id FROM audit_events WHERE entity_id = ? AND action = 'ACCOUNT_PERMANENTLY_DELETED'"
+    ).bind(disableId).first<{ action: string; actor_user_id: string }>();
+    expect(deletionAudit).toEqual({ action: "ACCOUNT_PERMANENTLY_DELETED", actor_user_id: adminId });
+    const reapply = await api("/api/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(registration("ignored-again", "22003"))
+    }, "203.0.113.16");
+    expect(reapply.status).toBe(202);
+    expect(await testEnv.DB.prepare(
+      "SELECT status FROM users WHERE username_normalized = '22003'"
+    ).first<{ status: string }>()).toEqual({ status: "PENDING_APPROVAL" });
 
     // PS cannot promote, cannot remove an ADMIN, and cannot remove another PS.
     expect((await api(`/api/v1/admin/accounts/${plainId}/promote`, {
@@ -257,6 +300,22 @@ describe("registration and authentication", () => {
       method: "POST",
       headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
     })).status).toBe(409);
+
+    // Even ADMIN cannot permanently delete an account that owns an RFQ.
+    await testEnv.DB.prepare(
+      "INSERT INTO rfqs (id, user_id, status, trade_count, created_at) VALUES (?, ?, 'DRAFT', 1, ?)"
+    ).bind("rfq_delete_guard", plainId, new Date().toISOString()).run();
+    expect((await api(`/api/v1/admin/accounts/${plainId}/disable`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
+    })).status).toBe(200);
+    const protectedDelete = await api(`/api/v1/admin/accounts/${plainId}/delete`, {
+      method: "POST",
+      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      body: JSON.stringify({ confirmation: "22004" })
+    });
+    expect(protectedDelete.status).toBe(409);
+    expect(await protectedDelete.json()).toMatchObject({ error: { code: "ACCOUNT_HAS_RFQS" } });
 
     // ADMIN can demote the PS account back to a regular USER.
     const demoteResponse = await api(`/api/v1/admin/accounts/${promoteId}/demote`, {

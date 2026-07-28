@@ -1,5 +1,6 @@
 import {
   approveRegistration,
+  deleteAccountPermanently,
   demoteAccount,
   disableAccount,
   listAccounts,
@@ -91,6 +92,8 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && demoteMatch?.[1]) return demoteAccount(request, env, session, demoteMatch[1]);
   const disableMatch = /^\/api\/v1\/admin\/accounts\/([^/]+)\/disable$/.exec(path);
   if (method === "POST" && disableMatch?.[1]) return disableAccount(request, env, session, disableMatch[1]);
+  const deleteMatch = /^\/api\/v1\/admin\/accounts\/([^/]+)\/delete$/.exec(path);
+  if (method === "POST" && deleteMatch?.[1]) return deleteAccountPermanently(request, env, session, deleteMatch[1]);
 
   if (method === "GET" && path === "/api/v1/rfqs/summary") return getRfqListSummary(env, session);
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);

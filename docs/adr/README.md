@@ -51,5 +51,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0016: On-demand quote images](0016-on-demand-quote-images.md)
 - [ADR 0017: Client-side quote-card rasterization](0017-client-side-quote-card-rendering.md)
 - [ADR 0018: Employee-number login for new registrations](0018-employee-number-login-registration.md)
+- [ADR 0019: Guarded permanent deletion of empty user accounts](0019-guarded-empty-account-deletion.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

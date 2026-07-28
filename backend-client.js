@@ -1079,10 +1079,10 @@
   const CARD_RENDER_STEP_TIMEOUT_MS = 12000;
   const CARD_RENDER_TOTAL_TIMEOUT_MS = 24000;
   const CARD_FONT_TIMEOUT_MS = 1500;
-  // iOS/iPadOS refuse to back a canvas larger than roughly 16.7M pixels (5M on low-memory
-  // devices) and return a blank one instead of throwing. Touch devices use the lower budget.
-  const CARD_SAFE_CANVAS_PIXELS = 12e6;
-  const CARD_TOUCH_SAFE_CANVAS_PIXELS = 4e6;
+  // Keep every device on the phone-size output profile. This also stays below the lower canvas
+  // limits seen on low-memory iOS/iPadOS devices and matches the server fallback's 1.5 scale.
+  const CARD_OUTPUT_CANVAS_PIXELS = 4e6;
+  const CARD_OUTPUT_MAX_SCALE = 1.5;
 
   // Every step below can stall indefinitely on mobile WebKit. Without this the button would sit
   // on 「產圖中…」 forever, because an unsettled promise never reaches the caller's catch.
@@ -1116,11 +1116,6 @@
     } finally {
       controller.abort();
     }
-  }
-
-  function isTouchRenderingDevice() {
-    return navigator.maxTouchPoints > 0
-      || window.matchMedia?.("(pointer: coarse)")?.matches === true;
   }
 
   function showCardImage(blob, filename) {
@@ -1200,10 +1195,10 @@
       const height = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
       if (!height) throw new Error("報價圖版面尚未完成，請再試一次。");
       frame.style.height = `${height}px`;
-      const touchDevice = isTouchRenderingDevice();
-      const pixelBudget = touchDevice ? CARD_TOUCH_SAFE_CANVAS_PIXELS : CARD_SAFE_CANVAS_PIXELS;
-      const maximumScale = touchDevice ? 1.5 : 2;
-      const scale = Math.max(0.5, Math.min(maximumScale, Math.sqrt(pixelBudget / (card.width * height))));
+      const scale = Math.max(
+        0.5,
+        Math.min(CARD_OUTPUT_MAX_SCALE, Math.sqrt(CARD_OUTPUT_CANVAS_PIXELS / (card.width * height)))
+      );
       const canvas = await withRenderDeadline(() => window.html2canvas(frameDocument.body, {
         backgroundColor: null,
         scale,

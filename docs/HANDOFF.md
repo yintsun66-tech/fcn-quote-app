@@ -179,6 +179,16 @@ Verification completed locally: `node --check backend-client.js`, `node --check 
 verification remains required. The deployment and live-asset checks succeeded as recorded at the
 top of this document.
 
+### Unified quote-image dimensions — local change awaiting commit/deploy
+
+The current working tree makes desktop, laptop, tablet, and phone client-rendered PNGs use the
+same phone-size output profile: maximum scale 1.5 and maximum canvas area 4M pixels. The
+server-render fallback already uses device scale factor 1.5 for the normal single-trade card, so
+the normal and fallback outputs now align. Responsive preview sizing is unchanged. `index.html`
+advances the backend-client cache key to `backend-v3`. Local verification passed:
+`node --check backend-client.js`, `node --check app.js`, `pnpm run typecheck`, `pnpm test`
+(16 files / 103 tests), and `pnpm run build`.
+
 ### Self-hosted rasterizer (closes the CDN fallback risk)
 
 `index.html` previously loaded html2canvas from `cdn.jsdelivr.net`. Corporate and bank networks

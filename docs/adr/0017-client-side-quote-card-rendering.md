@@ -37,7 +37,8 @@ copy for the owner.
    never serves renderable markup.
 5. **The client rasterizes it.** `backend-client.js` loads the document into an offscreen
    `sandbox="allow-same-origin"` iframe — which lets html2canvas read the DOM while keeping scripts
-   blocked — waits for `document.fonts.ready`, rasterizes at `scale: 2`, and downloads the PNG via
+   blocked — waits for `document.fonts.ready`, rasterizes with the same phone-size profile on every
+   device (`scale` capped at 1.5 and canvas area capped at 4M pixels), and produces the PNG via
    `canvas.toBlob`. Nothing is queued and nothing is written to R2.
 6. **A server-side fallback is retained.** html2canvas is served from a CDN that some corporate
    networks block. When `window.html2canvas` is unavailable the button falls back to the existing

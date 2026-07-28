@@ -11,6 +11,7 @@ const assets = [
   "app.js",
   "backend-client.js",
   "market-analysis.mjs",
+  "market-resources.mjs",
   "guide.html",
   "version-status.html",
   "交易所查詢0715.csv",

@@ -16,6 +16,7 @@ import {
 } from "./auth";
 import { getAdminOutboundEmail, listAdminOutboundEmails } from "./admin-outbound";
 import { listAdminRfqTimelines } from "./admin-rfq";
+import { getAdminMarketContextHealth } from "./admin-market";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
@@ -27,6 +28,7 @@ import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "./artifacts";
 import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
+import { cleanupExpiredMarketData, getMarketContext } from "./market-context";
 import {
   downloadArtifact,
   finalizeRfqNow,
@@ -79,6 +81,9 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && path === "/api/v1/admin/accounts/lookup") return lookupAccountByEmployeeNumber(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/outbound-emails") return listAdminOutboundEmails(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/rfq-timelines") return listAdminRfqTimelines(request, env, session);
+  if (method === "GET" && path === "/api/v1/admin/market-context-health") {
+    return getAdminMarketContextHealth(request, env, session);
+  }
   const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);
   if (method === "GET" && outboundEmailMatch?.[1]) return getAdminOutboundEmail(request, env, session, outboundEmailMatch[1]);
 
@@ -136,6 +141,10 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
       quoteAnalysisMatch[3]
     );
   }
+  const marketContextMatch = /^\/api\/v1\/market\/instruments\/([^/]+)\/context$/.exec(path);
+  if (method === "GET" && marketContextMatch?.[1]) {
+    return getMarketContext(request, env, session, decodeURIComponent(marketContextMatch[1]));
+  }
   const tradeCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/card$/.exec(path);
   if (method === "GET" && tradeCardMatch?.[1] && tradeCardMatch[2]) {
     return getTradeCardDocument(env, session, tradeCardMatch[1], tradeCardMatch[2]);
@@ -177,5 +186,12 @@ export default {
   },
   async scheduled(_controller, env, _context): Promise<void> {
     await scheduledWorkflowRecovery(env);
+    try {
+      await cleanupExpiredMarketData(env);
+    } catch (error) {
+      console.error("market_context_cleanup_failed", {
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
+    }
   }
 } satisfies ExportedHandler<AppEnv>;

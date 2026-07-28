@@ -4,6 +4,11 @@ import {
   parseIndicativeSpot,
   spotStorageKey
 } from "./market-analysis.mjs";
+import {
+  MARKET_RESOURCE_CONSENT_KEY,
+  marketResourceDescriptor,
+  tradingViewWidgetSrcdoc
+} from "./market-resources.mjs";
 
 (() => {
   "use strict";
@@ -144,6 +149,7 @@ import {
         <p class="backend-archive-note">僅顯示安全的處理狀態與耗時統計，不顯示郵件全文、RFQ token 或私人 R2 路徑。</p>
         <p id="backendRfqTimelinesError" class="backend-error" role="alert"></p>
         <div id="backendRfqHealth" class="backend-rfq-health"></div>
+        <div id="backendMarketHealth" class="backend-rfq-health"></div>
         <div id="backendRfqTimelinesList" class="backend-timeline-list"></div>
       </section>
     </dialog>
@@ -210,6 +216,7 @@ import {
   const adminTimelinesList = document.querySelector("#backendRfqTimelinesList");
   const adminTimelinesError = document.querySelector("#backendRfqTimelinesError");
   const adminRfqHealth = document.querySelector("#backendRfqHealth");
+  const adminMarketHealth = document.querySelector("#backendMarketHealth");
   const artifactContainer = document.querySelector("#backendArtifacts");
   const analysisView = document.querySelector("#backendAnalysisView");
   const analysisContent = document.querySelector("#backendAnalysisContent");
@@ -462,6 +469,190 @@ import {
       <p class="backend-analysis-disclaimer">${escapeHtml(analysis.disclaimer)}</p>`;
   }
 
+  function marketResourceConsent() {
+    try {
+      return localStorage.getItem(MARKET_RESOURCE_CONSENT_KEY) === "granted";
+    } catch {
+      return false;
+    }
+  }
+
+  function setMarketResourceConsent(granted) {
+    try {
+      if (granted) localStorage.setItem(MARKET_RESOURCE_CONSENT_KEY, "granted");
+      else localStorage.removeItem(MARKET_RESOURCE_CONSENT_KEY);
+    } catch {
+      // Consent remains valid for this page even when browser storage is unavailable.
+    }
+  }
+
+  function renderMarketResourcesPanel(underlyings) {
+    const descriptors = (Array.isArray(underlyings) ? underlyings : []).map(marketResourceDescriptor);
+    const supported = descriptors.filter(item => item.supported);
+    const consentChecked = marketResourceConsent() ? " checked" : "";
+    const options = supported.map(item =>
+      `<option value="${escapeHtml(item.underlying)}">${escapeHtml(item.underlying)}</option>`
+    ).join("");
+    const links = descriptors.map(item => {
+      if (!item.supported) {
+        return `<article><h3>${escapeHtml(item.underlying || "未識別標的")}</h3>
+          <p>尚未建立安全的交易所代碼映射，不會載入圖表。</p>
+          <a href="${escapeHtml(item.searchUrl)}" target="_blank" rel="noopener noreferrer nofollow">前往 TradingView 搜尋</a></article>`;
+      }
+      return `<article>
+        <h3>${escapeHtml(item.ticker)} <small>${escapeHtml(item.exchange)}</small></h3>
+        <nav aria-label="${escapeHtml(item.ticker)} 公開市場連結">
+          <a href="${escapeHtml(item.links.yahooFinance)}" target="_blank" rel="noopener noreferrer nofollow">Yahoo Finance</a>
+          <a href="${escapeHtml(item.links.googleTrends)}" target="_blank" rel="noopener noreferrer nofollow">Google Trends</a>
+          <a href="${escapeHtml(item.links.cboe)}" target="_blank" rel="noopener noreferrer nofollow">Cboe 延遲報價</a>
+          <a href="${escapeHtml(item.links.oic)}" target="_blank" rel="noopener noreferrer nofollow">OIC 選擇權工具</a>
+        </nav>
+      </article>`;
+    }).join("");
+
+    return `<details class="backend-market-resources">
+      <summary>公開市場資源（第三方）</summary>
+      <div class="backend-market-resources-body">
+        <p class="backend-analysis-note">下列圖表與連結是獨立的公開參考資訊，不會帶入上方試算、報價排名或報價圖。Yahoo Finance 與 Google Trends 僅提供主動開啟的連結，本系統不自動擷取其資料。</p>
+        <div class="backend-market-consent">
+          <label><input type="checkbox" data-market-consent${consentChecked}> 我了解載入圖表後，TradingView 會收到我的 IP、瀏覽器資訊與所選股票代碼；不會傳送 RFQ、行編、分行、報價或發行機構資料。</label>
+        </div>
+        ${supported.length ? `<div class="backend-market-controls">
+          <label>圖表標的<select data-market-symbol>${options}</select></label>
+          <button type="button" class="secondary" data-market-context-load>載入 SEC／FRED 公開資料</button>
+          <button type="button" class="secondary" data-market-load>載入外部圖表</button>
+          <button type="button" class="secondary" data-market-unload hidden>卸載圖表</button>
+        </div>
+        <p class="backend-market-status" data-market-status role="status"></p>
+        <div class="backend-market-context" data-market-context aria-live="polite"></div>
+        <div class="backend-market-widget" data-market-widget></div>` : `<p class="backend-market-status">目前標的沒有可確認的美股交易所代碼，因此不載入外部圖表。</p>`}
+        <div class="backend-market-links">${links}</div>
+        <p class="backend-market-source-note">圖表來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。請以各網站顯示的時間與條款為準。</p>
+      </div>
+    </details>`;
+  }
+
+  function unloadMarketWidget(container) {
+    const host = container.querySelector("[data-market-widget]");
+    if (host) {
+      host.replaceChildren();
+      delete host.dataset.loaded;
+    }
+    const unload = container.querySelector("[data-market-unload]");
+    if (unload) unload.hidden = true;
+    const load = container.querySelector("[data-market-load]");
+    if (load) load.hidden = false;
+  }
+
+  function loadMarketWidget(container) {
+    const consent = container.querySelector("[data-market-consent]");
+    const status = container.querySelector("[data-market-status]");
+    const host = container.querySelector("[data-market-widget]");
+    const select = container.querySelector("[data-market-symbol]");
+    if (!consent?.checked) {
+      if (status) status.textContent = "請先勾選同意，再載入第三方圖表。";
+      return;
+    }
+    const descriptor = marketResourceDescriptor(select?.value);
+    if (!host || !descriptor.supported) {
+      if (status) status.textContent = "此標的尚未建立安全的交易所代碼映射。";
+      return;
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.title = `${descriptor.ticker} TradingView 公開市場圖表`;
+    iframe.loading = "lazy";
+    iframe.referrerPolicy = "no-referrer";
+    iframe.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+    iframe.srcdoc = tradingViewWidgetSrcdoc(descriptor);
+    host.replaceChildren(iframe);
+    host.dataset.loaded = "1";
+    setMarketResourceConsent(true);
+    if (status) status.textContent = `${descriptor.ticker} 圖表已載入；其資料不會進入本頁試算。`;
+    const unload = container.querySelector("[data-market-unload]");
+    if (unload) unload.hidden = false;
+    const load = container.querySelector("[data-market-load]");
+    if (load) load.hidden = true;
+  }
+
+  function publicSourceStatus(source) {
+    if (!source) return "無資料";
+    if (source.status === "FRESH") return "最新快取";
+    if (source.status === "STALE") return "暫用過期快取";
+    return "目前無法取得";
+  }
+
+  function officialSecUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && (url.hostname === "www.sec.gov" || url.hostname === "sec.gov")
+        ? url.toString()
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function renderMarketContext(container, marketContext) {
+    const host = container.querySelector("[data-market-context]");
+    if (!host) return;
+    const sec = marketContext?.sec;
+    const fred = marketContext?.fred;
+    const company = sec?.data?.company;
+    const filings = Array.isArray(sec?.data?.recentFilings) ? sec.data.recentFilings : [];
+    const series = Array.isArray(fred?.data?.series) ? fred.data.series : [];
+    const secContent = company
+      ? `<article class="backend-market-context-card">
+          <header><div><p class="eyebrow">SEC EDGAR</p><h3>${escapeHtml(company.companyName)}</h3></div><span>${escapeHtml(publicSourceStatus(sec))}</span></header>
+          <dl><div><dt>Ticker</dt><dd>${escapeHtml(company.ticker)}</dd></div><div><dt>Exchange</dt><dd>${escapeHtml(company.exchange || "—")}</dd></div><div><dt>CIK</dt><dd>${escapeHtml(company.cik)}</dd></div></dl>
+          <h4>最近 5 筆 10-K／10-Q／8-K</h4>
+          ${filings.length ? `<ul>${filings.map(filing => {
+            const url = officialSecUrl(filing.officialUrl);
+            return `<li><b>${escapeHtml(filing.form)}</b><span>${escapeHtml(filing.filingDate)}</span>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">SEC 原始文件</a>` : ""}</li>`;
+          }).join("")}</ul>` : "<p>目前沒有可顯示的指定申報文件。</p>"}
+          <small>資料日期 ${escapeHtml(sec.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(sec.fetchedAt))}${sec.isStale ? "｜資料已過期，暫供參考" : ""}</small>
+        </article>`
+      : `<article class="backend-market-context-card"><header><h3>SEC EDGAR</h3><span>${escapeHtml(publicSourceStatus(sec))}</span></header><p>目前無法取得此標的的 SEC 公司與申報資料。</p></article>`;
+    const fredContent = `<article class="backend-market-context-card">
+      <header><div><p class="eyebrow">FRED</p><h3>美國總體市場指標</h3></div><span>${escapeHtml(publicSourceStatus(fred))}</span></header>
+      ${series.length ? `<div class="backend-fred-grid">${series.map(item => `
+        <section>
+          <b>${escapeHtml(item.seriesId)}</b>
+          <strong>${escapeHtml(item.value)}${item.unitsShort ? ` ${escapeHtml(item.unitsShort)}` : ""}</strong>
+          <small>${escapeHtml(item.title)}</small>
+          <span>前值 ${item.previousValue === null ? "—" : escapeHtml(item.previousValue)}｜變動 ${item.change === null ? "—" : escapeHtml(Number(item.change).toFixed(4))}</span>
+          <time>${escapeHtml(item.observationDate)}</time>
+        </section>`).join("")}</div>` : "<p>目前無法取得 FRED 指標。</p>"}
+      <small>資料日期 ${escapeHtml(fred?.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(fred?.fetchedAt))}${fred?.isStale ? "｜資料已過期，暫供參考" : ""}</small>
+      <p class="backend-fred-disclaimer">This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis. <a href="https://fred.stlouisfed.org/docs/api/terms_of_use.html" target="_blank" rel="noopener noreferrer">FRED API 使用條款</a></p>
+    </article>`;
+    host.innerHTML = `<div class="backend-market-context-grid">${secContent}${fredContent}</div>
+      <p class="backend-market-source-note">SEC／FRED 資料僅供公開資訊參考，不會寫入詢價條件、報價排名、風險試算或報價圖。</p>`;
+  }
+
+  async function loadMarketContext(container, button) {
+    const select = container.querySelector("[data-market-symbol]");
+    const host = container.querySelector("[data-market-context]");
+    const descriptor = marketResourceDescriptor(select?.value);
+    if (!host || !descriptor.supported) {
+      if (host) host.innerHTML = "<p class=\"backend-market-status\">此標的尚未建立安全的美股代碼映射。</p>";
+      return;
+    }
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "載入中…";
+    host.innerHTML = "<p class=\"backend-market-status\">正在讀取 SEC 與 FRED 官方公開資料…</p>";
+    try {
+      const payload = await request(`/market/instruments/${encodeURIComponent(descriptor.ticker)}/context`);
+      renderMarketContext(container, payload.marketContext);
+    } catch (error) {
+      host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "公開資料載入失敗。")}</p>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+
   function renderAnalysisPage(input, quotes) {
     state.analysisInput = input;
     const selectedQuoteId = input.quote.id;
@@ -506,7 +697,8 @@ import {
         <p class="backend-analysis-note">尚未定價前，下列執行價、KO 價與 KI 價均為依百分比換算的試算值，不是正式 Fixing。</p>
         <div class="backend-analysis-spots">${spotFields}</div>
       </section>
-      <div id="backendAnalysisCalculation"></div>`;
+      <div id="backendAnalysisCalculation"></div>
+      ${renderMarketResourcesPanel(input.terms.underlyings)}`;
     renderAnalysisCalculation();
   }
 
@@ -872,19 +1064,54 @@ import {
       </section>`;
   }
 
+  function renderAdminMarketHealth(health) {
+    if (!health) {
+      adminMarketHealth.innerHTML = "";
+      return;
+    }
+    const sources = Array.isArray(health.sources) ? health.sources : [];
+    adminMarketHealth.innerHTML = `
+      <section class="backend-health-panel">
+        <header><h3>SEC／FRED 公開資料快取</h3><small>不含 API Key、使用者資料或上游回應全文</small></header>
+        ${sources.length ? `<div class="backend-health-grid">${sources.map(item => `
+          <article>
+            <b>${escapeHtml(item.source)}｜${escapeHtml(item.status)}</b>
+            <strong>${escapeHtml(item.row_count)}</strong>
+            <small>新鮮 ${escapeHtml(item.fresh_count)}｜暫用舊資料 ${escapeHtml(item.stale_count)}｜已過期 ${escapeHtml(item.expired_count)}</small>
+          </article>`).join("")}</div>` : "<p class=\"backend-health-ok\">目前尚無公開資料快取。</p>"}
+        <div class="backend-health-alerts">
+          <span><b>待清理</b>${escapeHtml(health.expiredRows)}</span>
+          <span><b>暫用舊資料</b>${escapeHtml(health.staleRows)}</span>
+          <span><b>速率限制紀錄</b>${escapeHtml(health.rateLimitRows)}</span>
+        </div>
+      </section>`;
+  }
+
   async function openAdminRfqTimelines() {
     if (state.user?.role !== "ADMIN") return;
     adminTimelinesError.textContent = "";
     adminRfqHealth.innerHTML = "";
+    adminMarketHealth.innerHTML = "";
     adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">正在載入 RFQ 時間軸…</p>";
     if (!adminTimelinesDialog.open) adminTimelinesDialog.showModal();
     try {
-      const payload = await request("/admin/rfq-timelines?limit=50");
+      const [timelineResult, marketResult] = await Promise.allSettled([
+        request("/admin/rfq-timelines?limit=50"),
+        request("/admin/market-context-health")
+      ]);
+      if (timelineResult.status === "rejected") throw timelineResult.reason;
+      const payload = timelineResult.value;
       renderAdminRfqHealth(payload.health);
       renderAdminRfqTimelines(payload.records);
+      if (marketResult.status === "fulfilled") {
+        renderAdminMarketHealth(marketResult.value.health);
+      } else {
+        adminMarketHealth.innerHTML = "<p class=\"backend-archive-empty\">公開資料快取健康狀態目前無法讀取；RFQ 時間軸不受影響。</p>";
+      }
     } catch (error) {
       adminTimelinesError.textContent = error.message;
       adminRfqHealth.innerHTML = "";
+      adminMarketHealth.innerHTML = "";
       adminTimelinesList.innerHTML = "";
     }
   }
@@ -1576,6 +1803,46 @@ import {
     }
     const observed = event.target.closest("[data-analysis-observed]");
     if (observed) persistAnalysisSpot(observed.dataset.analysisObserved);
+    const consent = event.target.closest("[data-market-consent]");
+    if (consent) {
+      setMarketResourceConsent(consent.checked);
+      if (!consent.checked) {
+        const container = consent.closest(".backend-market-resources");
+        if (container) unloadMarketWidget(container);
+      }
+    }
+    const symbol = event.target.closest("[data-market-symbol]");
+    if (symbol) {
+      const container = symbol.closest(".backend-market-resources");
+      const context = container?.querySelector("[data-market-context]");
+      if (context) context.replaceChildren();
+      if (container?.querySelector("[data-market-widget]")?.dataset.loaded === "1") {
+        loadMarketWidget(container);
+      }
+    }
+  });
+  analysisContent.addEventListener("click", event => {
+    const contextLoad = event.target.closest("[data-market-context-load]");
+    if (contextLoad) {
+      const container = contextLoad.closest(".backend-market-resources");
+      if (container) loadMarketContext(container, contextLoad);
+      return;
+    }
+    const load = event.target.closest("[data-market-load]");
+    if (load) {
+      const container = load.closest(".backend-market-resources");
+      if (container) loadMarketWidget(container);
+      return;
+    }
+    const unload = event.target.closest("[data-market-unload]");
+    if (unload) {
+      const container = unload.closest(".backend-market-resources");
+      if (container) {
+        unloadMarketWidget(container);
+        const status = container.querySelector("[data-market-status]");
+        if (status) status.textContent = "外部圖表已卸載。";
+      }
+    }
   });
   document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);
   document.querySelector("#backendRankings").addEventListener("change", event => {

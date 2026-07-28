@@ -2,7 +2,78 @@
 
 Updated: 2026-07-28 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase1`
+Current branch: `codex/market-analysis-phase2-4`
+
+## Public market analysis Phases 2–4 (local, uncommitted, not deployed)
+
+Work moved to branch `codex/market-analysis-phase2-4` from deployed Phase 1 commit `c05d48c`.
+The user approved continuation of Phases 2–4 and requested Yahoo Finance and Google Trends in
+addition to SEC and FRED.
+
+Local Phase 2 changes:
+
+- `market-resources.mjs` strictly maps Bloomberg US-equity suffixes `UW`, `UN` and `UA` to public
+  symbols. Unknown or unsafe symbols fail closed.
+- The FCN analysis page has a collapsed third-party resource panel. A TradingView widget is
+  created only after an explicit checkbox and load-button action, inside a sandboxed `srcdoc`
+  iframe with `no-referrer`; only one widget exists at a time.
+- Yahoo Finance, Google Trends, Cboe and OIC are ordinary user-initiated external links. No
+  content is scraped, cached, persisted or supplied to calculations/ranking.
+- ADR 0021 records the privacy/licence boundary. `backend-client.js?v=backend-v5` is the new asset
+  cache key, and `market-resources.mjs` is included in the generated asset allowlist.
+- Phase 2 adds no D1 write, production dependency or lockfile change.
+
+Local Phase 3/4 changes:
+
+- Migration `0011_market_context.sql` adds only reconstructable `market_instruments`,
+  `public_data_cache` and hashed `market_context_rate_limits` tables. It does not change any RFQ,
+  mail, quote, ranking, authentication or artifact table.
+- Authenticated `GET /api/v1/market/instruments/:symbol/context` normalizes SEC CIK/company/
+  exchange/ticker, the latest five 10-K/10-Q/8-K filings, and FRED DGS10/FEDFUNDS/VIXCLS
+  latest/prior/change/units/date. It fetches only fixed official SEC/FRED origins.
+- Instrument identity uses a 30-day TTL; SEC/FRED context uses 24 hours plus a labelled seven-day
+  stale fallback. Same-isolate requests are coalesced and D1 supplies a short cross-isolate refresh
+  lease.
+- `FRED_API_KEY` is a required Cloudflare Secret and is never returned or logged. The declared SEC
+  identity is `FCN Quote App rfq@yintsun66.com`.
+- The analysis page loads the official data only when the user presses its button. It displays
+  source time/stale status and the required FRED notice. These values never enter spot input,
+  scenarios, ranking, mail or quote images.
+- ADMIN's RFQ timeline dialog has a separate cache-health panel. A failure in this optional panel
+  does not prevent the existing RFQ timeline from loading.
+- The existing cron runs idempotent expired-cache/rate-limit cleanup only after RFQ recovery;
+  cleanup failure cannot interrupt RFQ recovery.
+- ADR 0022 and `docs/runbooks/market-context-operations.md` record the data/security/rollout
+  boundary. Yahoo Finance and Google Trends remain link-only.
+
+Evidence completed:
+
+- `node --check backend-client.js`
+- `node --check market-resources.mjs`
+- `pnpm test` — 19 files, 122 tests passed. This includes 50 distinct concurrent users sharing one
+  SEC refresh path, fresh reuse, stale fallback, cleanup, SEC/FRED normalization, ADMIN isolation
+  and all existing RFQ/mail/ranking regression tests. Wrangler emitted expected local
+  missing-Secret warnings, but the synthetic test bindings were used and Vitest passed.
+- `pnpm run typecheck` — passed.
+- `pnpm run build` — Cloudflare dry-run build passed; 14 static assets included.
+- Read-only production D1 measurement: 10 users, 55 RFQs, 205 trades, 406 inbound messages,
+  1,693 issuer quotes, 637 ranking results, 2,488 audit events, 149 artifacts and 6,815,744 bytes.
+  The 24-hour D1 counters were 8,228 read queries, 3,416 write queries, 377,492 rows read and
+  10,862 rows written.
+
+Read-only production checks:
+
+- `wrangler secret list` confirms `FRED_API_KEY` now exists as encrypted `secret_text`; its value
+  was entered by the user through Wrangler's hidden prompt and was never shown or stored here.
+- `wrangler d1 migrations list fcn-quote --remote` shows `0011_market_context.sql` as pending.
+- No migration, feature commit, push or feature deployment had been performed when this section
+  was recorded.
+
+The 2019 article's `yfinance` and `pytrends` examples are research scraping clients, not current
+official production API contracts. Do not add either package or call undocumented endpoints.
+The smallest safe next step is to apply migration `0011`, deploy the reviewed feature commit and
+perform the authorized user/ADMIN smoke checks in the new runbook. Preserve
+`.claude/settings.local.json`; do not commit it.
 
 ## FCN market and risk analysis Phase 1 (committed, pushed and deployed)
 

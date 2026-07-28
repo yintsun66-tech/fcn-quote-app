@@ -471,6 +471,70 @@ Browser Rendering failures preserve a safe request/HTTP category such as
 
 The quote-card footer displays the complete outbound subject reference as `[RFQ:<10-character-code>]`, derived with the same server-side correlation helper used by outbound email. It is a display/reference value only; ownership continues to be enforced by the authenticated RFQ/artifact join.
 
+## Public market-context contract
+
+`GET /api/v1/market/instruments/:symbol/context`
+
+- requires a valid application session;
+- accepts only a normalized public US ticker, never an arbitrary URL;
+- is independently rate-limited by hashed user and IP keys;
+- returns display-only official SEC and FRED envelopes;
+- never changes RFQ, quote, ranking, analysis-input or artifact state.
+
+Response shape:
+
+```json
+{
+  "marketContext": {
+    "symbol": "AAPL",
+    "generatedAt": "2026-07-28T00:00:00.000Z",
+    "sec": {
+      "source": "SEC",
+      "status": "FRESH",
+      "sourceAsOf": "2026-07-25",
+      "fetchedAt": "2026-07-28T00:00:00.000Z",
+      "expiresAt": "2026-07-29T00:00:00.000Z",
+      "isStale": false,
+      "errorCode": null,
+      "data": {
+        "company": {
+          "symbol": "AAPL",
+          "companyName": "Example",
+          "exchange": "Nasdaq",
+          "cik": "0000000000",
+          "ticker": "AAPL",
+          "country": "US"
+        },
+        "recentFilings": []
+      }
+    },
+    "fred": {
+      "source": "FRED",
+      "status": "FRESH",
+      "sourceAsOf": "2026-07-25",
+      "fetchedAt": "2026-07-28T00:00:00.000Z",
+      "expiresAt": "2026-07-29T00:00:00.000Z",
+      "isStale": false,
+      "errorCode": null,
+      "data": {
+        "series": []
+      }
+    }
+  }
+}
+```
+
+`status` is `FRESH`, `STALE` or `UNAVAILABLE`. `STALE` is always visibly labelled. An unavailable
+provider returns a safe error code and `data: null`; it does not fail or alter the FCN analysis.
+The response never includes the FRED key, upstream request URL/body, RFQ identifiers or user
+identity.
+
+`GET /api/v1/admin/market-context-health`
+
+- requires effective role `ADMIN`;
+- returns only grouped cache status/counts plus expired, stale and rate-limit row counts;
+- never returns normalized payloads, symbols, user/IP hashes, Secrets or upstream bodies.
+
 ## Error response
 
 Errors use a stable machine code, user-safe message, request ID, and optional field errors. They never include raw mail, stack traces, secrets, password material, correlation tokens, or another user's identifiers.

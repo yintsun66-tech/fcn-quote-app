@@ -13,9 +13,9 @@ const RFQ_ID = "rfq_41000000-0000-4000-8000-000000000003";
 const ADMIN_TOKEN = "admin-rfq-timeline-token";
 const USER_TOKEN = "user-rfq-timeline-token";
 
-async function api(token: string): Promise<Response> {
+async function api(token: string, path = "/api/v1/admin/rfq-timelines?limit=10"): Promise<Response> {
   const context = createExecutionContext();
-  const response = await worker.fetch(new Request(`${BASE_URL}/api/v1/admin/rfq-timelines?limit=10`, {
+  const response = await worker.fetch(new Request(`${BASE_URL}${path}`, {
     headers: { cookie: `__Host-fcn_session=${token}` }
   }) as unknown as Request<unknown, IncomingRequestCfProperties>, testEnv, context);
   await waitOnExecutionContext(context);
@@ -126,5 +126,29 @@ describe("administrator RFQ timeline", () => {
     expect(serialized).not.toContain("private-token-hash");
     expect(serialized).not.toContain("private/r2/key");
     expect(serialized).not.toContain("private-message-id");
+  });
+
+  it("keeps public-data cache health private to administrators", async () => {
+    const forbidden = await api(USER_TOKEN, "/api/v1/admin/market-context-health");
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({ error: { code: "ADMIN_REQUIRED" } });
+
+    const response = await api(ADMIN_TOKEN, "/api/v1/admin/market-context-health");
+    expect(response.status).toBe(200);
+    const payload = await response.json<{
+      health: {
+        sources: unknown[];
+        expiredRows: number;
+        staleRows: number;
+        rateLimitRows: number;
+      };
+    }>();
+    expect(payload.health).toMatchObject({
+      sources: [],
+      expiredRows: 0,
+      staleRows: 0,
+      rateLimitRows: 0
+    });
+    expect(JSON.stringify(payload)).not.toContain("FRED_API_KEY");
   });
 });

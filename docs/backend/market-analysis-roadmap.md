@@ -1,7 +1,7 @@
 # FCN market analysis roadmap — Phases 2 to 4
 
-Status: Approved implementation plan; Phase 2–4 not yet implemented
-Baseline: Phase 1 in `codex/market-analysis-phase1`
+Status: Phases 2–4 implemented locally; production Secret, migration and deployment not yet applied
+Baseline: Phase 1 in `codex/market-analysis-phase1`; Phase 2 work in `codex/market-analysis-phase2-4`
 Updated: 2026-07-28 (Asia/Taipei)
 
 ## Purpose and non-negotiable rules
@@ -31,8 +31,8 @@ Add useful public visual references without creating a market-data backend or D1
 2. The user must explicitly choose “載入外部圖表” before any third-party frame is created.
 3. Show one TradingView symbol chart at a time. Switching an underlying replaces the existing
    frame instead of creating several simultaneous widgets.
-4. Add ordinary external links for Cboe delayed quote pages and Options Industry Council
-   educational/options calculator pages.
+4. Add ordinary external links for Yahoo Finance, Google Trends, Cboe delayed quote pages and
+   Options Industry Council educational/options calculator pages.
 5. Mark the widget and links as third-party resources, state that their values do not enter the
    calculation, and show a privacy/referrer notice before loading.
 6. If a corporate network blocks the widget, preserve the Phase 1 analysis and show a non-blocking
@@ -68,12 +68,34 @@ Add useful public visual references without creating a market-data backend or D1
 | Display price mistaken for calculation input | Strong source separation; never bind widget data to Phase 1 |
 | Terms/licence violation | Embed/link only under provider terms; no extraction or scraping |
 
+### Phase 2 source decision after reviewing the 2019 Python article
+
+The article correctly separates company, fundamental, price/volume, macroeconomic and search-
+interest data, and it highlights symbol normalization and scheduled refreshes. Its implementation
+examples are historical research examples, not current production API contracts:
+
+- `yfinance` is not an official Yahoo Finance API. Yahoo's current terms restrict automated
+  collection without prior permission, and the Yahoo developer catalogue does not offer a
+  supported Finance market-data endpoint. Yahoo Finance is therefore link-only.
+- `pytrends` relies on an unofficial Google Trends interface. Google's official Trends API is
+  currently limited to approved alpha testers. Google Trends is therefore link-only until this
+  project receives official API access.
+- FRED has a documented key-based API and remains suitable for Phase 3 after a Secret is provided.
+- SEC EDGAR provides keyless JSON APIs and remains suitable for Phase 3 under SEC fair-access
+  requirements.
+
+This classification is recorded in ADR 0021 and prevents a research scraper from becoming an
+unmonitored financial-data dependency.
+
 Primary references:
 
 - TradingView widget documentation: <https://www.tradingview.com/widget-docs/getting-started/>
 - TradingView data FAQ: <https://www.tradingview.com/widget-docs/faq/data/>
 - Cboe delayed quotes: <https://www.cboe.com/delayed_quotes/all/quote_table/>
 - OIC calculator: <https://www.optionseducation.org/options-calculator-for-all-investors>
+- Yahoo Terms of Service: <https://legal.yahoo.com/xw/en/yahoo/terms/otos/index.html>
+- Yahoo developer APIs: <https://developer.yahoo.com/api/>
+- Google Trends API alpha: <https://developers.google.com/search/apis/trends>
 
 ## Phase 3 — Worker-normalized SEC and FRED context
 
@@ -82,13 +104,22 @@ Primary references:
 Add issuer-independent company filings and macro context through a controlled Worker cache. This
 phase still does not provide a tradeable stock/option price.
 
-### Approval boundary
+### Approved release boundary
 
-Before implementation, obtain explicit approval for a new D1 migration, the FRED API key as a
-Cloudflare Secret, any new Worker variables/outbound hosts, retention/TTL policy, and the exact
-SEC/FRED fields shown in the UI.
+The user approved migration `0011`, the FRED Secret/configuration boundary, cache retention,
+monitoring, cleanup, a 50-user concurrent test and the following first-release fields:
 
-### Proposed data model
+- SEC company identity: CIK, legal name, exchange and ticker;
+- SEC recent filings: latest five 10-K, 10-Q and 8-K filings with filing date and official link;
+- FRED: latest observation, prior observation, change, units and observation date for `DGS10`,
+  `FEDFUNDS` and `VIXCLS`;
+- no Yahoo Finance or Google Trends values in the Worker response until approved official access
+  exists.
+
+The key value is ready but is not stored in the repository. It must be entered only through
+Cloudflare Secret management before the first production deployment.
+
+### Implemented data model
 
 `market_instruments`
 
@@ -110,9 +141,18 @@ SEC/FRED fields shown in the UI.
 - `source_as_of TEXT`
 - `fetched_at TEXT NOT NULL`
 - `expires_at TEXT NOT NULL`
+- `stale_until TEXT NOT NULL`
 - `etag TEXT`
 - `status TEXT NOT NULL`
 - `last_error_code TEXT`
+- `refresh_lease_expires_at TEXT`
+- `updated_at TEXT NOT NULL`
+
+`market_context_rate_limits`
+
+- hashed `request_key TEXT PRIMARY KEY`
+- `scope USER|IP`
+- bounded window/count timestamps
 
 Indexes:
 
@@ -123,13 +163,18 @@ Indexes:
 Do not store a complete SEC CompanyFacts payload in one D1 row. Normalize only the small fields the
 UI actually displays; use private R2 for an approved raw/large cache if later required.
 
-### Proposed API
+### Implemented API
 
 - `GET /api/v1/market/instruments/:symbol/context`
 - owner-authenticated, rate-limited, and independent from RFQ ownership;
 - returns normalized source records with `source`, `sourceAsOf`, `fetchedAt`, `expiresAt`,
   `isStale` and safe error codes;
 - never returns API keys, raw upstream errors or unrestricted upstream payloads.
+
+ADMIN-only cache health:
+
+- `GET /api/v1/admin/market-context-health`
+- returns aggregate source/status/stale/expired/rate-limit counts only.
 
 ### Fetch/cache flow
 
@@ -142,12 +187,12 @@ UI actually displays; use private R2 for an approved raw/large cache if later re
    calls.
 7. Write only when cache content/expiry changes — never on every page view or slider change.
 
-Initial TTL proposal:
+Implemented TTL:
 
 - instrument mapping: 30 days;
-- SEC filing index: 6–24 hours;
-- SEC normalized company facts: 24 hours;
+- SEC filing index and normalized company identity: 24 hours;
 - FRED observations: 24 hours.
+- stale fallback: no more than 7 days and always labelled stale.
 
 ### Security and operating controls
 
@@ -161,13 +206,12 @@ Initial TTL proposal:
 
 ### Verification
 
-- Fresh hit, expired hit, stale fallback and upstream failure.
-- Cache-key normalization and ticker mapping.
-- 50-user concurrent-miss coalescing.
-- SQL parameter binding and arbitrary-host rejection.
-- No secret in logs/errors.
-- D1 query/write count under representative traffic.
-- Migration forward test and documented compensating rollback.
+- Synthetic tests cover fresh-cache reuse, stale fallback, upstream failure, strict symbol
+  normalization, SEC filing filtering, FRED missing observations, ADMIN authorization, cleanup,
+  same-key miss coalescing and 50 simultaneous users.
+- The complete repository suite, typecheck and dry-run build remain mandatory before handoff.
+- Production D1 query/write and upstream latency evidence remain unverified until explicit
+  migration/Secret/deployment authorization.
 
 Primary references:
 
@@ -183,9 +227,11 @@ concurrent users.
 
 ### Capacity baseline and interpretation
 
-A previous read-only production sample recorded approximately 10 users, 55 RFQs / 205 trades,
-406 inbound messages, 1,693 issuer quotes, 637 ranking results, 2,485 audit events, 149 artifacts,
-and D1 size about 6.8 MB.
+A read-only production measurement on 2026-07-28 recorded 10 users, 55 RFQs / 205 trades,
+406 inbound messages, 1,693 issuer quotes, 637 ranking results, 2,488 audit events, 149 artifacts,
+and D1 size 6,815,744 bytes. Cloudflare reported 8,228 read queries, 3,416 write queries,
+377,492 rows read and 10,862 rows written during the preceding 24 hours. This is a point-in-time
+capacity baseline, not a user-activity audit.
 
 This sample must be re-measured before Phase 4 implementation. Its rough density (about 33 KB per
 trade across the whole application) implies that 10,000 trades could add roughly 330 MB before
@@ -197,6 +243,10 @@ the Phase 1 browser-only calculations or a shared SEC/FRED cache.
 
 Track D1 size/growth, rows read/written, cache hit/miss/stale rates, upstream success/latency,
 analysis-input API traffic/latency/errors, active users and cache cleanup failures.
+
+The implemented first step is an ADMIN-only safe cache-health panel plus structured Worker error
+events. It intentionally avoids per-view D1 analytics. Plan-level D1/Worker measurements remain in
+Cloudflare observability and must be recorded after rollout.
 
 Alert thresholds:
 
@@ -217,13 +267,20 @@ Alert thresholds:
 
 ### Load and incident work
 
-- Load test 50 concurrent users across result, analysis-input and public-context endpoints.
+- The automated public-context test exercises 50 concurrent distinct users and confirms one shared
+  SEC instrument/filing refresh path. Existing RFQ/analysis-input ownership tests remain unchanged.
+- A production-like mixed result/analysis/public-context load test is still required after the
+  Secret and migration exist in a non-production or explicitly approved environment.
 - Confirm owner isolation under concurrent quote selections.
 - Test cache stampede, upstream timeout, cleanup retry and D1 saturation.
 - Add a kill switch for Phase 2 widgets and Phase 3 external context while keeping RFQ/ranking and
   Phase 1 functional.
 - Document deploy, health verification, rollback, stale-cache purge and upstream outage response.
 - Record cost/capacity evidence after each production rollout.
+
+The implemented runtime kill switch is `MARKET_CONTEXT_ENABLED`. Phase 2 TradingView remains
+explicit opt-in and can be removed by rolling back the static asset deployment; it has no Worker
+polling or automatic load.
 
 ## Recommended implementation order
 

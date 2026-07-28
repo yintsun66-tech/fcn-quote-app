@@ -53,5 +53,7 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0018: Employee-number login for new registrations](0018-employee-number-login-registration.md)
 - [ADR 0019: Guarded permanent deletion of empty user accounts](0019-guarded-empty-account-deletion.md)
 - [ADR 0020: Owner-scoped FCN market and risk analysis](0020-owner-scoped-fcn-market-analysis.md)
+- [ADR 0021: Opt-in public market resources](0021-opt-in-public-market-resources.md)
+- [ADR 0022: Worker-normalized SEC and FRED market context](0022-worker-normalized-sec-fred-context.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

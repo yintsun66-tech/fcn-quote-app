@@ -5,14 +5,21 @@ Updated: 2026-07-28 (Asia/Taipei)
 Current branch: `feature/subject-branch-correlation`
 
 Latest production implementation commit:
-`7f1dca3 fix(artifacts): stop the mobile quote-image render from hanging forever`
+`99d7e9a fix(artifacts): harden tablet quote-image rendering`
 
 Production deployment record:
-Worker `b18cba05-bd46-49b5-818e-71d36d9b9d39` deployed 2026-07-28 from `7f1dca3`
+Worker `8f531342-e773-412b-9ba1-c5ffc00730ac` deployed 2026-07-28 from `99d7e9a`
+(bounded client/fallback requests, touch-safe canvas budget, responsive preview, and desktop
+new-page link). Post-deploy: application index and API health return HTTP 200; the live index
+references `backend-client.js?v=backend-v2`; the live client contains
+`CARD_RENDER_TOTAL_TIMEOUT_MS`, `CARD_TOUCH_SAFE_CANVAS_PIXELS`, `requestForRender`,
+`backend-card-open-link`, and the overlay preview; the live stylesheet contains the responsive
+desktop-link rule.
+Previous: `b18cba05-bd46-49b5-818e-71d36d9b9d39` deployed 2026-07-28 from `7f1dca3`
 (mobile render-hang fix). Post-deploy: API health 200; the live `backend-client.js` carries
 `withRenderTimeout`, `CARD_SAFE_CANVAS_PIXELS`, `showCardImage`, `opacity:0` and 「長按圖片」,
 and `styles.css` carries `backend-card-preview`.
-Previous: `f887ba53-2af9-4cf6-a493-bfc67cc4f489` from `b7ae5fb` (self-hosted rasterizer;
+Earlier: `f887ba53-2af9-4cf6-a493-bfc67cc4f489` from `b7ae5fb` (self-hosted rasterizer;
 `https://app.yintsun66.com/vendor/html2canvas-1.4.1.min.js` returns HTTP 200, 198,689 bytes,
 SHA-256 matching the vendored file exactly, and no third-party CDN host remains on the live page.
 The root page is edge-cached — send `Cache-Control: no-cache` when verifying it, because a query
@@ -32,7 +39,8 @@ economic top four plus custom fifth issuer/image);
 `25d32525-...` from `0913f16` (PS tier + migration 0010); `2de5b070-...` from `23c084e`.
 
 Production implementation head when this handoff was updated:
-`feature/subject-branch-correlation` at `7f1dca3`, pushed to `origin` (local and remote match).
+`feature/subject-branch-correlation` at `99d7e9a`, pushed to `origin` (local and remote match before
+this deployment-record documentation commit).
 Resolve the current branch HEAD from Git before making changes. The branch is not merged to
 `main`.
 
@@ -139,7 +147,7 @@ frame rasterizes to 1440×2536 (3.7M px, 1.27 MB PNG) for a single-trade card. *
 iOS/Android device check is still owed** — the browser pane is desktop Chromium and cannot
 reproduce mobile WebKit.
 
-### Mobile/tablet hang follow-up — local fix awaiting commit/deploy
+### Mobile/tablet hang follow-up — deployed
 
 The first fix in `7f1dca3` bounded the iframe/font/html2canvas/blob steps, but it did **not**
 bound the card-data `fetch`, the server-fallback request, or the result refresh awaited after the
@@ -147,8 +155,7 @@ fallback. A stalled network request could therefore still leave the button on �
 The preview also opened a second native modal `<dialog>` inside the already-open RFQ-results
 dialog, which is a fragile nested-modal pattern on iPadOS Safari.
 
-The current working tree contains a follow-up fix in `backend-client.js`, `styles.css`, and
-`index.html` (not committed, pushed, or deployed when this note was written):
+Commit `99d7e9a` contains the follow-up fix in `backend-client.js`, `styles.css`, and `index.html`:
 
 - the complete local-render flow has a 24-second deadline, including the authorized card-data
   request; timed-out fetches are aborted;
@@ -169,7 +176,8 @@ promise/UI lifecycle rather than a stuck Browser Rendering queue.
 
 Verification completed locally: `node --check backend-client.js`, `node --check app.js`,
 `pnpm run typecheck`, `pnpm test` (16 files / 103 tests), and `pnpm run build`. A real iPad/tablet
-verification remains required after deployment.
+verification remains required. The deployment and live-asset checks succeeded as recorded at the
+top of this document.
 
 ### Self-hosted rasterizer (closes the CDN fallback risk)
 

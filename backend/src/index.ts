@@ -25,6 +25,7 @@ import { createRfq, getRfq, getRfqListSummary, listRfqs, validateRfq } from "./r
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "./artifacts";
+import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import {
   downloadArtifact,
@@ -124,6 +125,16 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const quoteCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/quotes\/([^/]+)\/card$/.exec(path);
   if (method === "GET" && quoteCardMatch?.[1] && quoteCardMatch[2] && quoteCardMatch[3]) {
     return getTradeCardDocument(env, session, quoteCardMatch[1], quoteCardMatch[2], quoteCardMatch[3]);
+  }
+  const quoteAnalysisMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/quotes\/([^/]+)\/analysis-input$/.exec(path);
+  if (method === "GET" && quoteAnalysisMatch?.[1] && quoteAnalysisMatch[2] && quoteAnalysisMatch[3]) {
+    return getTradeAnalysisInput(
+      env,
+      session,
+      quoteAnalysisMatch[1],
+      quoteAnalysisMatch[2],
+      quoteAnalysisMatch[3]
+    );
   }
   const tradeCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/card$/.exec(path);
   if (method === "GET" && tradeCardMatch?.[1] && tradeCardMatch[2]) {

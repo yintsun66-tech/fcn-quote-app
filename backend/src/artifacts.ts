@@ -50,7 +50,7 @@ interface QuoteCardRow {
   comparable_price_pct: number | null;
 }
 
-interface ArtifactRequestQuote {
+export interface AuthorizedCardQuote {
   ranking_run_id: string;
   ranking_version: number;
   quote_id: string;
@@ -88,16 +88,17 @@ function artifactResponse(artifact: RequestedArtifact): Record<string, unknown> 
   };
 }
 
-// Single authorization path for every quote-card rendering route (server-side artifacts and the
-// client-rendered card). The browser may name a quote id, but only a quote the server itself ranks
-// within economic ranks 1-4, or admits as a custom-fifth candidate, is ever authorized.
-async function authorizeCardQuote(
+// Single authorization path for every owner-selected quote route (server-side artifacts,
+// client-rendered cards and market analysis). The browser may name a quote id, but only a quote
+// the server itself ranks within economic ranks 1-4, or admits as a custom-fifth candidate, is
+// ever authorized.
+export async function authorizeCardQuote(
   env: AppEnv,
   session: SessionContext,
   rfqId: string,
   tradeCode: string,
   quoteId?: string
-): Promise<ArtifactRequestQuote> {
+): Promise<AuthorizedCardQuote> {
   const rfq = await env.DB.prepare(
     "SELECT workflow_status, current_ranking_version FROM rfqs WHERE id = ? AND user_id = ?"
   ).bind(rfqId, session.user.id).first<{ workflow_status: string; current_ranking_version: number }>();
@@ -110,7 +111,7 @@ async function authorizeCardQuote(
   ).bind(rfqId, rfq.current_ranking_version).first<CurrentRankingRun>();
   if (!currentRun) throw new AppError(409, "RANKING_RUN_NOT_FOUND", "找不到目前的正式排名版本。 ");
 
-  let rankedQuote: ArtifactRequestQuote | null = null;
+  let rankedQuote: AuthorizedCardQuote | null = null;
   if (quoteId) {
     const trade = await env.DB.prepare(
       "SELECT id, target_field FROM rfq_trades WHERE rfq_id = ? AND trade_code = ? LIMIT 1"
@@ -145,7 +146,7 @@ async function authorizeCardQuote(
          JOIN issuer_quotes q ON q.id = result.quote_id
         WHERE run.rfq_id = ? AND run.version = ? AND trade.trade_code = ?
         LIMIT 1`
-    ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<ArtifactRequestQuote>();
+    ).bind(rfqId, rfq.current_ranking_version, tradeCode).first<AuthorizedCardQuote>();
   }
   if (!rankedQuote) {
     throw new AppError(

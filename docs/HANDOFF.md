@@ -2,7 +2,62 @@
 
 Updated: 2026-07-28 (Asia/Taipei)
 
-Current branch: `feature/subject-branch-correlation`
+Current branch: `codex/market-analysis-phase1`
+
+## FCN market and risk analysis Phase 1 (local implementation; not committed/deployed)
+
+The pre-analysis stable baseline is commit `9b3ba13`, preserved locally by annotated tag
+`stable/pre-market-analysis-2026-07-28`. The tag and this development branch have not been pushed.
+Production remains on the previously recorded Worker deployment; this section is not evidence of
+a Cloudflare release.
+
+Phase 1 adds an owner-scoped, separate analysis route for finalized FCN quotes:
+
+- Result rows for economic ranks 1–4 and the selected custom-fifth candidate can open
+  `/?rfq=<id>&view=analysis&trade=<tradeCode>&quote=<quoteId>`.
+- `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/quotes/:quoteId/analysis-input` reuses
+  `authorizeCardQuote`; an arbitrary browser quote ID or another user's RFQ remains unavailable.
+- The response contains one exact canonical issuer quote plus its immutable requested trade. A
+  missing non-target term may fall back to that requested trade only, never another issuer.
+- User-entered indicative spot/timestamp values stay in browser `localStorage`, keyed by RFQ,
+  trade and underlying. Phase 1 makes no D1 write and adds no migration, binding, Secret,
+  dependency or lockfile change.
+- The view computes indicative strike/KO/KI price levels and fixed worst-of scenarios. NONE, EKI
+  and path-dependent AKI are deliberately separated; DAC/DRA is refused in Phase 1.
+- ADR 0020 records the public/security/financial semantics.
+- `docs/backend/market-analysis-roadmap.md` preserves the approved Phase 2–4 plan for opt-in public
+  charts, SEC/FRED shared caching and production capacity/retention work.
+
+Files added/changed for the local Phase 1 work:
+
+- `market-analysis.mjs`
+- `backend/src/analysis.ts`
+- `backend/src/artifacts.ts`
+- `backend/src/index.ts`
+- `backend-client.js`
+- `styles.css`
+- `index.html`
+- `backend/scripts/prepare-assets.mjs`
+- `backend/test/market-analysis.test.ts`
+- `backend/test/ranking-integration.test.ts`
+- `docs/adr/0020-owner-scoped-fcn-market-analysis.md`
+- `docs/backend/market-analysis-roadmap.md`
+- `docs/backend/contracts.md`
+- `docs/adr/README.md`
+- `README.md`
+
+Verification completed during implementation:
+
+- `node --check backend-client.js`
+- `node --check market-analysis.mjs`
+- `pnpm run typecheck`
+- `pnpm test` — 17 files, 108 tests passed
+- `pnpm run build` — Cloudflare dry-run build passed; 13 static assets included
+
+Interactive authenticated browser QA remains unverified; no production deployment was performed.
+Preserve `.claude/settings.local.json`; do not include it in this work. The smallest safe next step
+is a focused Phase 1 commit, followed by a separately authorized push/deployment. Phase 2 must not
+begin automatically.
 
 ## Guarded permanent deletion of empty accounts (deployed; target deletion pending)
 

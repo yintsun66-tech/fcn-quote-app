@@ -53,6 +53,43 @@ Returns `{ card: { tradeCode, quoteId, issuer, rankingVersion, renderProfileVers
 
 Authorization is identical to the artifact endpoints and is enforced by the shared `authorizeCardQuote`: the caller must own the RFQ, the RFQ must be `COMPLETED` with a current ranking run, and the quote must be ranked 1–4 by the server or be a custom-fifth candidate. A quote id supplied by the browser is never trusted on its own. The document is returned inside JSON rather than as `text/html` so the API origin never serves renderable markup.
 
+### FCN market-analysis input (ADR 0020)
+
+- `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/quotes/:quoteId/analysis-input`
+
+Returns:
+
+```text
+{
+  analysisInput: {
+    version,
+    rfq: { id, finalizedAt, rankingVersion },
+    trade: { sequence, tradeCode, targetField, requestedProduct, requestedUnderlyings },
+    quote: {
+      id, issuer, issuerDisplayName, receivedAt,
+      rawPriceValue, rawPriceLabel, priceSemantics,
+      quoteReference, issuerComment, normalizationWarnings
+    },
+    terms: {
+      product, currency, tradeDate, effectiveDateOffsetCalendarDays,
+      tenorMonths, guaranteedPeriodsMonths, underlyings,
+      strikePct, koType, koBarrierPct, couponPaPct,
+      upfrontOrNotePricePct, barrierType, kiBarrierPct,
+      observationFrequencyMonths, otc
+    }
+  }
+}
+```
+
+This read endpoint reuses `authorizeCardQuote`; ownership, completed-RFQ status, current ranking
+version and rank 1–4/custom-fifth eligibility are server-enforced. A missing non-target quote term
+may fall back only to the immutable requested trade, never to another issuer. Phase 1 accepts FCN
+only and returns `422 ANALYSIS_PRODUCT_UNSUPPORTED` for DAC/DRA.
+
+The browser performs all spot/scenario calculations. User-entered indicative spots and timestamps
+are stored only in browser `localStorage`; this endpoint does not write D1, change a ranking or
+create an artifact.
+
 ### Administrative registration endpoints
 
 - `GET /api/v1/admin/registrations?status=PENDING_APPROVAL`

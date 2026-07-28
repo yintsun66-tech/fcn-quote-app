@@ -3,6 +3,7 @@ import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { processQuoteRankJob } from "../src/ranking";
 import { getTradeCardDocument, processImageRenderJob, requestTradeArtifact } from "../src/artifacts";
+import { getTradeAnalysisInput } from "../src/analysis";
 import { downloadArtifact, getRfqResults, listRfqArtifacts } from "../src/results";
 import { rfqCorrelationCode, sha256Text } from "../src/crypto";
 import type { AppEnv, ImageRenderJob, QuoteRankJob, SessionContext } from "../src/types";
@@ -193,14 +194,67 @@ describe("versioned ranking persistence", () => {
     expect(cardBody.card).toMatchObject({ tradeCode: "T01", quoteId: quoteIds[0], issuer: "BNP", width: 720 });
     expect(cardBody.card.html).toContain("<!doctype html>");
     expect(imageJobs.length).toBe(queuedBeforeCard);
+    const analysisResponse = await getTradeAnalysisInput(testEnv, session, rfqId, "T01", quoteIds[0]!);
+    expect(analysisResponse.status).toBe(200);
+    const analysisBody = await analysisResponse.json<{
+      analysisInput: {
+        rfq: { id: string; rankingVersion: number };
+        trade: { tradeCode: string; targetField: string };
+        quote: { id: string; issuer: string };
+        terms: {
+          product: string;
+          underlyings: string[];
+          couponPaPct: number;
+          strikePct: number;
+          barrierType: string;
+          kiBarrierPct: number | null;
+        };
+      };
+    }>();
+    expect(analysisBody.analysisInput).toMatchObject({
+      rfq: { id: rfqId, rankingVersion: 1 },
+      trade: { tradeCode: "T01", targetField: "COUPON" },
+      quote: { id: quoteIds[0], issuer: "BNP" },
+      terms: {
+        product: "FCN",
+        underlyings: ["AAA UW"],
+        couponPaPct: 14,
+        strikePct: 80,
+        barrierType: "NONE",
+        kiBarrierPct: null
+      }
+    });
+    const alternateAnalysis = await (await getTradeAnalysisInput(
+      testEnv,
+      session,
+      rfqId,
+      "T01",
+      quoteIds[3]!
+    )).json<{ analysisInput: { quote: { id: string; issuer: string }; terms: { couponPaPct: number } } }>();
+    expect(alternateAnalysis.analysisInput).toMatchObject({
+      quote: { id: quoteIds[3], issuer: "CA" },
+      terms: { couponPaPct: 10 }
+    });
+    expect(await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS result_count FROM ranking_results WHERE rfq_id = ?"
+    ).bind(rfqId).first<{ result_count: number }>()).toEqual({ result_count: 6 });
     await expect(getTradeCardDocument(
       appEnv,
       { ...session, user: { ...session.user, id: `usr_${crypto.randomUUID()}` } },
       rfqId,
       "T01",
-      quoteIds[0]
+      quoteIds[0]!
+    )).rejects.toMatchObject({ code: "RFQ_NOT_FOUND" });
+    await expect(getTradeAnalysisInput(
+      testEnv,
+      { ...session, user: { ...session.user, id: `usr_${crypto.randomUUID()}` } },
+      rfqId,
+      "T01",
+      quoteIds[0]!
     )).rejects.toMatchObject({ code: "RFQ_NOT_FOUND" });
     await expect(getTradeCardDocument(appEnv, session, rfqId, "T01", `qte_${crypto.randomUUID()}`))
+      .rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
+    await expect(getTradeAnalysisInput(testEnv, session, rfqId, "T01", `quo_${crypto.randomUUID()}`))
       .rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
 
     const alternateRequest = new Request(

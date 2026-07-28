@@ -25,6 +25,12 @@
 API 位於 `https://api.yintsun66.com`。後端程式、D1 migrations、Queue consumers、
 Durable Object、R2 與測試位於 `backend/`。
 
+完成詢價後，FCN 正式排名中的前四名或自選第五名可另開「市場與風險分析」頁。
+Phase 1 只使用該筆經後端授權的單一發行機構報價；參考現價由使用者手動輸入並只
+保存在目前瀏覽器，不會改變排名、寄件、報價圖或 D1。Phase 2～4 的公開圖表、
+SEC/FRED 快取與容量治理計畫記錄於
+[market-analysis-roadmap](docs/backend/market-analysis-roadmap.md)。
+
 ## 目前正式環境基線
 
 - 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。

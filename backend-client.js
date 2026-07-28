@@ -1,3 +1,10 @@
+import {
+  ANALYSIS_SCENARIOS,
+  buildFcnAnalysis,
+  parseIndicativeSpot,
+  spotStorageKey
+} from "./market-analysis.mjs";
+
 (() => {
   "use strict";
   if (location.hostname !== "app.yintsun66.com" && new URLSearchParams(location.search).get("backend") !== "1") return;
@@ -20,7 +27,8 @@
     hasRankings: false,
     rfqListScope: "active",
     rfqListCursor: null,
-    rfqListItems: []
+    rfqListItems: [],
+    analysisInput: null
   };
 
   const shell = document.createElement("section");
@@ -36,6 +44,17 @@
       <button id="backendAdminTimelines" type="button" class="secondary" hidden>RFQ 處理時間軸</button>
       <button id="backendLogout" type="button" class="secondary">登出</button>
     </div>
+    <main id="backendAnalysisView" class="backend-analysis-view" hidden>
+      <section class="backend-analysis-shell">
+        <header class="backend-analysis-header">
+          <div><p class="eyebrow">FCN MARKET &amp; RISK</p><h1>市場與風險分析</h1></div>
+          <a id="backendAnalysisBack" class="secondary backend-analysis-back" href="./">返回詢價結果</a>
+        </header>
+        <p class="backend-analysis-lead">以正式排名中的單一發行機構報價為基礎，搭配您手動輸入的參考現價做試算。</p>
+        <p id="backendAnalysisError" class="backend-error" role="alert"></p>
+        <div id="backendAnalysisContent" aria-live="polite"><p class="backend-analysis-loading">正在載入分析資料…</p></div>
+      </section>
+    </main>
     <dialog id="backendAuth" class="backend-dialog">
       <form id="backendLogin" class="backend-panel">
         <p class="eyebrow">SECURE QUOTE WORKSPACE</p><h2>登入詢價系統</h2>
@@ -192,6 +211,10 @@
   const adminTimelinesError = document.querySelector("#backendRfqTimelinesError");
   const adminRfqHealth = document.querySelector("#backendRfqHealth");
   const artifactContainer = document.querySelector("#backendArtifacts");
+  const analysisView = document.querySelector("#backendAnalysisView");
+  const analysisContent = document.querySelector("#backendAnalysisContent");
+  const analysisError = document.querySelector("#backendAnalysisError");
+  const analysisBack = document.querySelector("#backendAnalysisBack");
 
   function cookie(name) {
     return document.cookie.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) || "";
@@ -279,11 +302,236 @@
     return rfqId && /^rfq_[A-Za-z0-9-]+$/u.test(rfqId) ? rfqId : null;
   }
 
+  function currentAnalysisFromUrl() {
+    const url = new URL(location.href);
+    const rfqId = currentRfqFromUrl();
+    const tradeCode = url.searchParams.get("trade");
+    const quoteId = url.searchParams.get("quote");
+    if (
+      url.searchParams.get("view") !== "analysis"
+      || !rfqId
+      || !/^T(?:0[1-9]|1[0-9]|20)$/u.test(tradeCode ?? "")
+      || !/^quo_[A-Za-z0-9-]+$/u.test(quoteId ?? "")
+    ) return null;
+    return { rfqId, tradeCode, quoteId };
+  }
+
+  function rfqResultUrl(rfqId) {
+    const url = new URL(location.href);
+    url.search = "";
+    url.searchParams.set("rfq", rfqId);
+    return `${url.pathname}${url.search}`;
+  }
+
+  function analysisUrl(rfqId, tradeCode, quoteId) {
+    const url = new URL(location.href);
+    url.search = "";
+    url.searchParams.set("rfq", rfqId);
+    url.searchParams.set("view", "analysis");
+    url.searchParams.set("trade", tradeCode);
+    url.searchParams.set("quote", quoteId);
+    return `${url.pathname}${url.search}`;
+  }
+
   function updateRfqUrl(rfqId, replace = false) {
     const url = new URL(location.href);
     if (rfqId) url.searchParams.set("rfq", rfqId);
     else url.searchParams.delete("rfq");
     history[replace ? "replaceState" : "pushState"]({ rfqId }, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function percentText(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    const number = Number(value);
+    return Number.isFinite(number) ? `${Number(number.toFixed(4))}%` : "—";
+  }
+
+  function numberText(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? number.toLocaleString("zh-TW", { maximumFractionDigits: 4 })
+      : "—";
+  }
+
+  function loadSpotDraft(rfqId, tradeCode, underlying) {
+    try {
+      const raw = localStorage.getItem(spotStorageKey(rfqId, tradeCode, underlying));
+      if (!raw) return { spot: null, observedAt: "" };
+      const parsed = JSON.parse(raw);
+      return {
+        spot: parseIndicativeSpot(parsed?.spot),
+        observedAt: typeof parsed?.observedAt === "string" ? parsed.observedAt : ""
+      };
+    } catch {
+      return { spot: null, observedAt: "" };
+    }
+  }
+
+  function saveSpotDraft(rfqId, tradeCode, underlying, spot, observedAt) {
+    try {
+      const key = spotStorageKey(rfqId, tradeCode, underlying);
+      if (spot === null && !observedAt) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify({ version: 1, spot, observedAt }));
+    } catch {
+      // Browsers may disable storage. Analysis still works for the current page session.
+    }
+  }
+
+  function localDateTimeValue() {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function availableAnalysisQuotes(results, tradeCode) {
+    const trade = results?.trades?.find(item => item.tradeCode === tradeCode);
+    if (!trade) return [];
+    const seen = new Set();
+    return [
+      ...(trade.rankings ?? []).map(item => ({
+        quoteId: item.quoteId,
+        label: `第 ${item.rank} 名${item.tie ? "（同價）" : ""}｜${item.issuerDisplayName}`
+      })),
+      ...(trade.alternateQuotes ?? []).map(item => ({
+        quoteId: item.quoteId,
+        label: `自選候選｜${item.issuerDisplayName}`
+      }))
+    ].filter(item => {
+      if (seen.has(item.quoteId)) return false;
+      seen.add(item.quoteId);
+      return true;
+    });
+  }
+
+  function renderAnalysisCalculation() {
+    const input = state.analysisInput;
+    const container = document.querySelector("#backendAnalysisCalculation");
+    if (!input || !container) return;
+    const spots = {};
+    analysisContent.querySelectorAll("[data-analysis-spot]").forEach(field => {
+      spots[field.dataset.analysisSpot] = field.value;
+    });
+    let analysis;
+    try {
+      analysis = buildFcnAnalysis(input.terms, spots, ANALYSIS_SCENARIOS);
+      analysisError.textContent = "";
+    } catch (error) {
+      container.innerHTML = "";
+      analysisError.textContent = error instanceof Error ? error.message : "無法建立分析。";
+      return;
+    }
+
+    const levelRows = analysis.referenceLevels.map(level => `<tr>
+      <td><strong>${escapeHtml(level.underlying)}</strong></td>
+      <td>${numberText(level.spot)}</td>
+      <td>${numberText(level.strikePrice)}</td>
+      <td>${numberText(level.koPrice)}</td>
+      <td>${input.terms.barrierType === "NONE" ? "不適用" : numberText(level.kiPrice)}</td>
+    </tr>`).join("");
+    const scenarioRows = analysis.scenarios.map(row => {
+      const projected = row.projectedPrices.map(item => `${escapeHtml(item.underlying)}：${numberText(item.price)}`).join("<br>");
+      return `<tr>
+        <td>${row.changePct > 0 ? "+" : ""}${escapeHtml(row.changePct)}%</td>
+        <td>${escapeHtml(row.worstOfIndexPct)}%</td>
+        <td>${projected || "請先輸入參考現價"}</td>
+        <td>${escapeHtml(row.koAssessment)}</td>
+        <td>${escapeHtml(row.kiAssessment)}</td>
+        <td>${escapeHtml(row.outcome)}</td>
+      </tr>`;
+    }).join("");
+    const aki = analysis.akiBranches.length
+      ? `<section class="backend-analysis-paths"><h2>AKI 路徑分流</h2><div>${analysis.akiBranches.map(branch => `<article><h3>${escapeHtml(branch.title)}</h3><p>${escapeHtml(branch.description)}</p></article>`).join("")}</div></section>`
+      : "";
+    container.innerHTML = `
+      <section class="backend-analysis-section">
+        <div class="backend-analysis-section-heading"><div><p class="eyebrow">REFERENCE LEVELS</p><h2>依參考現價換算的試算價位</h2></div>
+          <div class="backend-analysis-metrics"><span>KO 所需變動 <b>${percentText(analysis.metrics.koRequiredMovePct)}</b></span><span>KI 緩衝 <b>${percentText(analysis.metrics.kiBufferPct)}</b></span></div>
+        </div>
+        <div class="backend-analysis-table-wrap"><table><thead><tr><th>連結標的</th><th>參考現價</th><th>試算執行價</th><th>試算 KO 價</th><th>試算 KI 價</th></tr></thead><tbody>${levelRows}</tbody></table></div>
+      </section>
+      <section class="backend-analysis-section">
+        <p class="eyebrow">WORST-OF SCENARIOS</p><h2>最弱標的情境表</h2>
+        <p class="backend-analysis-note">情境以目前參考現價為 100，並假設所有標的同步變動；多標的判斷採最弱標的，不取平均。</p>
+        <div class="backend-analysis-table-wrap"><table><thead><tr><th>情境變動</th><th>最弱標的指數</th><th>試算價格</th><th>KO 判斷</th><th>KI／路徑判斷</th><th>方向性說明</th></tr></thead><tbody>${scenarioRows}</tbody></table></div>
+      </section>
+      ${aki}
+      <p class="backend-analysis-disclaimer">${escapeHtml(analysis.disclaimer)}</p>`;
+  }
+
+  function renderAnalysisPage(input, quotes) {
+    state.analysisInput = input;
+    const selectedQuoteId = input.quote.id;
+    const quoteOptions = quotes.some(item => item.quoteId === selectedQuoteId)
+      ? quotes
+      : [{ quoteId: selectedQuoteId, label: input.quote.issuerDisplayName }, ...quotes];
+    const spotFields = input.terms.underlyings.map(underlying => {
+      const saved = loadSpotDraft(input.rfq.id, input.trade.tradeCode, underlying);
+      return `<article class="backend-analysis-spot-card">
+        <h3>${escapeHtml(underlying)}</h3>
+        <label>參考現價<input type="number" min="0.000001" step="any" inputmode="decimal" data-analysis-spot="${escapeHtml(underlying)}" value="${saved.spot ?? ""}" placeholder="請手動輸入"></label>
+        <label>參考時間<input type="datetime-local" data-analysis-observed="${escapeHtml(underlying)}" value="${escapeHtml(saved.observedAt)}"></label>
+        <small>來源：使用者手動輸入（僅儲存在此瀏覽器）</small>
+      </article>`;
+    }).join("");
+    analysisContent.innerHTML = `
+      <section class="backend-analysis-hero">
+        <div>
+          <span>${escapeHtml(input.trade.tradeCode)}｜正式排名版本 ${escapeHtml(input.rfq.rankingVersion)}</span>
+          <h2>${escapeHtml(input.terms.product)} · ${escapeHtml(input.terms.currency)}</h2>
+          <p>${escapeHtml(input.terms.underlyings.join(" / "))}</p>
+        </div>
+        <label>分析報價
+          <select id="backendAnalysisQuoteSelect">${quoteOptions.map(item => `<option value="${escapeHtml(item.quoteId)}"${item.quoteId === selectedQuoteId ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}</select>
+        </label>
+      </section>
+      <section class="backend-analysis-section">
+        <p class="eyebrow">SELECTED QUOTE</p><h2>${escapeHtml(input.quote.issuerDisplayName)}</h2>
+        <div class="backend-analysis-terms">
+          <span>期間<b>${escapeHtml(input.terms.tenorMonths)} 個月</b></span>
+          <span>Coupon<b>${percentText(input.terms.couponPaPct)}</b></span>
+          <span>Strike<b>${percentText(input.terms.strikePct)}</b></span>
+          <span>KO Barrier<b>${percentText(input.terms.koBarrierPct)}</b><small>${escapeHtml(input.terms.koType)}</small></span>
+          <span>KI Barrier<b>${input.terms.barrierType === "NONE" ? "不適用" : percentText(input.terms.kiBarrierPct)}</b><small>${escapeHtml(input.terms.barrierType)}</small></span>
+          <span>Guaranteed Period<b>${escapeHtml(input.terms.guaranteedPeriodsMonths)} 個月</b></span>
+          <span>Note Price<b>${percentText(input.terms.upfrontOrNotePricePct)}</b></span>
+          <span>報價時間<b>${escapeHtml(formatDateTime(input.quote.receivedAt))}</b></span>
+        </div>
+      </section>
+      <section class="backend-analysis-section">
+        <p class="eyebrow">INDICATIVE SPOT</p><h2>輸入標的參考現價</h2>
+        <p class="backend-analysis-note">尚未定價前，下列執行價、KO 價與 KI 價均為依百分比換算的試算值，不是正式 Fixing。</p>
+        <div class="backend-analysis-spots">${spotFields}</div>
+      </section>
+      <div id="backendAnalysisCalculation"></div>`;
+    renderAnalysisCalculation();
+  }
+
+  async function openAnalysis(route) {
+    clearTimeout(state.timer);
+    state.rfqId = route.rfqId;
+    state.analysisInput = null;
+    document.body.classList.add("backend-analysis-active");
+    analysisView.hidden = false;
+    analysisBack.href = rfqResultUrl(route.rfqId);
+    analysisError.textContent = "";
+    analysisContent.innerHTML = "<p class=\"backend-analysis-loading\">正在載入分析資料…</p>";
+    try {
+      const [analysisPayload, results] = await Promise.all([
+        request(`/rfqs/${route.rfqId}/trades/${encodeURIComponent(route.tradeCode)}/quotes/${encodeURIComponent(route.quoteId)}/analysis-input`),
+        request(`/rfqs/${route.rfqId}/results`)
+      ]);
+      renderAnalysisPage(
+        analysisPayload.analysisInput,
+        availableAnalysisQuotes(results, route.tradeCode)
+      );
+    } catch (error) {
+      analysisContent.innerHTML = "";
+      analysisError.textContent = error instanceof Error ? error.message : "無法載入市場與風險分析。";
+    }
   }
 
   function rfqTimingText(rfq) {
@@ -382,6 +630,8 @@
 
   async function openRfq(rfqId, { updateUrl = true, replace = false } = {}) {
     if (!/^rfq_[A-Za-z0-9-]+$/u.test(rfqId)) return;
+    document.body.classList.remove("backend-analysis-active");
+    analysisView.hidden = true;
     clearTimeout(state.timer);
     state.snapshotVersion = null;
     state.pollDelayMs = 4000;
@@ -420,6 +670,11 @@
   }
 
   async function restoreRfqFromUrl() {
+    const analysis = currentAnalysisFromUrl();
+    if (analysis && state.user) {
+      await openAnalysis(analysis);
+      return;
+    }
     const rfqId = currentRfqFromUrl();
     if (rfqId && state.user) await openRfq(rfqId, { updateUrl: false });
   }
@@ -913,6 +1168,19 @@
     return ` <span class="artifact-pending">（報價圖${escapeHtml(artifact.status)}）</span>`;
   }
 
+  function analysisLinkHtml(trade, quoteId, provisional) {
+    if (provisional || trade.product !== "FCN" || !state.rfqId) return "";
+    return ` <a class="analysis-link" href="${escapeHtml(analysisUrl(state.rfqId, trade.tradeCode, quoteId))}" target="_blank" rel="noopener">市場與風險分析</a>`;
+  }
+
+  function quoteActionsHtml(trade, quoteId, artifact, isImageWinner, provisional) {
+    return `${artifactLinkHtml(artifact, trade.tradeCode, quoteId, isImageWinner, provisional)}${analysisLinkHtml(
+      trade,
+      quoteId,
+      provisional
+    )}`;
+  }
+
   function renderResults(payload, artifactByQuote = {}) {
     state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
     state.latestResultsRfq = payload.rfq;
@@ -930,14 +1198,14 @@
       const customRow = selectedAlternate
         ? `<tr class="custom-fifth-row">
             <td>5（自選）</td>
-            <td><select data-custom-fifth-select="${escapeHtml(trade.tradeCode)}" aria-label="${escapeHtml(trade.tradeCode)} 自選第五名發行機構">
+            <td><select data-custom-fifth-select="${escapeHtml(trade.tradeCode)}" data-custom-fifth-product="${escapeHtml(trade.product)}" aria-label="${escapeHtml(trade.tradeCode)} 自選第五名發行機構">
               ${alternates.map(item => `<option value="${escapeHtml(item.quoteId)}" data-value="${escapeHtml(item.value)}" data-received="${escapeHtml(item.receivedAt)}"${item.quoteId === selectedAlternate.quoteId ? " selected" : ""}>${escapeHtml(item.issuerDisplayName)}</option>`).join("")}
             </select></td>
             <td data-custom-fifth-value="${escapeHtml(trade.tradeCode)}">${escapeHtml(selectedAlternate.value)}%</td>
-            <td><span data-custom-fifth-time="${escapeHtml(trade.tradeCode)}">${new Date(selectedAlternate.receivedAt).toLocaleTimeString("zh-TW")}</span><span data-custom-fifth-action="${escapeHtml(trade.tradeCode)}">${artifactLinkHtml(
-              artifactByQuote[selectedAlternate.quoteId],
-              trade.tradeCode,
+            <td><span data-custom-fifth-time="${escapeHtml(trade.tradeCode)}">${new Date(selectedAlternate.receivedAt).toLocaleTimeString("zh-TW")}</span><span data-custom-fifth-action="${escapeHtml(trade.tradeCode)}">${quoteActionsHtml(
+              trade,
               selectedAlternate.quoteId,
+              artifactByQuote[selectedAlternate.quoteId],
               false,
               provisional
             )}</span></td>
@@ -946,10 +1214,10 @@
       return `
       <section class="ranking-card"><h3>${escapeHtml(trade.tradeCode)} · ${escapeHtml(trade.underlyings.join(" / "))} <small>${escapeHtml(trade.targetField)}｜${provisional ? `有效 ${trade.validQuoteCount} 家${trade.lastUpdatedAt ? `｜更新 ${escapeHtml(formatDateTime(trade.lastUpdatedAt))}` : ""}` : "正式結果"}</small></h3>
       ${trade.rankings.length ? `<table><thead><tr><th>名次</th><th>發行機構</th><th>報價</th><th>時間</th></tr></thead><tbody>${trade.rankings.map(item => {
-        const link = artifactLinkHtml(
-          artifactByQuote[item.quoteId],
-          trade.tradeCode,
+        const link = quoteActionsHtml(
+          trade,
           item.quoteId,
+          artifactByQuote[item.quoteId],
           item.isImageWinner,
           provisional
         );
@@ -972,10 +1240,11 @@
     if (value) value.textContent = `${option.dataset.value}%`;
     if (time) time.textContent = new Date(option.dataset.received).toLocaleTimeString("zh-TW");
     if (action) {
-      action.innerHTML = artifactLinkHtml(
-        state.artifactByQuote[option.value],
-        tradeCode,
+      const trade = { tradeCode, product: select.dataset.customFifthProduct };
+      action.innerHTML = quoteActionsHtml(
+        trade,
         option.value,
+        state.artifactByQuote[option.value],
         false,
         Boolean(state.latestResultsRfq?.isProvisional)
       );
@@ -1274,6 +1543,40 @@
       target.textContent = originalLabel;
     }
   }
+  function persistAnalysisSpot(underlying) {
+    const spotField = [...analysisContent.querySelectorAll("[data-analysis-spot]")]
+      .find(field => field.dataset.analysisSpot === underlying);
+    const observedField = [...analysisContent.querySelectorAll("[data-analysis-observed]")]
+      .find(field => field.dataset.analysisObserved === underlying);
+    if (!spotField || !state.analysisInput) return;
+    const spot = parseIndicativeSpot(spotField.value);
+    if (spot !== null && observedField && !observedField.value) observedField.value = localDateTimeValue();
+    saveSpotDraft(
+      state.analysisInput.rfq.id,
+      state.analysisInput.trade.tradeCode,
+      underlying,
+      spot,
+      observedField?.value ?? ""
+    );
+    renderAnalysisCalculation();
+  }
+  analysisContent.addEventListener("input", event => {
+    const spot = event.target.closest("[data-analysis-spot]");
+    if (spot) persistAnalysisSpot(spot.dataset.analysisSpot);
+  });
+  analysisContent.addEventListener("change", event => {
+    const select = event.target.closest("#backendAnalysisQuoteSelect");
+    if (select && state.analysisInput) {
+      location.assign(analysisUrl(
+        state.analysisInput.rfq.id,
+        state.analysisInput.trade.tradeCode,
+        select.value
+      ));
+      return;
+    }
+    const observed = event.target.closest("[data-analysis-observed]");
+    if (observed) persistAnalysisSpot(observed.dataset.analysisObserved);
+  });
   document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);
   document.querySelector("#backendRankings").addEventListener("change", event => {
     const select = event.target.closest("[data-custom-fifth-select]");
@@ -1409,9 +1712,18 @@
     if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName, target.dataset.accountUsername);
   });
   addEventListener("popstate", () => {
+    const analysis = currentAnalysisFromUrl();
+    if (analysis && state.user) {
+      void openAnalysis(analysis);
+      return;
+    }
     const rfqId = currentRfqFromUrl();
     if (rfqId && state.user) void openRfq(rfqId, { updateUrl: false });
-    else if (progressDialog.open) closeRfqProgress({ updateUrl: false });
+    else {
+      document.body.classList.remove("backend-analysis-active");
+      analysisView.hidden = true;
+      if (progressDialog.open) closeRfqProgress({ updateUrl: false });
+    }
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

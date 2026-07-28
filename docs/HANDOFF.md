@@ -4,12 +4,17 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase1`
 
-## FCN market and risk analysis Phase 1 (local implementation; not committed/deployed)
+## FCN market and risk analysis Phase 1 (committed, pushed and deployed)
 
-The pre-analysis stable baseline is commit `9b3ba13`, preserved locally by annotated tag
-`stable/pre-market-analysis-2026-07-28`. The tag and this development branch have not been pushed.
-Production remains on the previously recorded Worker deployment; this section is not evidence of
-a Cloudflare release.
+The pre-analysis stable baseline is commit `9b3ba13`, preserved by annotated tag
+`stable/pre-market-analysis-2026-07-28`. The tag and branch `codex/market-analysis-phase1` are
+pushed to GitHub. Phase 1 implementation commit is `5e662af`.
+
+Cloudflare Worker version `544fce2d-897c-4927-8df8-3ce838c268ea` was deployed on 2026-07-28.
+Wrangler returned a non-zero exit after the Worker/assets/custom-domain triggers were deployed
+because one Queue-list API request failed. Read-only post-deploy checks confirmed the new Worker
+version is current, every production queue still has one producer and one consumer, and no Queue
+binding was lost.
 
 Phase 1 adds an owner-scoped, separate analysis route for finalized FCN quotes:
 
@@ -53,11 +58,17 @@ Verification completed during implementation:
 - `pnpm run typecheck`
 - `pnpm test` — 17 files, 108 tests passed
 - `pnpm run build` — Cloudflare dry-run build passed; 13 static assets included
+- `https://api.yintsun66.com/api/v1/health` — HTTP 200 with `{"status":"ok"}`
+- `https://app.yintsun66.com/` — HTTP 200 and references `backend-client.js?v=backend-v4`
+- live `backend-client.js` — contains the analysis module import, analysis view and
+  `analysis-input` route
+- live `market-analysis.mjs` — HTTP 200 and exports the FCN analysis model
+- `wrangler queues list` — five production queues retain one producer and one consumer each
 
-Interactive authenticated browser QA remains unverified; no production deployment was performed.
-Preserve `.claude/settings.local.json`; do not include it in this work. The smallest safe next step
-is a focused Phase 1 commit, followed by a separately authorized push/deployment. Phase 2 must not
-begin automatically.
+Interactive authenticated analysis-page QA remains unverified. Preserve
+`.claude/settings.local.json`; do not include it in this work. The smallest safe next step is to
+open one completed FCN result as its owner, select “市場與風險分析”, and verify the expected
+issuer/spot/scenario view. Phase 2 must not begin automatically.
 
 ## Guarded permanent deletion of empty accounts (deployed; target deletion pending)
 

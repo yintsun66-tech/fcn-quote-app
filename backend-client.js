@@ -881,7 +881,7 @@
   function artifactLinkHtml(artifact, tradeCode, quoteId, isImageWinner, provisional) {
     if (provisional) return "";
     if (!artifact) {
-      const label = isImageWinner ? "下載第一名報價圖" : "下載此發行機構報價圖";
+      const label = isImageWinner ? "產出第一名報價圖" : "產出此發行機構報價圖";
       // Rank-one is no longer pre-rendered (ADR 0016); every rank uses the same on-demand action,
       // which rasterizes in this browser (ADR 0017) and falls back to a server render if blocked.
       return ` <button type="button" class="secondary artifact-request" data-artifact-trade="${escapeHtml(tradeCode)}" data-artifact-quote="${escapeHtml(quoteId)}">${label}</button>`;
@@ -968,7 +968,7 @@
   function renderArtifactSummary(artifacts) {
     if (!artifacts.length) {
       artifactContainer.innerHTML = state.hasRankings
-        ? "<p class=\"artifact-pending\">需要報價圖時，請在發行機構旁按「下載報價圖」，圖片會直接在本機產生並下載；前四名及自選第五名皆可。</p>"
+        ? "<p class=\"artifact-pending\">需要報價圖時，請在發行機構旁按「產出報價圖」；圖片會先顯示預覽，電腦可另開頁面，手機或平板可長按儲存。前四名及自選第五名皆可。</p>"
         : "";
       return;
     }
@@ -1077,45 +1077,95 @@
   // decides which quote may be rendered and still owns the card template; only the pixel work
   // moves to the client, which removes the shared Browser Rendering budget from the hot path.
   const CARD_RENDER_STEP_TIMEOUT_MS = 12000;
+  const CARD_RENDER_TOTAL_TIMEOUT_MS = 24000;
+  const CARD_FONT_TIMEOUT_MS = 1500;
   // iOS/iPadOS refuse to back a canvas larger than roughly 16.7M pixels (5M on low-memory
-  // devices) and return a blank one instead of throwing. Stay well under that.
+  // devices) and return a blank one instead of throwing. Touch devices use the lower budget.
   const CARD_SAFE_CANVAS_PIXELS = 12e6;
+  const CARD_TOUCH_SAFE_CANVAS_PIXELS = 4e6;
 
   // Every step below can stall indefinitely on mobile WebKit. Without this the button would sit
   // on 「產圖中…」 forever, because an unsettled promise never reaches the caller's catch.
-  function withRenderTimeout(value, step) {
+  function withRenderTimeout(value, step, timeoutMs = CARD_RENDER_STEP_TIMEOUT_MS) {
     let timer;
     return Promise.race([
       Promise.resolve(value).finally(() => clearTimeout(timer)),
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`本機產圖逾時（${step}）`)), CARD_RENDER_STEP_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error(`產圖逾時（${step}）`)), timeoutMs);
       })
     ]);
   }
 
+  function withRenderDeadline(start, step, deadlineAt, maximumMs = CARD_RENDER_STEP_TIMEOUT_MS) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) return Promise.reject(new Error(`產圖逾時（${step}）`));
+    return withRenderTimeout(Promise.resolve().then(start), step, Math.min(maximumMs, remainingMs));
+  }
+
+  async function requestForRender(path, options, step, deadlineAt) {
+    const controller = new AbortController();
+    try {
+      return await withRenderDeadline(
+        () => request(path, { ...options, signal: controller.signal }),
+        step,
+        deadlineAt
+      );
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(`產圖逾時（${step}）`);
+      throw error;
+    } finally {
+      controller.abort();
+    }
+  }
+
+  function isTouchRenderingDevice() {
+    return navigator.maxTouchPoints > 0
+      || window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  }
+
   function showCardImage(blob, filename) {
     const url = URL.createObjectURL(blob);
-    const dialog = document.createElement("dialog");
-    dialog.className = "backend-dialog backend-card-preview";
-    dialog.innerHTML = `<section class="backend-panel">
+    progressDialog.querySelector("[data-card-preview] [data-card-close]")?.click();
+    const preview = document.createElement("section");
+    preview.className = "backend-card-preview";
+    preview.dataset.cardPreview = "";
+    preview.setAttribute("role", "dialog");
+    preview.setAttribute("aria-modal", "true");
+    preview.setAttribute("aria-label", "報價圖預覽");
+    preview.innerHTML = `<section class="backend-panel">
       <div class="backend-results-heading"><div><p class="eyebrow">QUOTE IMAGE</p><h2>報價圖</h2></div><button type="button" class="secondary" data-card-close>關閉</button></div>
-      <p class="backend-archive-note">手機或平板請「長按圖片 → 儲存影像」，即可貼到 LINE 或郵件；電腦可直接按下載。</p>
+      <p class="backend-archive-note">手機或平板請「長按圖片 → 儲存影像」；電腦可在新頁面檢視，圖片會依螢幕大小縮放。</p>
       <div class="backend-card-preview-frame"><img alt="報價圖" src="${url}"></div>
-      <a class="artifact-link" href="${url}" download="${escapeHtml(filename)}">下載 PNG</a>
+      <div class="backend-card-preview-actions">
+        <a class="artifact-link backend-card-open-link" href="${url}" target="_blank" rel="noopener">在新頁面檢視</a>
+        <a class="artifact-link" href="${url}" download="${escapeHtml(filename)}">下載 PNG</a>
+      </div>
     </section>`;
-    document.body.append(dialog);
+    progressDialog.append(preview);
+    const onKeydown = event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    };
     const close = () => {
-      dialog.close();
-      dialog.remove();
+      document.removeEventListener("keydown", onKeydown, true);
+      preview.remove();
       URL.revokeObjectURL(url);
     };
-    dialog.querySelector("[data-card-close]").addEventListener("click", close);
-    dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
-    dialog.showModal();
+    preview.querySelector("[data-card-close]").addEventListener("click", close);
+    document.addEventListener("keydown", onKeydown, true);
+    preview.querySelector("[data-card-close]").focus();
   }
 
   async function renderCardLocally(tradeCode, quoteId) {
-    const { card } = await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(tradeCode)}/quotes/${encodeURIComponent(quoteId)}/card`);
+    const deadlineAt = Date.now() + CARD_RENDER_TOTAL_TIMEOUT_MS;
+    const { card } = await requestForRender(
+      `/rfqs/${state.rfqId}/trades/${encodeURIComponent(tradeCode)}/quotes/${encodeURIComponent(quoteId)}/card`,
+      {},
+      "取得報價資料",
+      deadlineAt
+    );
     const frame = document.createElement("iframe");
     // allow-same-origin lets html2canvas read the document; scripts stay blocked.
     frame.setAttribute("sandbox", "allow-same-origin");
@@ -1123,21 +1173,26 @@
     frame.setAttribute("tabindex", "-1");
     // The frame must stay render-eligible. Mobile WebKit skips layout and paint for `display:none`
     // and for offscreen `visibility:hidden` frames, which stalls both `fonts.ready` and the clone
-    // iframe html2canvas creates internally. `opacity:0` behind the page stays laid out but unseen.
-    frame.style.cssText = `position:fixed;left:0;top:0;width:${card.width}px;height:10px;border:0;opacity:0;pointer-events:none;z-index:-1`;
+    // iframe html2canvas creates internally. `opacity:0` stays laid out but unseen.
+    frame.style.cssText = `position:fixed;left:0;top:0;width:${card.width}px;height:10px;border:0;opacity:0;pointer-events:none;z-index:0`;
     document.body.append(frame);
     try {
-      await withRenderTimeout(new Promise((resolve, reject) => {
+      await withRenderDeadline(() => new Promise((resolve, reject) => {
         frame.addEventListener("load", resolve, { once: true });
         frame.addEventListener("error", () => reject(new Error("報價圖載入失敗。")), { once: true });
         frame.srcdoc = card.html;
-      }), "載入");
+      }), "載入", deadlineAt);
       const frameDocument = frame.contentDocument;
       if (!frameDocument?.body) throw new Error("無法讀取報價圖內容。");
       // Fonts are a nice-to-have: rendering with the fallback face beats failing the whole export.
       if (frameDocument.fonts?.ready) {
         try {
-          await withRenderTimeout(frameDocument.fonts.ready, "字型");
+          await withRenderDeadline(
+            () => frameDocument.fonts.ready,
+            "字型",
+            deadlineAt,
+            CARD_FONT_TIMEOUT_MS
+          );
         } catch {
           // continue with whatever fonts are already resolved
         }
@@ -1145,8 +1200,11 @@
       const height = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
       if (!height) throw new Error("報價圖版面尚未完成，請再試一次。");
       frame.style.height = `${height}px`;
-      const scale = Math.max(0.5, Math.min(2, Math.sqrt(CARD_SAFE_CANVAS_PIXELS / (card.width * height))));
-      const canvas = await withRenderTimeout(window.html2canvas(frameDocument.body, {
+      const touchDevice = isTouchRenderingDevice();
+      const pixelBudget = touchDevice ? CARD_TOUCH_SAFE_CANVAS_PIXELS : CARD_SAFE_CANVAS_PIXELS;
+      const maximumScale = touchDevice ? 1.5 : 2;
+      const scale = Math.max(0.5, Math.min(maximumScale, Math.sqrt(pixelBudget / (card.width * height))));
+      const canvas = await withRenderDeadline(() => window.html2canvas(frameDocument.body, {
         backgroundColor: null,
         scale,
         logging: false,
@@ -1155,10 +1213,11 @@
         height,
         windowWidth: card.width,
         windowHeight: height
-      }), "繪製");
-      const blob = await withRenderTimeout(
-        new Promise(resolve => canvas.toBlob(resolve, "image/png")),
-        "轉檔"
+      }), "繪製", deadlineAt);
+      const blob = await withRenderDeadline(
+        () => new Promise(resolve => canvas.toBlob(resolve, "image/png")),
+        "轉檔",
+        deadlineAt
       );
       if (!blob) throw new Error("報價圖轉檔失敗。");
       showCardImage(blob, `${state.rfqId}-${card.tradeCode}-${card.issuer}.png`);
@@ -1183,16 +1242,21 @@
         } catch (localError) {
           // Local rasterization is best-effort. Anything from a blocked rasterizer to a mobile
           // WebKit stall falls through to the server renderer so an image is still produced.
-          status.textContent = `${localError.message} 改用伺服器產圖…`;
+          const message = localError instanceof Error ? localError.message : "本機產圖失敗。";
+          status.textContent = `${message} 改用伺服器產圖…`;
         }
       }
-      await request(`/rfqs/${state.rfqId}/trades/${encodeURIComponent(artifactTrade)}/quotes/${encodeURIComponent(artifactQuote)}/artifact`, {
-        method: "POST",
-        body: "{}"
-      });
-      await refreshResults();
+      await requestForRender(
+        `/rfqs/${state.rfqId}/trades/${encodeURIComponent(artifactTrade)}/quotes/${encodeURIComponent(artifactQuote)}/artifact`,
+        { method: "POST", body: "{}" },
+        "啟動伺服器備援",
+        Date.now() + CARD_RENDER_STEP_TIMEOUT_MS
+      );
+      state.snapshotVersion = null;
+      status.textContent = "已交由伺服器備援產圖；按鈕已恢復，完成後會顯示「查看報價圖」。";
+      scheduleResultRefresh(1000);
     } catch (error) {
-      status.textContent = error.message;
+      status.textContent = error instanceof Error ? error.message : "產圖失敗，請稍後再試。";
     } finally {
       target.disabled = false;
       target.textContent = originalLabel;

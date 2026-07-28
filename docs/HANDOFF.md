@@ -139,6 +139,38 @@ frame rasterizes to 1440×2536 (3.7M px, 1.27 MB PNG) for a single-trade card. *
 iOS/Android device check is still owed** — the browser pane is desktop Chromium and cannot
 reproduce mobile WebKit.
 
+### Mobile/tablet hang follow-up — local fix awaiting commit/deploy
+
+The first fix in `7f1dca3` bounded the iframe/font/html2canvas/blob steps, but it did **not**
+bound the card-data `fetch`, the server-fallback request, or the result refresh awaited after the
+fallback. A stalled network request could therefore still leave the button on 「產圖中…」.
+The preview also opened a second native modal `<dialog>` inside the already-open RFQ-results
+dialog, which is a fragile nested-modal pattern on iPadOS Safari.
+
+The current working tree contains a follow-up fix in `backend-client.js`, `styles.css`, and
+`index.html` (not committed, pushed, or deployed when this note was written):
+
+- the complete local-render flow has a 24-second deadline, including the authorized card-data
+  request; timed-out fetches are aborted;
+- the server-render fallback request has its own 12-second deadline, and the button is restored as
+  soon as the fallback job is accepted instead of waiting for a full results refresh;
+- touch devices use a 4M-pixel canvas budget and maximum scale 1.5, while desktop retains the
+  12M-pixel / scale-2 budget;
+- the PNG preview is now a responsive overlay within the existing results dialog rather than a
+  second native modal;
+- desktop/laptop users receive an additional 「在新頁面檢視」 link; the image remains responsive,
+  while mobile/tablet keeps the preview and long-press workflow; and
+- `index.html` advances the backend-client cache key from `backend-v1` to `backend-v2`.
+
+Read-only production evidence collected before the patch: all 41 `generated_artifacts` and all 41
+completed image jobs were `READY`/completed; after the `7f1dca3` deployment, all 6 server-fallback
+jobs completed in 5.34 seconds on average (6.28 seconds maximum). This points to the client
+promise/UI lifecycle rather than a stuck Browser Rendering queue.
+
+Verification completed locally: `node --check backend-client.js`, `node --check app.js`,
+`pnpm run typecheck`, `pnpm test` (16 files / 103 tests), and `pnpm run build`. A real iPad/tablet
+verification remains required after deployment.
+
 ### Self-hosted rasterizer (closes the CDN fallback risk)
 
 `index.html` previously loaded html2canvas from `cdn.jsdelivr.net`. Corporate and bank networks

@@ -1,8 +1,91 @@
 # Project handoff
 
-Updated: 2026-07-28 (Asia/Taipei)
+Updated: 2026-07-29 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
+
+## Alpha Vantage end-of-day market ideas (deployed; provider response still unavailable)
+
+The user approved replacing FRED with Alpha Vantage for the proof-of-concept market panel. The
+current working tree implements the change and Cloudflare production now runs it. The source
+implementation is commit `c487355` on `codex/market-analysis-phase2-4`, pushed to the matching
+origin branch together with this handoff update.
+
+Local behavior:
+
+- no runtime code calls FRED and `FRED_API_KEY` is no longer a required Worker Secret;
+- authenticated per-symbol context keeps SEC and adds Alpha Vantage
+  `TIME_SERIES_DAILY&outputsize=compact`;
+- an empty analysis spot automatically receives the provider's latest completed daily close;
+  an existing browser-saved manual value is preserved and receives an explicit `套用前收` action;
+- one daily `TOP_GAINERS_LOSERS` cache supplies gainers, losers and most-active lists;
+- the same cached daily series supplies 20-day annualized historical volatility, relative volume,
+  absolute daily move and a labelled composite heat ranking over cached symbols only;
+- `GET /api/v1/market/ideas` returns those display-only lists; none of them changes RFQ terms,
+  issuer ranking, mail, quote cards or artifacts;
+- D1 cache rows remain shared across users, while `market_provider_daily_usage` enforces 24
+  attempted Alpha Vantage requests per UTC day; and
+- ADMIN cache health includes today's provider attempt count without payloads, identities or keys.
+
+Schema/configuration:
+
+- migration `0012_alpha_vantage_market_data.sql` copies the reconstructable public cache into a
+  table whose source check also accepts `ALPHA_VANTAGE`, preserves old rows, recreates indexes and
+  adds the provider daily-usage table; it was applied successfully to remote D1 on 2026-07-29;
+- the new required Secret is `ALPHA_VANTAGE_API_KEY`, entered only through Wrangler's hidden
+  prompt and its Secret name is present in production; do not put its value in chat, commands,
+  source, logs or Git;
+- `ALPHA_VANTAGE_DAILY_REQUEST_LIMIT=24` is the safety cap; and
+- the old encrypted FRED Secret is not read. Removing it is a separate remote operation and is not
+  required for this rollout.
+
+Verification completed:
+
+- `node --check backend-client.js`;
+- `node --check market-resources.mjs`;
+- `pnpm run typecheck`;
+- `pnpm test` — 19 files / 131 tests;
+- targeted market/admin/resource suite — 3 files / 25 tests; and
+- `pnpm run build` — Cloudflare dry-run succeeded with 14 static assets and existing bindings.
+
+Wrangler/Vitest printed known filesystem static-analysis warnings inside the managed sandbox, but
+all tests passed; the dry-run build was repeated outside that read restriction and passed.
+
+Production rollout evidence:
+
+- remote D1 migration `0012_alpha_vantage_market_data.sql` completed successfully;
+- the initial deployment was Worker `6cad336e-856c-44ef-9495-1c1d4812e3ad`;
+- authenticated verification found that the page still used the old fixed
+  `backend-client.js?v=backend-v5` browser cache key, so `index.html` now uses
+  `market-alpha-v1` for both `backend-client.js` and `styles.css`;
+- the corrected deployment is Worker `0c63296c-f61f-4a11-a358-30db6e783ac6`;
+- public health returned HTTP 200, the new assets returned HTTP 200, and unauthenticated
+  `/api/v1/market/ideas` correctly returned HTTP 401; and
+- an existing authenticated FCN analysis page loaded the new controls without creating or sending
+  a real RFQ.
+
+Provider verification gap:
+
+- the first ORCL, TSM and market-movers requests all reached Alpha Vantage, but the provider
+  returned an `Information` response which the current safe parser records as
+  `ALPHA_VANTAGE_RATE_LIMITED`;
+- remote D1 recorded three attempts for UTC date 2026-07-29 and no market payload;
+- both selected endpoints are documented by Alpha Vantage as available to free keys in the
+  configured end-of-day/compact form, so verify that the entered Secret is an Alpha Vantage key
+  (not a MarketData.app token), is activated and has not been throttled; and
+- do not clear cache or usage rows manually. Re-enter a verified Alpha Vantage key through the
+  hidden prompt, wait for the ten-minute failed-refresh backoff, then retry one symbol and the
+  market-movers panel.
+
+Not yet done:
+
+- no successful normalized Alpha Vantage payload has been observed; and
+- no provider licence confirmation has been recorded for broader institutional multi-user use.
+
+Preserve the user-owned untracked `.claude/` directory. The smallest safe next step is to verify
+the Alpha Vantage key at its source, replace only that Secret if necessary, wait for the existing
+backoff, and repeat the authenticated existing-page check before calling the provider integration
+fully operational.
 
 ## FRED 400 and TradingView client-block recovery (committed, pushed and deployed)
 

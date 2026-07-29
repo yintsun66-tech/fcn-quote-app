@@ -173,6 +173,31 @@ describe("official public market context", () => {
     expect(fred.data.series[0]?.change).toBeCloseTo(0.15);
   });
 
+  it("trims a copied FRED key and rejects an invalid key before any upstream request", async () => {
+    let observedKey = "";
+    const trimmingFetcher = publicDataFetcher(url => {
+      if (url.hostname === "api.stlouisfed.org") observedKey = url.searchParams.get("api_key") ?? "";
+    });
+    await fetchFredContext(
+      { ...testEnv, FRED_API_KEY: "  abcdefghijklmnopqrstuvwxyz123456\r\n" },
+      trimmingFetcher
+    );
+    expect(observedKey).toBe("abcdefghijklmnopqrstuvwxyz123456");
+
+    let requestCount = 0;
+    await expect(fetchFredContext(
+      { ...testEnv, FRED_API_KEY: "not-a-valid-key" },
+      (async () => {
+        requestCount += 1;
+        return jsonResponse({});
+      }) as typeof fetch
+    )).rejects.toMatchObject({
+      status: 503,
+      code: "FRED_KEY_INVALID_FORMAT"
+    });
+    expect(requestCount).toBe(0);
+  });
+
   it("returns authenticated SEC and FRED context and reuses shared fresh cache", async () => {
     const fetcher = publicDataFetcher();
     const first = await getMarketContext(

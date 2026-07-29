@@ -333,17 +333,17 @@ export async function fetchSecFilings(
 }
 
 async function fetchFredSeries(
-  env: AppEnv,
+  apiKey: string,
   seriesId: string,
   fetcher: Fetcher
 ): Promise<FredObservation> {
   const metadataUrl = new URL("/fred/series", FRED_ORIGIN);
   metadataUrl.searchParams.set("series_id", seriesId);
-  metadataUrl.searchParams.set("api_key", env.FRED_API_KEY);
+  metadataUrl.searchParams.set("api_key", apiKey);
   metadataUrl.searchParams.set("file_type", "json");
   const observationsUrl = new URL("/fred/series/observations", FRED_ORIGIN);
   observationsUrl.searchParams.set("series_id", seriesId);
-  observationsUrl.searchParams.set("api_key", env.FRED_API_KEY);
+  observationsUrl.searchParams.set("api_key", apiKey);
   observationsUrl.searchParams.set("file_type", "json");
   observationsUrl.searchParams.set("sort_order", "desc");
   observationsUrl.searchParams.set("limit", "10");
@@ -387,10 +387,14 @@ export async function fetchFredContext(
   env: AppEnv,
   fetcher: Fetcher = runtimeFetch
 ): Promise<CacheLoadResult<FredContext>> {
-  if (!env.FRED_API_KEY) {
+  const apiKey = String(env.FRED_API_KEY ?? "").trim();
+  if (!apiKey) {
     throw new AppError(503, "FRED_NOT_CONFIGURED", "FRED API 尚未設定。 ");
   }
-  const series = await Promise.all(FRED_SERIES.map(seriesId => fetchFredSeries(env, seriesId, fetcher)));
+  if (!/^[a-z0-9]{32}$/u.test(apiKey)) {
+    throw new AppError(503, "FRED_KEY_INVALID_FORMAT", "FRED API Key 格式不正確。 ");
+  }
+  const series = await Promise.all(FRED_SERIES.map(seriesId => fetchFredSeries(apiKey, seriesId, fetcher)));
   const sourceAsOf = series.map(item => item.observationDate).sort().at(-1) ?? null;
   return { data: { series }, sourceAsOf };
 }

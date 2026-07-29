@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 // The production module is a browser-native ES module copied as a static asset.
 // @ts-expect-error The root browser module intentionally has no backend TypeScript declaration.
-import { marketResourceDescriptor, tradingViewWidgetSrcdoc } from "../../market-resources.mjs";
+import { marketResourceDescriptor, tradingViewWidgetSrcdoc, tradingViewWidgetUrl } from "../../market-resources.mjs";
 
 describe("public market resource mapping", () => {
   it("maps supported Bloomberg US exchange suffixes to strict third-party symbols", () => {
@@ -42,5 +42,16 @@ describe("public market resource mapping", () => {
     expect(html).toContain("NASDAQ:AAPL");
     expect(html).toContain('name="referrer" content="no-referrer"');
     expect(html).not.toMatch(/rfq_|quote_|employee|branch/i);
+  });
+
+  it("builds a direct official widget URL without the client-blocked loader script", () => {
+    const url = new URL(tradingViewWidgetUrl(marketResourceDescriptor("MU UW")));
+    const settings = JSON.parse(decodeURIComponent(url.hash.slice(1)));
+    expect(url.origin).toBe("https://www.tradingview-widget.com");
+    expect(url.pathname).toBe("/embed-widget/advanced-chart/");
+    expect(url.searchParams.get("locale")).toBe("zh_TW");
+    expect(settings.symbol).toBe("NASDAQ:MU");
+    expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
+    expect(url.toString()).not.toContain("s3.tradingview.com");
   });
 });

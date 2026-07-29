@@ -85,3 +85,26 @@ export function tradingViewWidgetSrcdoc(descriptor) {
     </div>
   </body></html>`;
 }
+
+export function tradingViewWidgetUrl(descriptor) {
+  if (!descriptor?.supported || !/^(NASDAQ|NYSE|AMEX):[A-Z0-9.-]+$/.test(descriptor.tradingViewSymbol)) {
+    throw new Error("無法建立未映射標的的外部圖表。");
+  }
+
+  const configuration = {
+    autosize: true,
+    symbol: descriptor.tradingViewSymbol,
+    interval: "D",
+    timezone: "exchange",
+    theme: "light",
+    backgroundColor: "#ffffff",
+    gridColor: "rgba(8, 117, 99, 0.08)",
+    style: "1",
+    allow_symbol_change: false,
+    hide_side_toolbar: true,
+    save_image: false,
+    calendar: false,
+    support_host: "https://www.tradingview.com"
+  };
+  return `https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=zh_TW#${encodeURIComponent(JSON.stringify(configuration))}`;
+}

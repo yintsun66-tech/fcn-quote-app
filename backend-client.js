@@ -7,7 +7,7 @@ import {
 import {
   MARKET_RESOURCE_CONSENT_KEY,
   marketResourceDescriptor,
-  tradingViewWidgetSrcdoc
+  tradingViewWidgetUrl
 } from "./market-resources.mjs";
 
 (() => {
@@ -563,8 +563,8 @@ import {
     iframe.title = `${descriptor.ticker} TradingView 公開市場圖表`;
     iframe.loading = "lazy";
     iframe.referrerPolicy = "no-referrer";
-    iframe.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
-    iframe.srcdoc = tradingViewWidgetSrcdoc(descriptor);
+    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+    iframe.src = tradingViewWidgetUrl(descriptor);
     host.replaceChildren(iframe);
     host.dataset.loaded = "1";
     setMarketResourceConsent(true);

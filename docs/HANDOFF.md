@@ -4,11 +4,11 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `5fd12bd`, deployed as Worker
-`680e77ee-333d-4406-84bd-b71181c31d6d` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `335a561`, deployed as Worker
+`2e32a971-b1e4-482b-b3e4-300b1bb89c50` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## Local Zimbra manual-mail fallback (not committed, pushed or deployed)
+## Zimbra manual-mail fallback (committed, pushed and deployed)
 
 The static/manual email flow no longer immediately depends on `mailto:`. After issuer validation it
 copies the existing HTML table and opens a preparation dialog. The user can either:
@@ -29,7 +29,18 @@ Files: `mail-compose.mjs`, `app.js`, `index.html`, `styles.css`,
 and `version-status.html`. Syntax checks, TypeScript typecheck, **20 test files / 137 tests**, and
 the Cloudflare dry-run build with 15 public assets pass. A local Chromium walkthrough confirmed
 HTML clipboard preparation, recipient/subject display and rejection of non-HTTPS Zimbra URLs.
-No real Zimbra page was opened and no email was sent. Preserve `.claude/settings.local.json`.
+Implementation commit `335a561` is pushed to `origin/codex/market-analysis-phase2-4`. Cloudflare
+deployment first published the feature as Worker `5e74d55e-6969-4eae-9486-c871e3c85f5b`; the
+final status-page deployment is Worker `2e32a971-b1e4-482b-b3e4-300b1bb89c50`. Cache-busting
+verification returned HTTP 200 for the homepage, `app.js`, `mail-compose.mjs` and API health, with
+the expected Zimbra markers. No real Zimbra page was opened and no email was sent.
+
+The allowlisted public assets were independently synced to `yintsun66-tech/fcnV2` as commit
+`fcd2996d537599d9090fa1a3be932ba5b2bf6e39`. Source/destination SHA-256 comparison had zero
+mismatches; no Worker source, migration, Secret, D1/R2 content or private fixture was copied.
+GitHub Pages verification returned HTTP 200 for the homepage, `app.js`, `mail-compose.mjs` and
+`version-status.html`, with the expected Zimbra/source-commit markers. Preserve
+`.claude/settings.local.json`.
 
 ## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
 
@@ -783,13 +794,14 @@ or issuer replies are healthy. Verify each boundary separately.
 - Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
   (`feat: publish FCN V2 static snapshot`).
 - Current static program commit:
-  `3ae50b78fb90ae9563c649ce2c1206a0591cf154`.
-- Current static repository HEAD after the public README deployment record:
-  `2664d3497cf8b5d0359ddccbb8e218339666217a`.
+  `fcd2996d537599d9090fa1a3be932ba5b2bf6e39`.
+- Current static repository HEAD:
+  `fcd2996d537599d9090fa1a3be932ba5b2bf6e39`.
 - Snapshot source: the allowlisted public assets prepared from
-  `feature/subject-branch-correlation` at implementation baseline `98d969c`.
+  `codex/market-analysis-phase2-4` at implementation baseline `335a561`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
-  `guide.html`, `version-status.html`, `交易所查詢0715.csv`,
+  `mail-compose.mjs`, `market-analysis.mjs`, `market-resources.mjs`, `guide.html`,
+  `version-status.html`, `交易所查詢0715.csv`, `vendor/html2canvas-1.4.1.min.js`,
   `backend/shared/email-formats.js`, and a static-only `README.md`.
 - The updated `app.js` returned HTTP 200 after the Pages build. A rendered browser check confirmed
   the static currency selector includes `ZAR`, keeps `USD` selected, and does not activate

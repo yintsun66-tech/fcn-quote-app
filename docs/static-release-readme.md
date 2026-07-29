@@ -3,7 +3,8 @@
 這個 repository 是 `fcn-quote-app` 的公開靜態快照，使用 GitHub Pages 提供：
 
 - 交易條件輸入頁；
-- 手動開啟郵件與複製 HTML 詢價表格；
+- 手動開啟郵件、複製 HTML 詢價表格與 Edge／Zimbra 網頁備援；
+- 美股／日股熱門榜及公開市場資料連結；
 - 手機／桌面響應式介面；
 - 使用說明及版本部署狀態。
 
@@ -16,10 +17,10 @@
 ## 版本基準
 
 - 靜態同步來源：`yintsun66-tech/fcn-quote-app`
-- 來源分支：`feature/subject-branch-correlation`
-- 來源功能 HEAD：`98d969c`
-- 正式靜態程式基線：Cloudflare 功能 commit `98d969c`
-- 同步日期：2026-07-27（Asia/Taipei）
+- 來源分支：`codex/market-analysis-phase2-4`
+- 來源功能 HEAD：`335a561`
+- 正式靜態程式基線：Cloudflare 功能 commit `335a561`
+- 同步日期：2026-07-30（Asia/Taipei）
 
 ## 重要邊界
 

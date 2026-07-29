@@ -40,17 +40,20 @@ provider answered with an `Information` envelope), and a shared market-wide list
 of a 24-request daily budget. Hot lists also belong *before* an RFQ exists, not behind a finalized
 ranking.
 
-- **Homepage panel.** `index.html` gains a collapsed 「美股／日股熱門榜」 section above the
-  trade-input workspace, using TradingView's **hotlists** widget. The widget supplies its own
-  活躍／漲幅榜／跌幅榜 tabs, so there is no ranking selector. Client-side only (`app.js` +
-  `market-resources.mjs`), so it works in both runtime modes.
-- **Japan is link-only, and must stay that way.** The first attempt used the screener widget, which
-  showed 「沒有商品符合您的條件」 in production. Probing the live widgets established that the
-  screener is unusable for any market, that `hotlists` `exchange: "TSE"` is refused outright, and
-  that `"JP"`, `"JPX"` and `"TYO"` are accepted but return **US** rows — i.e. they would display US
-  stocks under a Japan label. Selecting 日股 therefore shows an explanation plus a link to
-  TradingView's Japan market-movers page. **Do not set the Japan exchange to `JP`/`JPX`/`TYO`;** it
-  looks correct and is wrong. Full evidence table in ADR 0024.
+- **Homepage panel mirrors TradingView's own hierarchy.** `index.html` gains a collapsed
+  「美股／日股熱門榜」 section above the trade-input workspace: a market selector
+  (美股 → NASDAQ, NYSE, NYSE ARCA, OTC ／ 日股 → TSE, NAG, FSE, SAPSE) above five rankings
+  (波動最大, 大型股, 現金最多, 成交最活躍, 營收最高). The rankings are links to TradingView's own
+  pages and work for **both** markets; 美股 additionally embeds a live hotlists widget inline.
+  Client-side only (`app.js` + `market-resources.mjs`), so it works in both runtime modes.
+- **The embeddable widgets cannot deliver the rankings or Japan — do not retry them.** Measured
+  against the live widgets: `most_volatile` is recognized but returns zero rows; `large_cap`,
+  `highest_cash`, `most_active` and `highest_revenue` are not recognized and fall back to an
+  unranked 18,057-symbol "General" list; `market: "japan"` is ignored entirely (returns AAPL in
+  USD); `hotlists exchange "TSE"` is refused; and `"JP"`/`"JPX"`/`"TYO"` silently return US rows.
+  **Do not set the Japan exchange to `JP`/`JPX`/`TYO`** — it looks correct and is wrong. The five
+  rankings and the USA/JAPAN grouping exist on TradingView's website only; all ten pages return
+  HTTP 200. Full evidence table in ADR 0024.
 - **Consent still gates it.** No iframe exists until the user ticks consent (verified in-browser);
   unticking unloads it. Consent is per browser (`HOTLIST_CONSENT_KEY`).
 - **The widget URL is built directly** (no TradingView loader script in our origin), and the iframe

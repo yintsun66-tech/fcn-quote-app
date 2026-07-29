@@ -15,16 +15,31 @@ export const HOTLIST_CONSENT_KEY = "fcn-market-hotlist-consent:v1";
 export const HOTLIST_MARKETS = Object.freeze({
   us: Object.freeze({
     label: "美股",
+    exchanges: "NASDAQ, NYSE, NYSE ARCA, OTC",
+    marketPath: "stocks-usa",
     exchange: "US",
-    embeddable: true,
-    fallbackUrl: "https://www.tradingview.com/markets/stocks-usa/market-movers-active/"
+    embeddable: true
   }),
   japan: Object.freeze({
     label: "日股",
+    exchanges: "TSE, NAG, FSE, SAPSE",
+    marketPath: "stocks-japan",
     exchange: null,
-    embeddable: false,
-    fallbackUrl: "https://www.tradingview.com/markets/stocks-japan/market-movers-active/"
+    embeddable: false
   })
+});
+
+// TradingView's own market-movers rankings. The embeddable screener widget cannot serve these:
+// only `most_volatile` is even recognized and it returns zero rows, the others fall back to an
+// unranked 18,000-symbol "General" list, and `market: "japan"` is ignored entirely (it returns US
+// symbols priced in USD). Every ranking is therefore opened on TradingView's site, where the same
+// USA/JAPAN + preset hierarchy exists and works for both markets.
+export const HOTLIST_SCREENS = Object.freeze({
+  most_volatile: Object.freeze({ label: "波動最大", slug: "market-movers-most-volatile" }),
+  large_cap: Object.freeze({ label: "大型股", slug: "market-movers-large-cap" }),
+  highest_cash: Object.freeze({ label: "現金最多", slug: "market-movers-highest-cash" }),
+  most_active: Object.freeze({ label: "成交最活躍", slug: "market-movers-active" }),
+  highest_revenue: Object.freeze({ label: "營收最高", slug: "market-movers-highest-revenue" })
 });
 
 // Own-property lookups only: a plain `map[key]` would resolve inherited keys such as `__proto__`
@@ -39,9 +54,23 @@ export function hotlistDescriptor(marketKey) {
   return {
     marketKey,
     label: market.label,
+    exchanges: market.exchanges,
     embeddable: market.embeddable,
-    fallbackUrl: market.fallbackUrl
+    fallbackUrl: hotlistScreenUrl(marketKey, "most_active"),
+    screens: Object.keys(HOTLIST_SCREENS).map(screenKey => ({
+      screenKey,
+      label: HOTLIST_SCREENS[screenKey].label,
+      url: hotlistScreenUrl(marketKey, screenKey)
+    }))
   };
+}
+
+// Deep link into TradingView's own ranking page for one market and preset.
+export function hotlistScreenUrl(marketKey, screenKey) {
+  const market = allowlisted(HOTLIST_MARKETS, marketKey);
+  const screen = allowlisted(HOTLIST_SCREENS, screenKey);
+  if (!market || !screen) throw new Error("無法建立未支援的熱門榜連結。");
+  return `https://www.tradingview.com/markets/${market.marketPath}/${screen.slug}/`;
 }
 
 // Builds the TradingView hot-list embed URL directly instead of injecting their loader script into

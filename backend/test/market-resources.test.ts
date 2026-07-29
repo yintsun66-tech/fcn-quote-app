@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 // The production module is a browser-native ES module copied as a static asset.
 // @ts-expect-error The root browser module intentionally has no backend TypeScript declaration.
-import { hotlistDescriptor, hotlistWidgetUrl, marketResourceDescriptor, tradingViewWidgetSrcdoc, tradingViewWidgetUrl } from "../../market-resources.mjs";
+import { hotlistDescriptor, hotlistScreenUrl, hotlistWidgetUrl, marketResourceDescriptor, tradingViewWidgetSrcdoc, tradingViewWidgetUrl } from "../../market-resources.mjs";
 
 describe("public market resource mapping", () => {
   it("maps supported Bloomberg US exchange suffixes to strict third-party symbols", () => {
@@ -73,15 +73,33 @@ describe("public market resource mapping", () => {
     // "JP"/"JPX"/"TYO" are accepted upstream but silently return US rows, so Japan must never be
     // embedded — it would show US stocks under a Japan label.
     expect(hotlistDescriptor("japan")).toMatchObject({ marketKey: "japan", embeddable: false });
-    expect(hotlistDescriptor("japan").fallbackUrl).toContain("stocks-japan");
     expect(() => hotlistWidgetUrl("japan")).toThrow();
   });
 
-  it("fails closed for hot-list markets outside the allowlist", () => {
+  it("links the five TradingView rankings for both markets", () => {
+    const expected = ["most_volatile", "large_cap", "highest_cash", "most_active", "highest_revenue"];
+    for (const [marketKey, marketPath] of [["us", "stocks-usa"], ["japan", "stocks-japan"]] as const) {
+      const descriptor = hotlistDescriptor(marketKey);
+      expect(descriptor.screens.map((screen: { screenKey: string }) => screen.screenKey)).toEqual(expected);
+      for (const screen of descriptor.screens as Array<{ url: string }>) {
+        const url = new URL(screen.url);
+        expect(url.origin).toBe("https://www.tradingview.com");
+        expect(url.pathname).toContain(`/markets/${marketPath}/market-movers-`);
+        expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
+      }
+    }
+    expect(hotlistScreenUrl("japan", "highest_revenue"))
+      .toBe("https://www.tradingview.com/markets/stocks-japan/market-movers-highest-revenue/");
+  });
+
+  it("fails closed for hot-list markets or rankings outside the allowlist", () => {
     expect(hotlistDescriptor("us")).toMatchObject({ marketKey: "us", embeddable: true });
     expect(hotlistDescriptor("taiwan")).toBeNull();
     expect(hotlistDescriptor("__proto__")).toBeNull();
     expect(() => hotlistWidgetUrl("taiwan")).toThrow();
     expect(() => hotlistWidgetUrl("'; alert(1);//")).toThrow();
+    expect(() => hotlistScreenUrl("taiwan", "large_cap")).toThrow();
+    expect(() => hotlistScreenUrl("us", "__proto__")).toThrow();
+    expect(() => hotlistScreenUrl("us", "../../evil")).toThrow();
   });
 });

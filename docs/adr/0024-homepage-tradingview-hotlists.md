@@ -28,11 +28,13 @@ Phase 2 third-party resource in this application.
 
 ## Decision
 
-1. **Hot lists move to the homepage and are served by TradingView's hotlists widget.**
-   `index.html` gains a collapsed 「美股／日股熱門榜」 panel above the trade-input workspace. The
-   widget supplies its own 活躍／漲幅榜／跌幅榜 tabs, so this application adds no ranking selector.
-   It runs in both runtime modes because it is pure client-side markup in `app.js` and
-   `market-resources.mjs`.
+1. **Hot lists move to the homepage.** `index.html` gains a collapsed 「美股／日股熱門榜」 panel
+   above the trade-input workspace, mirroring TradingView's own hierarchy: a market selector
+   (美股 → NASDAQ, NYSE, NYSE ARCA, OTC ／ 日股 → TSE, NAG, FSE, SAPSE) above five rankings
+   (波動最大, 大型股, 現金最多, 成交最活躍, 營收最高). The five rankings are **links to
+   TradingView's own pages** and work for both markets. For 美股 only, an embedded hotlists widget
+   additionally shows live 活躍／漲幅榜／跌幅榜 rows inline. It runs in both runtime modes because
+   it is pure client-side markup in `app.js` and `market-resources.mjs`.
 2. **Alpha Vantage is narrowed to the previous close.** The per-symbol
    `TIME_SERIES_DAILY&outputsize=compact` path that fills 「輸入標的參考現價」 is unchanged.
    `TOP_GAINERS_LOSERS`, the movers cache, the cached-universe rankings, the composite heat score
@@ -61,8 +63,15 @@ widgets with TradingView's own embed tags established why:
 | `hotlists` `exchange: "NASDAQ"` (control) | Different rows to `US` — the parameter *is* honoured |
 | `hotlists` `exchange: "TSE"` | Refused: "This exchange is not available for widget" |
 | `hotlists` `exchange: "JP"` / `"JPX"` / `"TYO"` | Accepted, but returns **US** rows |
-| `screener` `market: "america"` / `"japan"` | "No symbols match your criteria" — unusable |
+| `screener` `defaultScreen: "most_volatile"` | Preset recognized, but returns **zero** rows |
+| `screener` `large_cap` / `highest_cash` / `most_active` / `highest_revenue` | Not recognized — falls back to an unranked 18,057-symbol "General" list |
+| `screener` `market: "japan"` (any preset) | Ignored — returns AAPL priced in **USD** |
 | `market-overview` with `TSE:` symbols | Symbols resolve to errors, no prices |
+
+The five named rankings (Most volatile, Large cap, Highest cash, Most active, Highest revenue) and
+the USA/JAPAN exchange grouping exist on **TradingView's website**, not in the free embeddable
+widgets. All ten pages (five rankings × two markets) return HTTP 200 and are therefore linked
+directly.
 
 Two conclusions follow. The screener widget is not usable for this purpose at all, and
 **TradingView's free widgets have no Japan hot list**. The `JP`/`JPX`/`TYO` values are the dangerous

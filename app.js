@@ -6,7 +6,7 @@ import {
   HOTLIST_CONSENT_KEY,
   hotlistDescriptor,
   hotlistWidgetUrl,
-} from "./market-resources.mjs?v=market-hotlist-v2";
+} from "./market-resources.mjs?v=market-hotlist-v3";
 
 (() => {
   "use strict";
@@ -689,7 +689,8 @@ import {
     const unloadButton = panel.querySelector("#hotlistUnload");
     const status = panel.querySelector("#hotlistStatus");
     const host = panel.querySelector("#hotlistWidget");
-    const fallbackLink = panel.querySelector("#hotlistFallbackLink");
+    const screensNav = panel.querySelector("#hotlistScreens");
+    const exchanges = panel.querySelector("#hotlistExchanges");
 
     let stored = null;
     try {
@@ -699,9 +700,21 @@ import {
     }
     consent.checked = stored === "1";
 
-    function syncFallback() {
+    // Rebuilds the ranking links and exchange caption for the selected market. These are plain
+    // links to TradingView's own pages, so they need no consent and work for both markets.
+    function syncMarket() {
       const descriptor = hotlistDescriptor(marketSelect.value);
-      if (descriptor) fallbackLink.href = descriptor.fallbackUrl;
+      if (!descriptor) return;
+      exchanges.textContent = descriptor.exchanges;
+      screensNav.replaceChildren(...descriptor.screens.map(screen => {
+        const link = document.createElement("a");
+        link.href = screen.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer nofollow";
+        link.textContent = screen.label;
+        return link;
+      }));
+      loadButton.hidden = !descriptor.embeddable || !unloadButton.hidden;
     }
 
     function unload() {
@@ -721,12 +734,11 @@ import {
         status.textContent = "不支援的市場。";
         return;
       }
-      // TradingView's free hot-list widget covers US exchanges only, and its Japan-looking exchange
-      // values silently return US rows. Say so plainly and link out rather than show US stocks
-      // under a Japan label.
+      // TradingView's free widgets cover US exchanges only; their Japan-looking values silently
+      // return US rows. Say so plainly rather than show US stocks under a Japan label.
       if (!descriptor.embeddable) {
         unload();
-        status.textContent = `${descriptor.label}熱門榜目前無法內嵌（TradingView 免費 widget 僅提供美股），請改用下方連結開啟 TradingView 網站查看。`;
+        status.textContent = `${descriptor.label}沒有可內嵌的即時熱門榜（TradingView 免費 widget 僅提供美股），請改用上方排行連結開啟 TradingView 網站。`;
         return;
       }
       let url;
@@ -759,12 +771,12 @@ import {
       if (!consent.checked) unload();
     });
     marketSelect.addEventListener("change", () => {
-      syncFallback();
+      syncMarket();
       if (!unloadButton.hidden) load();
     });
     loadButton.addEventListener("click", load);
-    unloadButton.addEventListener("click", unload);
-    syncFallback();
+    unloadButton.addEventListener("click", () => { unload(); syncMarket(); });
+    syncMarket();
   }
 
   if (!restoreDraft()) createRow();

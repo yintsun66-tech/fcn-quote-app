@@ -7,8 +7,10 @@
 以靜態網頁伺服器開啟此資料夾（例如 VS Code 的 Live Server），再開啟
 `index.html`。請保留同資料夾內的 `交易所查詢0715.csv`，供 BBG Code 自動補正使用。
 
-此模式仍保留 GitHub Pages 相容性。「發送詢價條件」會使用 `mailto:` 開啟裝置的預設
-郵件 App，並把 HTML 詢價表格複製到剪貼簿供使用者手動貼上。
+此模式仍保留 GitHub Pages 相容性。「發送詢價條件」會先把 HTML 詢價表格複製到
+剪貼簿，再讓使用者選擇裝置的預設郵件 App（`mailto:`）或已在同一個瀏覽器登入的
+Zimbra 網頁版。Zimbra 網址只保存在該瀏覽器，不會上傳；網頁不會代替使用者按下寄出。
+Cloudflare 正式模式的「手動貼郵件詢價」也共用此備援流程，後端自動寄信功能不受影響。
 
 ### Cloudflare 正式模式
 
@@ -72,7 +74,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 首頁「美股／日股熱門榜」（ADR 0024）在靜態版與 Cloudflare 版皆可使用；不需 API Key、
   不佔 Alpha Vantage 額度。五種排行以官網連結提供、美日皆可用；美股另內嵌即時熱門榜，
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
-- 目前驗證基線為 19 個測試檔、133 項測試；JavaScript 語法、TypeScript typecheck、
+- 目前驗證基線為 20 個測試檔、137 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。

@@ -9,6 +9,7 @@ const assets = [
   "index.html",
   "styles.css",
   "app.js",
+  "mail-compose.mjs",
   "backend-client.js",
   "market-analysis.mjs",
   "market-resources.mjs",

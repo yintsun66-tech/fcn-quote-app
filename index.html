@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=market-hotlist-v3" />
+    <link rel="stylesheet" href="./styles.css?v=zimbra-compose-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -181,7 +181,7 @@
           <option value="CA">CA</option>
           <option value="ALL">全部（依序建立 8 封郵件）</option>
         </select>
-        <p id="emailIssuerHint" class="dialog-hint">「全部」會在您確認已寄出目前郵件後，再開啟下一封，避免裝置一次只保留最後一封草稿。</p>
+        <p id="emailIssuerHint" class="dialog-hint">系統會先複製 HTML 表格，再讓您選擇裝置預設郵件程式或已在 Edge 登入的 Zimbra 網頁版。「全部」會逐封準備，避免裝置只保留最後一封草稿。</p>
         <div class="dialog-actions">
           <button id="cancelEmailIssuer" type="button" class="secondary">取消</button>
           <button type="submit" class="primary">準備郵件</button>
@@ -191,18 +191,27 @@
 
     <dialog id="emailQueueDialog" class="issuer-dialog">
       <div class="dialog-content">
-        <h2>全部詢價郵件</h2>
+        <h2>準備詢價郵件</h2>
         <p id="emailQueueProgress"></p>
         <p id="emailQueueDetail" class="dialog-hint"></p>
+        <p id="emailClipboardStatus" class="email-clipboard-status" aria-live="polite"></p>
+        <div class="email-compose-actions">
+          <button id="openDefaultEmail" type="button" class="secondary">使用裝置預設郵件程式</button>
+          <label for="zimbraUrl">Zimbra 網頁網址</label>
+          <input id="zimbraUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://貴行的-zimbra-網址/" />
+          <small>第一次請貼上您目前已登入的 Zimbra 網址；只會儲存在這台瀏覽器，不會上傳。若未直接進入新郵件，請在 Zimbra 按「新郵件」，收件人與主旨可依上方資訊填入。</small>
+          <button id="openZimbraEmail" type="button" class="primary">開啟 Zimbra 新郵件</button>
+          <button id="copyEmailAgain" type="button" class="secondary">重新複製詢價表格</button>
+        </div>
         <div class="dialog-actions">
           <button id="cancelEmailQueue" type="button" class="secondary">結束流程</button>
-          <button id="nextEmailQueue" type="button" class="primary">我已寄出，開啟下一封</button>
+          <button id="nextEmailQueue" type="button" class="primary">這封已完成，準備下一封</button>
         </div>
       </div>
     </dialog>
 
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./app.js?v=market-hotlist-v3"></script>
+    <script type="module" src="./app.js?v=zimbra-compose-v1"></script>
     <script type="module" src="./backend-client.js?v=market-hotlist-v3"></script>
   </body>
 </html>

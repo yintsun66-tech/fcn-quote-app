@@ -1,13 +1,35 @@
 # Project handoff
 
-Updated: 2026-07-29 (Asia/Taipei)
+Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current Git baseline: implementation commit `584d33d` is the production source, deployed as Worker
-`a71a2da2-26fa-42b2-818a-ea966cc57d8d` on 2026-07-29. It also absorbed the previously uncommitted
-2026-07-29 documentation refresh. Previous baseline: `c487355` / handoff `7d903ee` / Worker
-`0c63296c-f61f-4a11-a358-30db6e783ac6`.
+Current production source: implementation commit `5fd12bd`, deployed as Worker
+`680e77ee-333d-4406-84bd-b71181c31d6d` on 2026-07-30. Current branch HEAD may include later
+documentation-only commits and must be resolved from Git history.
+
+## Local Zimbra manual-mail fallback (not committed, pushed or deployed)
+
+The static/manual email flow no longer immediately depends on `mailto:`. After issuer validation it
+copies the existing HTML table and opens a preparation dialog. The user can either:
+
+- use the existing device-default `mailto:` path; or
+- enter the HTTPS address of a Zimbra Web Client already signed in within Edge and open a Zimbra
+  compose URL carrying only the fixed recipient and existing subject.
+
+The Zimbra address is stored only in browser `localStorage`, is never sent to the backend and must
+not contain credentials. Quote-table HTML remains on the clipboard and is not placed in the Zimbra
+URL or browser history. The browser cannot inspect another tab, verify Zimbra login or press Send;
+the user still pastes the table and sends the message. If a Zimbra version ignores the compose
+parameters, it may open the mailbox instead; the user can select New Message and use the recipient
+and subject displayed in the preparation dialog.
+
+Files: `mail-compose.mjs`, `app.js`, `index.html`, `styles.css`,
+`backend/scripts/prepare-assets.mjs`, `backend/test/mail-compose.test.ts`, `guide.html`, `README.md`
+and `version-status.html`. Syntax checks, TypeScript typecheck, **20 test files / 137 tests**, and
+the Cloudflare dry-run build with 15 public assets pass. A local Chromium walkthrough confirmed
+HTML clipboard preparation, recipient/subject display and rejection of non-HTTPS Zimbra URLs.
+No real Zimbra page was opened and no email was sent. Preserve `.claude/settings.local.json`.
 
 ## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
 

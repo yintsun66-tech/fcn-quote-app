@@ -7,6 +7,11 @@ import {
   hotlistDescriptor,
   hotlistWidgetUrl,
 } from "./market-resources.mjs?v=market-hotlist-v3";
+import {
+  ZIMBRA_URL_STORAGE_KEY,
+  buildMailtoUrl,
+  buildZimbraComposeUrl,
+} from "./mail-compose.mjs?v=zimbra-compose-v1";
 
 (() => {
   "use strict";
@@ -28,10 +33,13 @@ import {
   const emailQueueDialog = document.querySelector("#emailQueueDialog");
   const emailQueueProgress = document.querySelector("#emailQueueProgress");
   const emailQueueDetail = document.querySelector("#emailQueueDetail");
+  const emailClipboardStatus = document.querySelector("#emailClipboardStatus");
+  const zimbraUrlInput = document.querySelector("#zimbraUrl");
   let selectedIssuer = "BNP";
   let issuerDialogMode = "download";
   let emailQueue = [];
   let emailQueueIndex = -1;
+  let emailClipboardFormat = "none";
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
@@ -565,28 +573,76 @@ import {
     return rows;
   }
 
-  async function openInstitutionEmail(payload) {
-    const clipboardFormat = await copyEmailTable(payload.html, payload.plainText).catch(() => "none");
-    const mailBody = clipboardFormat === "html" ? "" : payload.plainText;
-    const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(mailBody)}`;
-    window.location.href = uri;
-    setStatus(
-      clipboardFormat === "html"
-        ? `已開啟 ${payload.label} 郵件草稿並複製對應 HTML 表格；請在郵件本文貼上後寄送。`
-        : `已開啟 ${payload.label} 郵件草稿；此裝置無法複製 HTML 表格，已改帶入文字格式內容。`,
-      true
-    );
+  function currentEmailPayload() {
+    return emailQueue[emailQueueIndex] ?? null;
   }
 
-  async function openQueuedEmail() {
-    const payload = emailQueue[emailQueueIndex];
+  function updateClipboardStatus(format) {
+    emailClipboardStatus.textContent = format === "html"
+      ? "HTML 詢價表格已複製。開啟郵件後，請在本文按「貼上」。"
+      : format === "text"
+        ? "此瀏覽器只允許複製文字格式；開啟郵件後，請在本文按「貼上」。"
+        : "瀏覽器未允許剪貼簿存取；使用預設郵件程式時會改把文字內容帶入本文。";
+    emailClipboardStatus.dataset.state = format;
+  }
+
+  async function copyCurrentEmailTable() {
+    const payload = currentEmailPayload();
+    if (!payload) return;
+    emailClipboardFormat = await copyEmailTable(payload.html, payload.plainText).catch(() => "none");
+    updateClipboardStatus(emailClipboardFormat);
+  }
+
+  function storedZimbraUrl() {
+    try { return localStorage.getItem(ZIMBRA_URL_STORAGE_KEY) ?? ""; }
+    catch { return ""; }
+  }
+
+  function saveZimbraUrl(url) {
+    try { localStorage.setItem(ZIMBRA_URL_STORAGE_KEY, url); }
+    catch { /* Private browsing may disable storage; opening Zimbra should still work. */ }
+  }
+
+  async function prepareQueuedEmail() {
+    const payload = currentEmailPayload();
     if (!payload) return;
     emailQueueProgress.textContent = `第 ${emailQueueIndex + 1} / ${emailQueue.length} 封：${payload.label}`;
-    emailQueueDetail.textContent = `主旨：${payload.subject}。請貼上已複製的表格並寄出，完成後回到此頁開啟下一封。`;
+    emailQueueDetail.textContent = `收件人：${MAIL_TO}｜主旨：${payload.subject}`;
     const nextButton = document.querySelector("#nextEmailQueue");
-    nextButton.textContent = emailQueueIndex === emailQueue.length - 1 ? "我已寄出，完成流程" : "我已寄出，開啟下一封";
+    nextButton.textContent = emailQueueIndex === emailQueue.length - 1 ? "這封已完成，結束流程" : "這封已完成，準備下一封";
     if (!emailQueueDialog.open) emailQueueDialog.showModal();
-    await openInstitutionEmail(payload);
+    await copyCurrentEmailTable();
+  }
+
+  function openPreparedEmail(mode) {
+    const payload = currentEmailPayload();
+    if (!payload) return;
+    try {
+      if (mode === "zimbra") {
+        const zimbraUrl = zimbraUrlInput.value.trim();
+        const composeUrl = buildZimbraComposeUrl(zimbraUrl, {
+          to: MAIL_TO,
+          subject: payload.subject,
+        });
+        saveZimbraUrl(zimbraUrl);
+        const opened = window.open(composeUrl, "_blank");
+        if (opened) opened.opener = null;
+        if (!opened) throw new Error("Edge 已阻擋新分頁，請允許此網站開啟彈出式視窗後再試一次。");
+        setStatus(`已開啟 ${payload.label} 的 Zimbra 郵件頁；請貼上已複製的詢價表格並寄出。`, true);
+        return;
+      }
+      const mailBody = emailClipboardFormat === "html" ? "" : payload.plainText;
+      window.location.href = buildMailtoUrl({
+        to: MAIL_TO,
+        subject: payload.subject,
+        body: mailBody,
+      });
+      setStatus(`已交由裝置的預設郵件程式開啟 ${payload.label} 郵件；請貼上表格並寄出。`, true);
+    } catch (error) {
+      setStatus(error.message);
+      emailClipboardStatus.textContent = error.message;
+      emailClipboardStatus.dataset.state = "error";
+    }
   }
 
   function showMailIssuerDialog() {
@@ -616,13 +672,20 @@ import {
       const rows = validatedMailRows();
       const selection = emailIssuerSelect.value;
       emailIssuerDialog.close();
-      if (selection === "ALL") {
-        emailQueue = SHARED_MAIL_INSTITUTION_ORDER.map(key => buildInstitutionEmail(key, rows));
-        emailQueueIndex = 0;
-        await openQueuedEmail();
-      } else {
-        await openInstitutionEmail(buildInstitutionEmail(selection, rows));
-      }
+      emailQueue = selection === "ALL"
+        ? SHARED_MAIL_INSTITUTION_ORDER.map(key => buildInstitutionEmail(key, rows))
+        : [buildInstitutionEmail(selection, rows)];
+      emailQueueIndex = 0;
+      zimbraUrlInput.value = storedZimbraUrl();
+      await prepareQueuedEmail();
+    } catch (error) { setStatus(error.message); }
+  });
+  document.querySelector("#openDefaultEmail").addEventListener("click", () => openPreparedEmail("default"));
+  document.querySelector("#openZimbraEmail").addEventListener("click", () => openPreparedEmail("zimbra"));
+  document.querySelector("#copyEmailAgain").addEventListener("click", async () => {
+    try {
+      await copyCurrentEmailTable();
+      setStatus("已重新複製目前郵件的詢價表格。", true);
     } catch (error) { setStatus(error.message); }
   });
   document.querySelector("#cancelEmailQueue").addEventListener("click", () => {
@@ -640,7 +703,7 @@ import {
       return;
     }
     emailQueueIndex += 1;
-    try { await openQueuedEmail(); } catch (error) { setStatus(error.message); }
+    try { await prepareQueuedEmail(); } catch (error) { setStatus(error.message); }
   });
   document.querySelector("#generateQuoteImage").addEventListener("click", () => {
     try {

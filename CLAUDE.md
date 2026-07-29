@@ -35,7 +35,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - Production implementation commit `5fd12bd` is documented by this handoff and
   deployed as Worker `680e77ee-333d-4406-84bd-b71181c31d6d` on 2026-07-30. Resolve the current
   branch HEAD from Git rather than copying a historical handoff hash. The current verification
-  baseline is 19 test files / 131 tests. A deployment record is evidence of Worker/static-asset
+  baseline is 20 test files / 137 tests. A deployment record is evidence of Worker/static-asset
   publication, not evidence that Alpha Vantage returned usable data or that real bank mail was
   delivered.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is

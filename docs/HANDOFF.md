@@ -4,6 +4,47 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+## FRED 400 and TradingView client-block recovery (committed, pushed and deployed)
+
+The post-deployment `MU` load proves that the Cloudflare redirect fix is working: SEC instrument
+and filings rows are now `FRESH`, while only `fred:macro:v1` is
+`ERROR / UPSTREAM_HTTP_400`. The official FRED API requires a 32-character lowercase
+alphanumeric API key. The current production Secret exists, but its value cannot be inspected and
+the pre-recovery upstream 400 meant it had to be re-entered or otherwise verified through Wrangler's hidden
+prompt.
+
+The same user browser returns `net::ERR_BLOCKED_BY_CLIENT` when opening TradingView's documented
+`s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js` loader. In that browser the
+official direct chart at `www.tradingview-widget.com/embed-widget/advanced-chart/` loads the `MU`
+chart successfully.
+
+The deployed recovery:
+
+- trims harmless leading/trailing whitespace from `FRED_API_KEY`, rejects any nonconforming key
+  locally as `FRED_KEY_INVALID_FORMAT`, and never logs or returns the key;
+- replaces the client-blocked TradingView loader script with the official direct widget URL;
+- keeps the chart in a cross-origin sandboxed iframe, passes only the mapped public ticker, uses
+  no referrer, and does not add RFQ, quote, employee, branch or issuer information; and
+- adds regression tests for copied-key trimming, invalid-key rejection and the direct widget URL.
+
+Verification:
+
+- root JavaScript syntax checks passed;
+- `pnpm test` passed: 19 files / 127 tests;
+- `pnpm run typecheck` passed; and
+- `pnpm run build` passed with 14 static assets and all existing bindings.
+
+Implementation commit `4896b7f` is pushed to `origin/codex/market-analysis-phase2-4`. The FRED
+Secret was re-entered only through Wrangler's hidden prompt; Cloudflare recorded Secret Change
+version `2b550fc4-4b29-4842-ac9e-e36c406ebd27` without exposing its value. Worker version
+`528cc15e-72c7-41c0-a514-4a0ccb03f696` is deployed with all previous domains, mail, Queue, D1,
+R2, Durable Object and schedule bindings intact.
+
+Post-deploy checks confirm API health returns HTTP 200 and the live client/resources contain the
+direct `www.tradingview-widget.com` implementation. The final authenticated `MU` click is pending
+only because the application session expired; after login, confirm FRED becomes `FRESH` and the
+embedded chart renders without the blocked `s3.tradingview.com` loader.
+
 ## SEC/FRED first authenticated-load recovery (deployed; final UI check pending login)
 
 The first authenticated production load for `MU` reached the market-context API and rate limiter,

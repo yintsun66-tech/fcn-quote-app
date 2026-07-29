@@ -198,6 +198,29 @@ describe("official public market context", () => {
     expect(requestCount).toBe(0);
   });
 
+  it("retries one transient FRED edge failure and avoids parallel upstream requests", async () => {
+    const delegate = publicDataFetcher();
+    let requestCount = 0;
+    let activeRequests = 0;
+    let maximumConcurrentRequests = 0;
+    const transientFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestCount += 1;
+      activeRequests += 1;
+      maximumConcurrentRequests = Math.max(maximumConcurrentRequests, activeRequests);
+      try {
+        if (requestCount === 1) return new Response("temporary edge failure", { status: 520 });
+        return await delegate(input, init);
+      } finally {
+        activeRequests -= 1;
+      }
+    }) as typeof fetch;
+
+    const fred = await fetchFredContext(testEnv, transientFetcher);
+    expect(fred.data.series).toHaveLength(3);
+    expect(requestCount).toBe(7);
+    expect(maximumConcurrentRequests).toBe(1);
+  });
+
   it("returns authenticated SEC and FRED context and reuses shared fresh cache", async () => {
     const fetcher = publicDataFetcher();
     const first = await getMarketContext(

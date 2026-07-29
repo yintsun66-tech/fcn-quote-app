@@ -15,6 +15,7 @@ const INSTRUMENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SEC_DIRECTORY_BYTES = 5_000_000;
 const MAX_SEC_SUBMISSIONS_BYTES = 5_000_000;
 const MAX_FRED_BYTES = 500_000;
+const TRANSIENT_UPSTREAM_STATUSES = new Set([502, 503, 504, 520]);
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type SourceName = "SEC" | "FRED";
@@ -200,13 +201,19 @@ async function fetchJson<T>(
   url: URL,
   maximumBytes: number,
   headers: HeadersInit,
-  fetcher: Fetcher
+  fetcher: Fetcher,
+  retryTransient = false
 ): Promise<{ data: T; etag: string | null }> {
-  const response = await fetcher(url, {
+  const request = () => fetcher(url, {
     headers,
     redirect: "manual",
     signal: AbortSignal.timeout(8_000)
   });
+  let response = await request();
+  if (retryTransient && TRANSIENT_UPSTREAM_STATUSES.has(response.status)) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    response = await request();
+  }
   if (response.status >= 300 && response.status < 400) {
     throw new AppError(503, "UPSTREAM_REDIRECT_REJECTED", "公開資料來源回傳未允許的重新導向。");
   }
@@ -348,10 +355,20 @@ async function fetchFredSeries(
   observationsUrl.searchParams.set("sort_order", "desc");
   observationsUrl.searchParams.set("limit", "10");
 
-  const [{ data: metadata }, { data: observations }] = await Promise.all([
-    fetchJson<FredSeriesResponse>(metadataUrl, MAX_FRED_BYTES, { accept: "application/json" }, fetcher),
-    fetchJson<FredObservationsResponse>(observationsUrl, MAX_FRED_BYTES, { accept: "application/json" }, fetcher)
-  ]);
+  const { data: metadata } = await fetchJson<FredSeriesResponse>(
+    metadataUrl,
+    MAX_FRED_BYTES,
+    { accept: "application/json" },
+    fetcher,
+    true
+  );
+  const { data: observations } = await fetchJson<FredObservationsResponse>(
+    observationsUrl,
+    MAX_FRED_BYTES,
+    { accept: "application/json" },
+    fetcher,
+    true
+  );
   const series = metadata.seriess?.[0];
   const validObservations = (observations.observations ?? [])
     .map(item => ({
@@ -394,7 +411,10 @@ export async function fetchFredContext(
   if (!/^[a-z0-9]{32}$/u.test(apiKey)) {
     throw new AppError(503, "FRED_KEY_INVALID_FORMAT", "FRED API Key 格式不正確。 ");
   }
-  const series = await Promise.all(FRED_SERIES.map(seriesId => fetchFredSeries(apiKey, seriesId, fetcher)));
+  const series: FredObservation[] = [];
+  for (const seriesId of FRED_SERIES) {
+    series.push(await fetchFredSeries(apiKey, seriesId, fetcher));
+  }
   const sourceAsOf = series.map(item => item.observationDate).sort().at(-1) ?? null;
   return { data: { series }, sourceAsOf };
 }

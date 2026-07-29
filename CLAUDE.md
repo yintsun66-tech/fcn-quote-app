@@ -29,13 +29,15 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `backend/worker-configuration.d.ts`.
 - A real RFQ, email-route change, D1 mutation, migration, commit, push, merge, or deployment
   requires explicit user authorization.
-- `feature/subject-branch-correlation` contains the current backend work and is not automatically
-  equivalent to `main`.
-- Production code is implementation commit `7f1dca3`, deployed as Worker
-  `b18cba05-bd46-49b5-818e-71d36d9b9d39` on 2026-07-28. Resolve the current branch HEAD from Git
-  rather than copying a historical handoff hash. The current verification baseline is 16 test
-  files / 103 tests. A deployment record is evidence of Worker/static-asset publication, not
-  evidence that real bank mail was delivered.
+- `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
+  source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
+  `main`.
+- Production implementation commit `c487355` is documented by handoff commit `7d903ee` and
+  deployed as Worker `0c63296c-f61f-4a11-a358-30db6e783ac6` on 2026-07-29. Resolve the current
+  branch HEAD from Git rather than copying a historical handoff hash. The current verification
+  baseline is 19 test files / 131 tests. A deployment record is evidence of Worker/static-asset
+  publication, not evidence that Alpha Vantage returned usable data or that real bank mail was
+  delivered.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
   program commit `3ae50b7` mirrors the approved public asset set with ZAR support. It contains no Cloudflare
@@ -61,6 +63,12 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
   onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded
   SHA-256; `.gitattributes` keeps `vendor/**` byte-exact on checkout.
+- ADR 0023 replaces the FRED runtime path with SEC plus Alpha Vantage end-of-day data. Migration
+  `0012` and the `ALPHA_VANTAGE_API_KEY` Secret name exist in production, but the first ORCL, TSM
+  and market-movers requests returned an Alpha Vantage `Information` envelope and produced no
+  normalized payload. Treat the public market panel as non-blocking and verify that the Secret is
+  an activated Alpha Vantage key before changing parser, cache, RFQ or ranking code. Never log,
+  retrieve or commit the Secret value.
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.
@@ -77,7 +85,8 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   RFQs after exact-login confirmation. Never hard-delete an account with RFQs, an ADMIN, a PS, or
   the current ADMIN. ADMIN/PS accounts are protected by SQL `WHERE` guards. The ADMIN-only
   `POST /admin/accounts/lookup` must never log the queried 行編, and `register()` stays silent to
-  the applicant on duplicates (anti-enumeration). Migrations are applied through `0010`.
+  the applicant on duplicates (anti-enumeration). Remote D1 migrations are applied through
+  `0012`; migration `0010` remains the role/account-management boundary.
 
 ## Handback checklist
 

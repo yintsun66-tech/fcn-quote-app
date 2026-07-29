@@ -29,20 +29,25 @@ Durable Object、R2 與測試位於 `backend/`。
 Phase 1 只使用該筆經後端授權的單一發行機構報價；參考現價由使用者手動輸入並只
 保存在目前瀏覽器，不會改變排名、寄件、報價圖或 D1。Phase 2 已加入使用者同意後才
 載入的 TradingView 單一圖表，以及 Yahoo Finance、Google
-Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式排名。市場資料功能分支
+Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式排名。正式市場資料功能
 已改用 SEC 與 Alpha Vantage：登入使用者可查看 SEC 公司／最近申報文件，空白的分析
-現價欄位會自動帶入前一交易日美股收盤價，並可載入成交活躍、漲跌幅、20 日歷史
-波動、相對量能與綜合熱度排行。資料由 Worker 正規化、所有使用者共用 D1 短期快取，
-且明確標示時間與過期狀態；它不會寫回詢價條件、正式排名或報價圖。正式啟用前仍須
-安全設定 `ALPHA_VANTAGE_API_KEY`、套用 migration `0012` 並完成部署驗證。詳細規格與操作程序記錄於
+現價欄位會自動帶入前一交易日美股收盤價。資料由 Worker 正規化、所有使用者共用 D1
+短期快取，且明確標示時間與過期狀態；它不會寫回詢價條件、正式排名或報價圖。Secret
+名稱、migration `0012` 與新版 Worker 已部署，但第一次正式請求只收到 Alpha Vantage
+`Information` 回應，尚未取得可用市場資料；接手者應先確認 Key 來源與啟用狀態。
+依 ADR 0024，市場熱門榜已改放在**首頁**並改用 TradingView widget（美股／日股，
+成交最活躍／漲幅／跌幅／市值），需使用者勾選同意才會載入；Alpha Vantage 現在只
+負責「輸入標的參考現價」的前一日收盤價。
+詳細規格與操作程序記錄於
 [market-analysis-roadmap](docs/backend/market-analysis-roadmap.md)。
 
 ## 目前正式環境基線
 
-- 正式後端位於 `feature/subject-branch-correlation`，尚未合併至 `main`。
-- 正式功能程式基線為 `7f1dca3`；實際最新分支 HEAD 請以 Git history 與
-  [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `b18cba05-bd46-49b5-818e-71d36d9b9d39`（2026-07-28 部署）。
+- 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
+- 正式功能程式基線為 `c487355`，交接文件 commit 為 `7d903ee`；實際最新分支 HEAD
+  仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
+- 最新正式 Worker 版本為 `0c63296c-f61f-4a11-a358-30db6e783ac6`（2026-07-29
+  部署）。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；
   本機產圖失敗時會自動退回伺服器產圖。`AUTO_RANK_ONE_IMAGE="1"` 可恢復舊的
@@ -54,16 +59,18 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 正式結果自動顯示經濟排名 1–4；第五列由使用者從前四名以外的有效發行機構選擇，
   並可產圖。晚到報價保留原始狀態，僅能由詢價本人或 ADMIN 建立新的不可變排名版本。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
-  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0010`。
+  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0012`。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
   家族在野村、DBS、SG、GS、CA 使用 `DRA(T+7)`，BMJB、UBS、CITI 使用
   `DAC(T+7)`；規則詳見 ADR 0014。
 - Barclays 已回信但拒絕 Product=`DAC`，不是收信或 parser 遺失。Barclays 接受的
   DAC 商品代碼／主旨尚未確認，不可直接修改共用 BMJB 格式或猜成 `DRA`。
-- 目前驗證基線為 16 個測試檔、103 項測試；JavaScript 語法、TypeScript typecheck、
-  完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health 與新前端
-  程式標記已驗證，但尚未完成登入後的完整人工操作巡檢——其中**以真實手機／平板
-  測試「下載報價圖」是目前最優先的待驗證項目**。
+- 首頁「美股／日股熱門榜」由 TradingView widget 提供（ADR 0024），需勾選同意才載入，
+  在靜態版與 Cloudflare 版皆可使用；不需 API Key、不佔 Alpha Vantage 額度。
+- 目前驗證基線為 19 個測試檔、131 項測試；JavaScript 語法、TypeScript typecheck、
+  完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
+  邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
+  目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
   `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `3ae50b7`。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。

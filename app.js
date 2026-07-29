@@ -2,6 +2,11 @@ import {
   MAIL_INSTITUTION_ORDER as SHARED_MAIL_INSTITUTION_ORDER,
   buildInstitutionEmail as buildSharedInstitutionEmail,
 } from "./backend/shared/email-formats.js?v=issuer-product-subject-v3";
+import {
+  HOTLIST_CONSENT_KEY,
+  hotlistDescriptor,
+  hotlistWidgetUrl,
+} from "./market-resources.mjs?v=market-hotlist-v1";
 
 (() => {
   "use strict";
@@ -667,9 +672,93 @@ import {
     if (!quotePreviewPanel.hidden) renderQuoteSheet();
   }));
 
+  setupHotlist();
+
   const dialog = document.querySelector("#helpDialog");
   document.querySelector("#showHelp").addEventListener("click", () => dialog.showModal());
   document.querySelector("#closeHelp").addEventListener("click", () => dialog.close());
+
+  // Market hot lists are opt-in: no third-party frame is created until the user consents, so a
+  // plain visit to the quote page never discloses an IP to TradingView.
+  function setupHotlist() {
+    const panel = document.querySelector("#hotlistPanel");
+    if (!panel) return;
+    const consent = panel.querySelector("#hotlistConsent");
+    const marketSelect = panel.querySelector("#hotlistMarket");
+    const screenSelect = panel.querySelector("#hotlistScreen");
+    const loadButton = panel.querySelector("#hotlistLoad");
+    const unloadButton = panel.querySelector("#hotlistUnload");
+    const status = panel.querySelector("#hotlistStatus");
+    const host = panel.querySelector("#hotlistWidget");
+    const fallbackLink = panel.querySelector("#hotlistFallbackLink");
+
+    let stored = null;
+    try {
+      stored = localStorage.getItem(HOTLIST_CONSENT_KEY);
+    } catch {
+      // private mode or blocked storage: treat as no stored consent
+    }
+    consent.checked = stored === "1";
+
+    function syncFallback() {
+      const descriptor = hotlistDescriptor(marketSelect.value, screenSelect.value);
+      if (descriptor) fallbackLink.href = descriptor.fallbackUrl;
+    }
+
+    function unload() {
+      host.replaceChildren();
+      unloadButton.hidden = true;
+      loadButton.hidden = false;
+      status.textContent = "";
+    }
+
+    function load() {
+      if (!consent.checked) {
+        status.textContent = "請先勾選同意，才會載入外部熱門榜。";
+        return;
+      }
+      const descriptor = hotlistDescriptor(marketSelect.value, screenSelect.value);
+      if (!descriptor) {
+        status.textContent = "不支援的熱門榜選項。";
+        return;
+      }
+      let url;
+      try {
+        url = hotlistWidgetUrl(marketSelect.value, screenSelect.value);
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+      const frame = document.createElement("iframe");
+      frame.title = `${descriptor.label} 熱門榜`;
+      frame.loading = "lazy";
+      frame.referrerPolicy = "no-referrer";
+      // Matches the already-deployed Phase 2 chart widget, which is confirmed working in production.
+      frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+      frame.src = url;
+      host.replaceChildren(frame);
+      loadButton.hidden = true;
+      unloadButton.hidden = false;
+      status.textContent = `${descriptor.label}｜資料由 TradingView 提供，可能為延遲或收盤資料。`;
+    }
+
+    consent.addEventListener("change", () => {
+      try {
+        if (consent.checked) localStorage.setItem(HOTLIST_CONSENT_KEY, "1");
+        else localStorage.removeItem(HOTLIST_CONSENT_KEY);
+      } catch {
+        // storage failures must not block the panel
+      }
+      if (!consent.checked) unload();
+    });
+    [marketSelect, screenSelect].forEach(select => select.addEventListener("change", () => {
+      syncFallback();
+      if (!unloadButton.hidden) load();
+    }));
+    loadButton.addEventListener("click", load);
+    unloadButton.addEventListener("click", unload);
+    syncFallback();
+  }
 
   if (!restoreDraft()) createRow();
   loadBbgLookup();

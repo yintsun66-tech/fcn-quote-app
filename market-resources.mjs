@@ -1,4 +1,60 @@
 export const MARKET_RESOURCE_CONSENT_KEY = "fcn-market-resources-consent:v1";
+export const HOTLIST_CONSENT_KEY = "fcn-market-hotlist-consent:v1";
+
+// Screener markets and screens are fixed allowlists. Nothing a user types ever reaches the widget
+// configuration — an unknown key fails closed instead of being passed through.
+export const HOTLIST_MARKETS = Object.freeze({
+  us: Object.freeze({
+    label: "美股",
+    market: "us",
+    fallbackUrl: "https://www.tradingview.com/markets/stocks-usa/market-movers-active/"
+  }),
+  japan: Object.freeze({
+    label: "日股",
+    market: "japan",
+    fallbackUrl: "https://www.tradingview.com/markets/stocks-japan/market-movers-active/"
+  })
+});
+
+export const HOTLIST_SCREENS = Object.freeze({
+  volume_leaders: "成交最活躍",
+  top_gainers: "漲幅最高",
+  top_losers: "跌幅最高",
+  most_capitalized: "市值最大"
+});
+
+// Own-property lookups only: a plain `map[key]` would resolve inherited keys such as `__proto__`
+// or `constructor` and let an unlisted value pass the allowlist check.
+function allowlisted(map, key) {
+  return typeof key === "string" && Object.hasOwn(map, key) ? map[key] : null;
+}
+
+export function hotlistDescriptor(marketKey, screenKey) {
+  const market = allowlisted(HOTLIST_MARKETS, marketKey);
+  const screenLabel = allowlisted(HOTLIST_SCREENS, screenKey);
+  if (!market || !screenLabel) return null;
+  return { marketKey, screenKey, label: `${market.label}｜${screenLabel}`, fallbackUrl: market.fallbackUrl };
+}
+
+// Builds the TradingView screener embed URL directly instead of injecting their loader script into
+// our page, so no third-party JavaScript executes in the application origin.
+export function hotlistWidgetUrl(marketKey, screenKey) {
+  const market = allowlisted(HOTLIST_MARKETS, marketKey);
+  if (!market || !allowlisted(HOTLIST_SCREENS, screenKey)) {
+    throw new Error("無法建立未支援的熱門榜。");
+  }
+  const configuration = {
+    width: "100%",
+    height: "100%",
+    defaultColumn: "overview",
+    defaultScreen: screenKey,
+    market: market.market,
+    showToolbar: true,
+    colorTheme: "light",
+    isTransparent: false
+  };
+  return `https://www.tradingview-widget.com/embed-widget/screener/?locale=zh_TW#${encodeURIComponent(JSON.stringify(configuration))}`;
+}
 
 const BLOOMBERG_EXCHANGES = Object.freeze({
   UW: "NASDAQ",

@@ -1,8 +1,17 @@
 # FCN market analysis roadmap — Phases 2 to 4
 
-Status: Alpha Vantage end-of-day extension implemented locally; Secret, migration and deployment pending
+Status: Deployed; Alpha Vantage provider response validation pending
 Baseline: Phase 1 in `codex/market-analysis-phase1`; Phase 2 work in `codex/market-analysis-phase2-4`
-Updated: 2026-07-28 (Asia/Taipei)
+Updated: 2026-07-29 (Asia/Taipei)
+
+> **ADR 0024 amendment.** Market-idea/hot-list content is no longer an Alpha Vantage feature. It is
+> a TradingView screener widget on the **homepage** (`index.html`), covering `us` and `japan`
+> across `volume_leaders`, `top_gainers`, `top_losers` and `most_capitalized`, behind the same
+> explicit consent rule as the Phase 2 chart. Alpha Vantage is now used **only** for the per-symbol
+> previous close that fills 「輸入標的參考現價」. `GET /api/v1/market/ideas`, the
+> `TOP_GAINERS_LOSERS` fetch, the cached-universe rankings and the composite heat score are
+> removed. Where Phase 3 text below describes market-movers or heat rankings, ADR 0024 supersedes
+> it; the SEC and previous-close portions stand.
 
 ## Purpose and non-negotiable rules
 
@@ -122,8 +131,11 @@ cache retention, monitoring, cleanup, a 50-user concurrent test and the followin
 - no Yahoo Finance or Google Trends values in the Worker response until approved official access
   exists.
 
-The Alpha Vantage key must be obtained separately and is not stored in the repository. It must be
-entered only through Cloudflare Secret management before the first production deployment.
+The Alpha Vantage key is obtained separately and is not stored in the repository. The production
+Secret name exists and was entered through Cloudflare Secret management. The first production
+requests returned an `Information` envelope rather than usable data, so the key's source,
+activation and entitlement still require verification before this integration is called
+operational.
 
 ### Implemented data model
 

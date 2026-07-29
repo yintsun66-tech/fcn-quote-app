@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 // The production module is a browser-native ES module copied as a static asset.
 // @ts-expect-error The root browser module intentionally has no backend TypeScript declaration.
-import { marketResourceDescriptor, tradingViewWidgetSrcdoc, tradingViewWidgetUrl } from "../../market-resources.mjs";
+import { hotlistDescriptor, hotlistWidgetUrl, marketResourceDescriptor, tradingViewWidgetSrcdoc, tradingViewWidgetUrl } from "../../market-resources.mjs";
 
 describe("public market resource mapping", () => {
   it("maps supported Bloomberg US exchange suffixes to strict third-party symbols", () => {
@@ -53,5 +53,27 @@ describe("public market resource mapping", () => {
     expect(settings.symbol).toBe("NASDAQ:MU");
     expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
     expect(url.toString()).not.toContain("s3.tradingview.com");
+  });
+
+  it("builds US and Japan hot-list widget URLs from the fixed allowlist", () => {
+    for (const [marketKey, expectedMarket] of [["us", "us"], ["japan", "japan"]] as const) {
+      const url = new URL(hotlistWidgetUrl(marketKey, "volume_leaders"));
+      const settings = JSON.parse(decodeURIComponent(url.hash.slice(1)));
+      expect(url.origin).toBe("https://www.tradingview-widget.com");
+      expect(url.pathname).toBe("/embed-widget/screener/");
+      expect(settings.market).toBe(expectedMarket);
+      expect(settings.defaultScreen).toBe("volume_leaders");
+      // The hot list is market-wide: no underlying, RFQ or account identifier may travel with it.
+      expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
+      expect(url.toString()).not.toContain("s3.tradingview.com");
+    }
+  });
+
+  it("fails closed for hot-list markets or screens outside the allowlist", () => {
+    expect(hotlistDescriptor("us", "volume_leaders")).toMatchObject({ marketKey: "us" });
+    expect(hotlistDescriptor("taiwan", "volume_leaders")).toBeNull();
+    expect(hotlistDescriptor("us", "__proto__")).toBeNull();
+    expect(() => hotlistWidgetUrl("taiwan", "volume_leaders")).toThrow();
+    expect(() => hotlistWidgetUrl("us", "'; alert(1);//")).toThrow();
   });
 });

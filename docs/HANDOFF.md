@@ -4,12 +4,56 @@ Updated: 2026-07-29 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+Current Git baseline: implementation commit `c487355` and deployment-handoff commit `7d903ee` are
+pushed to `origin/codex/market-analysis-phase2-4`. The current handoff/README/Claude documentation
+refresh is local and uncommitted until the user explicitly requests a commit.
+
+## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
+
+Implemented locally, **not yet committed or deployed**. Production still runs Worker
+`0c63296c-f61f-4a11-a358-30db6e783ac6`.
+
+Why: the Alpha Vantage market-movers panel never returned a usable payload in production (the
+provider answered with an `Information` envelope), and a shared market-wide list is the worst use
+of a 24-request daily budget. Hot lists also belong *before* an RFQ exists, not behind a finalized
+ranking.
+
+- **Homepage panel.** `index.html` gains a collapsed 「美股／日股熱門榜」 section above the
+  trade-input workspace, with markets `us`/`japan` and screens
+  `volume_leaders`/`top_gainers`/`top_losers`/`most_capitalized`. It works in both runtime modes
+  because it is client-side only (`app.js` + `market-resources.mjs`).
+- **Consent still gates it.** No iframe exists until the user ticks consent (verified in-browser);
+  unticking unloads it. Consent is per browser (`HOTLIST_CONSENT_KEY`).
+- **The widget URL is built directly** (no TradingView loader script in our origin), and the iframe
+  attributes match the already-deployed Phase 2 chart exactly — `referrerPolicy="no-referrer"` plus
+  the same sandbox tokens — so it inherits a configuration proven to work in production.
+- **Markets/screens are fixed allowlists** checked with `Object.hasOwn`. A plain `map[key]` lookup
+  resolved inherited keys such as `__proto__` and let an unlisted value through; a test caught this
+  and it is fixed.
+- **Removed:** `GET /api/v1/market/ideas` and its route, `fetchAlphaMarketMovers`,
+  `normalizeMoverRows`, the `AlphaMarketMover(s)`/`AlphaMoversResponse` types, `cachedEquityIdeas`,
+  `percentileScores`, the composite heat score, and the analysis-page ideas UI plus its button and
+  handler.
+- **Kept:** SEC context and the per-symbol `TIME_SERIES_DAILY` previous close that fills
+  「輸入標的參考現價」, unchanged. Migration `0012` and `market_provider_daily_usage` stay; only
+  movers cache rows stop being written. No migration, Secret or binding change.
+- Asset cache keys bumped to `market-hotlist-v1` for `index.html`, `app.js`, `backend-client.js`
+  and `styles.css` (the previous rollout was served stale under an old key).
+- Verification: `node --check` on `app.js`, `backend-client.js` and `market-resources.mjs`;
+  typecheck; **19 files / 131 tests**; Wrangler dry-run build. In-browser on a local server:
+  consent gate blocks loading, US loads with the expected config/sandbox, switching to 日股 reloads
+  in place (one iframe, fallback link updates), unload clears it, no console errors.
+- **Not verified:** whether TradingView serves populated rows for `market: "japan"` from the
+  production domain. The widget accepts the parameter and renders its chrome, but a localhost probe
+  showed empty rows and widget providers may gate data by host. **Confirm both markets on
+  `app.yintsun66.com` after deployment**; the fallback link covers a blocked network.
+
 ## Alpha Vantage end-of-day market ideas (deployed; provider response still unavailable)
 
 The user approved replacing FRED with Alpha Vantage for the proof-of-concept market panel. The
-current working tree implements the change and Cloudflare production now runs it. The source
-implementation is commit `c487355` on `codex/market-analysis-phase2-4`, pushed to the matching
-origin branch together with this handoff update.
+repository implements the change and Cloudflare production now runs it. The source implementation
+is commit `c487355` on `codex/market-analysis-phase2-4`; deployment evidence was committed in
+`7d903ee`.
 
 Local behavior:
 
@@ -21,8 +65,7 @@ Local behavior:
 - one daily `TOP_GAINERS_LOSERS` cache supplies gainers, losers and most-active lists;
 - the same cached daily series supplies 20-day annualized historical volatility, relative volume,
   absolute daily move and a labelled composite heat ranking over cached symbols only;
-- `GET /api/v1/market/ideas` returns those display-only lists; none of them changes RFQ terms,
-  issuer ranking, mail, quote cards or artifacts;
+- `GET /api/v1/market/ideas` returned those display-only lists (**removed by ADR 0024**);
 - D1 cache rows remain shared across users, while `market_provider_daily_usage` enforces 24
   attempted Alpha Vantage requests per UTC day; and
 - ADMIN cache health includes today's provider attempt count without payloads, identities or keys.
@@ -1160,15 +1203,23 @@ that the verified API/static deployment failed.
 
 ## Safe next steps
 
-**Highest-value item right now: the quote-image download on a real phone/tablet.** ADR 0017 moved
-rasterization into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile
-WebKit. The reproduction harness was desktop Chromium, so mobile behavior is reasoned from measured
-canvas sizes plus known iOS limits, **not observed on a device**. Ask the operator to press
-下載報價圖 on a phone/tablet; the three outcomes and what each means are recorded in the
+**Highest-value item right now: validate the Alpha Vantage credential without changing
+application logic.** The Secret name, migration and Worker are deployed, but ORCL, TSM and
+market-movers all returned an `Information` envelope and no normalized payload. Confirm that the
+hidden Secret value is an activated Alpha Vantage key rather than a MarketData.app token, replace
+only that Secret if needed, wait for the ten-minute failed-refresh backoff, then retry one existing
+analysis symbol and the movers panel. Do not log the key, expose the upstream body, clear D1 rows
+manually or create a real RFQ for this check.
+
+**Second: validate quote-image download on a real phone/tablet.** ADR 0017 moved rasterization
+into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile WebKit. The
+reproduction harness was desktop Chromium, so mobile behavior is reasoned from measured canvas
+sizes plus known iOS limits, **not observed on a device**. Ask the operator to press 下載報價圖 on
+a phone/tablet; the three outcomes and what each means are recorded in the
 "Mobile/tablet 「產圖中…」 hang" section. If the message names a timed-out step, that step is the
 next thing to fix.
 
-**Second: decide ADR 0017-B with data, not assumption.** `QUOTE_IMAGE_DOWNLOADED` audit events have
+**Third: decide ADR 0017-B with data, not assumption.** `QUOTE_IMAGE_DOWNLOADED` audit events have
 been collected since `de9e8d9`. Measure real image demand before investing in the deferred SVG
 renderer; after the client-side move and the self-hosted rasterizer, B's only remaining benefit is
 cross-device pixel consistency.

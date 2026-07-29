@@ -5,12 +5,10 @@ import worker from "../src/index";
 import {
   cleanupExpiredMarketData,
   fetchAlphaEquityContext,
-  fetchAlphaMarketMovers,
   fetchSecFilings,
   fetchSecInstrument,
   getCachedPublicData,
   getMarketContext,
-  getMarketIdeas,
   marketContextHealth,
   normalizeMarketSymbol
 } from "../src/market-context";
@@ -88,21 +86,6 @@ function publicDataFetcher(onRequest?: (url: URL) => void): typeof fetch {
         }))
       });
     }
-    if (url.hostname === "www.alphavantage.co" && url.searchParams.get("function") === "TOP_GAINERS_LOSERS") {
-      return jsonResponse({
-        metadata: "Top gainers, losers, and most actively traded US tickers",
-        last_updated: "2026-07-28 16:15:59 US/Eastern",
-        top_gainers: [
-          { ticker: "GAIN", price: "25.50", change_amount: "5.10", change_percentage: "25.00%", volume: "1000000" }
-        ],
-        top_losers: [
-          { ticker: "LOSS", price: "8.10", change_amount: "-1.90", change_percentage: "-19.00%", volume: "900000" }
-        ],
-        most_actively_traded: [
-          { ticker: "AAPL", price: "200.00", change_amount: "2.00", change_percentage: "1.01%", volume: "88000000" }
-        ]
-      });
-    }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 }
@@ -120,13 +103,15 @@ describe("official public market context", () => {
     );
     expect(contextResponse.status).toBe(401);
     expect(await contextResponse.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
-    const ideasResponse = await worker.fetch(
-      new Request("https://api.yintsun66.com/api/v1/market/ideas"),
+    // ADR 0024 removed the market-ideas endpoint. Unauthenticated callers still stop at the
+    // session gate, so the meaningful check is that the admin health route stays ADMIN-gated.
+    const healthResponse = await worker.fetch(
+      new Request("https://api.yintsun66.com/api/v1/admin/market-context-health"),
       testEnv,
       createExecutionContext()
     );
-    expect(ideasResponse.status).toBe(401);
-    expect(await ideasResponse.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
+    expect(healthResponse.status).toBe(401);
+    expect(await healthResponse.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
   });
 
   it("normalizes only safe market symbols", () => {
@@ -197,14 +182,6 @@ describe("official public market context", () => {
     expect(equity.data.relativeVolume20d).toBeGreaterThan(1);
     expect(equity.data.realizedVolatility20dPct).toBeGreaterThan(0);
     expect(equity.data.range20dPct).toBeGreaterThan(0);
-  });
-
-  it("normalizes the Alpha Vantage daily market movers response", async () => {
-    const movers = await fetchAlphaMarketMovers(testEnv, publicDataFetcher());
-    expect(movers.sourceAsOf).toBe("2026-07-28");
-    expect(movers.data.topGainers[0]).toMatchObject({ symbol: "GAIN", changePct: 25 });
-    expect(movers.data.topLosers[0]).toMatchObject({ symbol: "LOSS", changePct: -19 });
-    expect(movers.data.mostActive[0]).toMatchObject({ symbol: "AAPL", volume: 88_000_000 });
   });
 
   it("trims a copied Alpha Vantage key and rejects an invalid key before any upstream request", async () => {
@@ -411,42 +388,6 @@ describe("official public market context", () => {
     expect(payloads).toHaveLength(50);
     expect(payloads.every(payload => payload.marketContext.sec.data.company.ticker === "MSFT")).toBe(true);
     expect(secRequests).toBe(2);
-  });
-
-  it("returns one cached market-movers payload and rankings from cached equity metrics", async () => {
-    const first = await getMarketIdeas(
-      new Request("https://api.yintsun66.com/api/v1/market/ideas", {
-        headers: { "cf-connecting-ip": "198.51.100.200" }
-      }),
-      testEnv,
-      {
-        ...session,
-        id: "ses_market_ideas",
-        user: { ...session.user, id: "usr_market_ideas" }
-      },
-      publicDataFetcher()
-    );
-    const payload = await first.json<Record<string, any>>();
-    expect(payload.marketIdeas.alphaVantage.status).toBe("FRESH");
-    expect(payload.marketIdeas.alphaVantage.data.mostActive[0]).toMatchObject({ symbol: "AAPL" });
-    expect(payload.marketIdeas.watchlist.universeSize).toBeGreaterThan(0);
-    expect(payload.marketIdeas.watchlist.heat[0]).toHaveProperty("heatScore");
-
-    const second = await getMarketIdeas(
-      new Request("https://api.yintsun66.com/api/v1/market/ideas", {
-        headers: { "cf-connecting-ip": "198.51.100.201" }
-      }),
-      testEnv,
-      {
-        ...session,
-        id: "ses_market_ideas_second",
-        user: { ...session.user, id: "usr_market_ideas_second" }
-      },
-      (async () => {
-        throw new Error("fresh market-movers cache must prevent another provider call");
-      }) as typeof fetch
-    );
-    expect((await second.json<Record<string, any>>()).marketIdeas.alphaVantage.status).toBe("FRESH");
   });
 
   it("stops before the provider request when the configured daily Alpha Vantage budget is exhausted", async () => {

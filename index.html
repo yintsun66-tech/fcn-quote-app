@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=market-alpha-v1" />
+    <link rel="stylesheet" href="./styles.css?v=market-hotlist-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -33,6 +33,42 @@
       </section>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section id="hotlistPanel" class="hotlist-panel" aria-label="市場熱門榜">
+        <details>
+          <summary>美股／日股熱門榜（找交易想法）</summary>
+          <div class="hotlist-body">
+            <p class="hotlist-note">熱門榜由 TradingView 提供，為公開市場行情參考，不構成投資建議，也不會進入詢價條件、正式排名或報價圖。</p>
+            <label class="hotlist-consent">
+              <input type="checkbox" id="hotlistConsent">
+              我了解載入後 TradingView 會收到我的 IP 與瀏覽器資訊；不會傳送行編、分行、詢價內容或報價資料。
+            </label>
+            <div class="hotlist-controls">
+              <label>市場
+                <select id="hotlistMarket">
+                  <option value="us">美股</option>
+                  <option value="japan">日股</option>
+                </select>
+              </label>
+              <label>排行
+                <select id="hotlistScreen">
+                  <option value="volume_leaders">成交最活躍</option>
+                  <option value="top_gainers">漲幅最高</option>
+                  <option value="top_losers">跌幅最高</option>
+                  <option value="most_capitalized">市值最大</option>
+                </select>
+              </label>
+              <button id="hotlistLoad" type="button" class="secondary">載入熱門榜</button>
+              <button id="hotlistUnload" type="button" class="secondary" hidden>卸載</button>
+            </div>
+            <p id="hotlistStatus" class="hotlist-status" role="status" aria-live="polite"></p>
+            <div id="hotlistWidget" class="hotlist-widget"></div>
+            <p class="hotlist-fallback">若公司網路封鎖外部內容，可改用 TradingView 網站：
+              <a id="hotlistFallbackLink" href="https://www.tradingview.com/markets/stocks-usa/market-movers-active/" target="_blank" rel="noopener noreferrer nofollow">開啟市場熱門榜</a>
+            </p>
+          </div>
+        </details>
+      </section>
 
       <section class="entry-workspace" aria-label="詢價交易條件">
         <header class="entry-workspace-header">
@@ -175,7 +211,7 @@
     </dialog>
 
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./app.js?v=issuer-product-subject-v3"></script>
-    <script type="module" src="./backend-client.js?v=market-alpha-v1"></script>
+    <script type="module" src="./app.js?v=market-hotlist-v1"></script>
+    <script type="module" src="./backend-client.js?v=market-hotlist-v1"></script>
   </body>
 </html>

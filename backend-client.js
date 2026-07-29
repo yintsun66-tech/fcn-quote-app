@@ -514,23 +514,21 @@ import {
     return `<details class="backend-market-resources">
       <summary>每日市場資料與標的靈感</summary>
       <div class="backend-market-resources-body">
-        <p class="backend-analysis-note">Alpha Vantage 提供前一交易日股價與收盤後熱門榜；系統另以已快取標的的最近日線計算歷史波動與量能排行。這些內容只供組合發想，不會改變詢價、正式排名或報價圖。</p>
+        <p class="backend-analysis-note">Alpha Vantage 只提供此標的前一交易日的收盤價與日線統計，用於帶入上方參考現價。市場熱門榜已移至首頁，改由 TradingView 提供。這些內容只供參考，不會改變詢價、正式排名或報價圖。</p>
         <div class="backend-market-consent">
           <label><input type="checkbox" data-market-consent${consentChecked}> 我了解載入圖表後，TradingView 會收到我的 IP、瀏覽器資訊與所選股票代碼；不會傳送 RFQ、行編、分行、報價或發行機構資料。</label>
         </div>
         ${supported.length ? `<div class="backend-market-controls">
           <label>圖表標的<select data-market-symbol>${options}</select></label>
           <button type="button" class="secondary" data-market-context-load>載入公司與前收資料</button>
-          <button type="button" class="secondary" data-market-ideas-load>載入每日熱門榜</button>
           <button type="button" class="secondary" data-market-load>載入外部圖表</button>
           <button type="button" class="secondary" data-market-unload hidden>卸載圖表</button>
         </div>
         <p class="backend-market-status" data-market-status role="status"></p>
         <div class="backend-market-context" data-market-context aria-live="polite"></div>
-        <div class="backend-market-ideas" data-market-ideas aria-live="polite"></div>
         <div class="backend-market-widget" data-market-widget></div>` : `<p class="backend-market-status">目前標的沒有可確認的美股交易所代碼，因此不載入外部圖表。</p>`}
         <div class="backend-market-links">${links}</div>
-        <p class="backend-market-source-note">股價與熱門榜來源：Alpha Vantage（免費資料為收盤後更新）。圖表來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。所有內容均為公開資訊參考，不構成投資建議。</p>
+        <p class="backend-market-source-note">前收與日線統計來源：Alpha Vantage（免費資料為收盤後更新）。圖表與首頁熱門榜來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。所有內容均為公開資訊參考，不構成投資建議。</p>
       </div>
     </details>`;
   }
@@ -667,56 +665,6 @@ import {
       <p class="backend-market-source-note">SEC／Alpha Vantage 資料僅供公開資訊參考。前收可作為上方試算的起始值，但不會寫回詢價條件、正式排名或報價圖。</p>`;
   }
 
-  function moverTable(title, rows, valueLabel) {
-    const items = Array.isArray(rows) ? rows.slice(0, 10) : [];
-    return `<article class="backend-market-idea-card"><h3>${escapeHtml(title)}</h3>
-      ${items.length ? `<ol>${items.map(item => `<li>
-        <b>${escapeHtml(item.symbol)}</b>
-        <span>${escapeHtml(valueLabel(item))}</span>
-        <small>量 ${escapeHtml(marketVolume(item.volume))}</small>
-      </li>`).join("")}</ol>` : "<p>目前沒有可顯示資料。</p>"}
-    </article>`;
-  }
-
-  function watchlistTable(title, rows, valueLabel) {
-    const items = Array.isArray(rows) ? rows.slice(0, 10) : [];
-    return `<article class="backend-market-idea-card"><h3>${escapeHtml(title)}</h3>
-      ${items.length ? `<ol>${items.map(item => `<li>
-        <b>${escapeHtml(item.symbol)}</b>
-        <span>${escapeHtml(valueLabel(item))}</span>
-        <small>${escapeHtml(item.tradingDate)}｜收 ${escapeHtml(marketNumber(item.closePrice, 4))}</small>
-      </li>`).join("")}</ol>` : "<p>尚無足夠的已快取標的資料。</p>"}
-    </article>`;
-  }
-
-  function renderMarketIdeas(container, marketIdeas) {
-    const host = container.querySelector("[data-market-ideas]");
-    if (!host) return;
-    const alphaVantage = marketIdeas?.alphaVantage;
-    const movers = alphaVantage?.data;
-    const watchlist = marketIdeas?.watchlist ?? {};
-    host.innerHTML = `
-      <section class="backend-market-ideas-section">
-        <header><div><p class="eyebrow">US MARKET MOVERS</p><h2>前一交易日市場熱門榜</h2></div><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header>
-        <div class="backend-market-idea-grid">
-          ${moverTable("成交最活躍", movers?.mostActive, item => `收 ${marketNumber(item.price, 4)}｜${marketPercent(item.changePct)}`)}
-          ${moverTable("漲幅最高", movers?.topGainers, item => marketPercent(item.changePct))}
-          ${moverTable("跌幅最高", movers?.topLosers, item => marketPercent(item.changePct))}
-        </div>
-        <small>Alpha Vantage 更新 ${escapeHtml(movers?.updatedAt || alphaVantage?.sourceAsOf || "—")}${alphaVantage?.isStale ? "｜目前顯示過期快取" : ""}</small>
-      </section>
-      <section class="backend-market-ideas-section">
-        <header><div><p class="eyebrow">CACHED UNDERLYING POOL</p><h2>已載入標的排行</h2></div><span>${escapeHtml(watchlist.universeSize || 0)} 檔</span></header>
-        <div class="backend-market-idea-grid">
-          ${watchlistTable("綜合熱度", watchlist.heat, item => `${marketNumber(item.heatScore)} 分`)}
-          ${watchlistTable("20日歷史波動", watchlist.realizedVolatility, item => `${marketNumber(item.realizedVolatility20dPct)}%`)}
-          ${watchlistTable("相對量能", watchlist.relativeVolume, item => `${marketNumber(item.relativeVolume20d)}×`)}
-          ${watchlistTable("單日波動", watchlist.absoluteMove, item => marketPercent(item.dailyChangePct))}
-        </div>
-        <p class="backend-market-source-note">綜合熱度只比較系統已快取的標的：相對量能 40%＋單日絕對漲跌 35%＋20日歷史波動 25%。它不是全市場排名，也不代表投資推薦。</p>
-      </section>`;
-  }
-
   async function loadMarketContext(container, button) {
     const select = container.querySelector("[data-market-symbol]");
     const host = container.querySelector("[data-market-context]");
@@ -734,24 +682,6 @@ import {
       renderMarketContext(container, payload.marketContext);
     } catch (error) {
       host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "公開資料載入失敗。")}</p>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = original;
-    }
-  }
-
-  async function loadMarketIdeas(container, button) {
-    const host = container.querySelector("[data-market-ideas]");
-    if (!host) return;
-    button.disabled = true;
-    const original = button.textContent;
-    button.textContent = "載入中…";
-    host.innerHTML = "<p class=\"backend-market-status\">正在載入前一交易日熱門榜與標的池排行…</p>";
-    try {
-      const payload = await request("/market/ideas");
-      renderMarketIdeas(container, payload.marketIdeas);
-    } catch (error) {
-      host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "熱門榜載入失敗。")}</p>`;
     } finally {
       button.disabled = false;
       button.textContent = original;
@@ -2017,12 +1947,6 @@ import {
     if (contextLoad) {
       const container = contextLoad.closest(".backend-market-resources");
       if (container) loadMarketContext(container, contextLoad);
-      return;
-    }
-    const ideasLoad = event.target.closest("[data-market-ideas-load]");
-    if (ideasLoad) {
-      const container = ideasLoad.closest(".backend-market-resources");
-      if (container) loadMarketIdeas(container, ideasLoad);
       return;
     }
     const load = event.target.closest("[data-market-load]");

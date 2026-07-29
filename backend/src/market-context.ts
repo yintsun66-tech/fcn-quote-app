@@ -106,35 +106,9 @@ export interface AlphaEquityContext extends AlphaDailyPoint {
   range20dPct: number | null;
 }
 
-export interface AlphaMarketMover {
-  symbol: string;
-  price: number;
-  changeAmount: number;
-  changePct: number;
-  volume: number;
-}
-
-interface AlphaMarketMovers {
-  updatedAt: string | null;
-  topGainers: AlphaMarketMover[];
-  topLosers: AlphaMarketMover[];
-  mostActive: AlphaMarketMover[];
-}
-
 interface AlphaDailyResponse {
   "Meta Data"?: Record<string, unknown>;
   "Time Series (Daily)"?: Record<string, Record<string, unknown>>;
-  Information?: unknown;
-  Note?: unknown;
-  "Error Message"?: unknown;
-}
-
-interface AlphaMoversResponse {
-  metadata?: unknown;
-  last_updated?: unknown;
-  top_gainers?: unknown;
-  top_losers?: unknown;
-  most_actively_traded?: unknown;
   Information?: unknown;
   Note?: unknown;
   "Error Message"?: unknown;
@@ -418,7 +392,7 @@ async function consumeAlphaVantageBudget(env: AppEnv): Promise<void> {
   }
 }
 
-function alphaVantagePayloadError(payload: AlphaDailyResponse | AlphaMoversResponse): AppError | null {
+function alphaVantagePayloadError(payload: AlphaDailyResponse): AppError | null {
   if (typeof payload["Error Message"] === "string") {
     return new AppError(404, "ALPHA_VANTAGE_SYMBOL_NOT_FOUND", "Alpha Vantage 找不到此股票代碼。 ");
   }
@@ -428,7 +402,7 @@ function alphaVantagePayloadError(payload: AlphaDailyResponse | AlphaMoversRespo
   return null;
 }
 
-async function fetchAlphaVantageJson<T extends AlphaDailyResponse | AlphaMoversResponse>(
+async function fetchAlphaVantageJson<T extends AlphaDailyResponse>(
   env: AppEnv,
   parameters: Record<string, string>,
   fetcher: Fetcher
@@ -539,66 +513,6 @@ export async function fetchAlphaEquityContext(
       range20dPct: lowest > 0 ? rounded((highest / lowest - 1) * 100, 4) : null
     },
     sourceAsOf: latest.tradingDate
-  };
-}
-
-function normalizeMoverRows(value: unknown): AlphaMarketMover[] {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 20).map(row => {
-    if (!row || typeof row !== "object") return null;
-    const raw = row as Record<string, unknown>;
-    let symbol: string;
-    try {
-      symbol = normalizeMarketSymbol(String(raw.ticker ?? ""));
-    } catch {
-      return null;
-    }
-    const price = finiteNumber(raw.price);
-    const changeAmount = finiteNumber(raw.change_amount);
-    const changePct = finiteNumber(String(raw.change_percentage ?? "").replace(/%$/u, ""));
-    const volume = finiteNumber(raw.volume);
-    if (
-      price === null
-      || changeAmount === null
-      || changePct === null
-      || volume === null
-      || price <= 0
-      || volume < 0
-    ) return null;
-    return {
-      symbol,
-      price: rounded(price),
-      changeAmount: rounded(changeAmount),
-      changePct: rounded(changePct, 4),
-      volume: Math.round(volume)
-    };
-  }).filter((row): row is AlphaMarketMover => row !== null);
-}
-
-export async function fetchAlphaMarketMovers(
-  env: AppEnv,
-  fetcher: Fetcher = runtimeFetch
-): Promise<CacheLoadResult<AlphaMarketMovers>> {
-  const data = await fetchAlphaVantageJson<AlphaMoversResponse>(
-    env,
-    { function: "TOP_GAINERS_LOSERS" },
-    fetcher
-  );
-  const updatedAt = typeof data.last_updated === "string"
-    ? data.last_updated.normalize("NFKC").replace(/\s+/gu, " ").trim().slice(0, 80) || null
-    : null;
-  const normalized = {
-    updatedAt,
-    topGainers: normalizeMoverRows(data.top_gainers),
-    topLosers: normalizeMoverRows(data.top_losers),
-    mostActive: normalizeMoverRows(data.most_actively_traded)
-  };
-  if (!normalized.topGainers.length && !normalized.topLosers.length && !normalized.mostActive.length) {
-    throw new AppError(503, "ALPHA_VANTAGE_MOVERS_INVALID", "Alpha Vantage 熱門榜資料無法正規化。 ");
-  }
-  return {
-    data: normalized,
-    sourceAsOf: updatedAt?.match(/\d{4}-\d{2}-\d{2}/u)?.[0] ?? null
   };
 }
 
@@ -923,123 +837,6 @@ export async function getMarketContext(
       generatedAt: nowIso(),
       sec,
       alphaVantage
-    }
-  });
-}
-
-interface CachedEquityIdea extends AlphaEquityContext {
-  heatScore: number;
-}
-
-function percentileScores(
-  rows: AlphaEquityContext[],
-  selector: (row: AlphaEquityContext) => number | null
-): Map<string, number> {
-  const values = rows
-    .map(row => ({ symbol: row.symbol, value: selector(row) }))
-    .filter((row): row is { symbol: string; value: number } => row.value !== null && Number.isFinite(row.value))
-    .sort((left, right) => left.value - right.value || left.symbol.localeCompare(right.symbol));
-  const scores = new Map<string, number>();
-  if (!values.length) return scores;
-  for (let start = 0; start < values.length;) {
-    let end = start;
-    while (end + 1 < values.length && values[end + 1]!.value === values[start]!.value) end += 1;
-    const percentile = values.length === 1 ? 1 : ((start + end) / 2) / (values.length - 1);
-    for (let index = start; index <= end; index += 1) {
-      scores.set(values[index]!.symbol, percentile);
-    }
-    start = end + 1;
-  }
-  return scores;
-}
-
-async function cachedEquityIdeas(env: AppEnv): Promise<{
-  universeSize: number;
-  realizedVolatility: CachedEquityIdea[];
-  relativeVolume: CachedEquityIdea[];
-  absoluteMove: CachedEquityIdea[];
-  heat: CachedEquityIdea[];
-}> {
-  const now = nowIso();
-  const rows = await env.DB.prepare(
-    `SELECT normalized_payload_json
-       FROM public_data_cache
-      WHERE source = 'ALPHA_VANTAGE'
-        AND data_type = 'DAILY_EQUITY'
-        AND fetched_at IS NOT NULL
-        AND stale_until > ?
-      ORDER BY source_as_of DESC, symbol
-      LIMIT 250`
-  ).bind(now).all<{ normalized_payload_json: string }>();
-  const equities = rows.results
-    .map(row => safeJson<AlphaEquityContext>(row.normalized_payload_json))
-    .filter((row): row is AlphaEquityContext =>
-      !!row
-      && typeof row.symbol === "string"
-      && Number.isFinite(row.closePrice)
-      && Number.isFinite(row.dailyChangePct)
-    );
-  const volumePercentiles = percentileScores(equities, row => row.relativeVolume20d);
-  const movePercentiles = percentileScores(equities, row => Math.abs(row.dailyChangePct));
-  const volatilityPercentiles = percentileScores(equities, row => row.realizedVolatility20dPct);
-  const withHeat = equities.map(row => ({
-    ...row,
-    heatScore: rounded((
-      (volumePercentiles.get(row.symbol) ?? 0) * 0.4
-      + (movePercentiles.get(row.symbol) ?? 0) * 0.35
-      + (volatilityPercentiles.get(row.symbol) ?? 0) * 0.25
-    ) * 100, 2)
-  }));
-  const descending = (selector: (row: CachedEquityIdea) => number | null) =>
-    [...withHeat]
-      .filter(row => {
-        const value = selector(row);
-        return value !== null && Number.isFinite(value);
-      })
-      .sort((left, right) =>
-        Number(selector(right)) - Number(selector(left)) || left.symbol.localeCompare(right.symbol)
-      )
-      .slice(0, 10);
-  return {
-    universeSize: withHeat.length,
-    realizedVolatility: descending(row => row.realizedVolatility20dPct),
-    relativeVolume: descending(row => row.relativeVolume20d),
-    absoluteMove: descending(row => Math.abs(row.dailyChangePct)),
-    heat: descending(row => row.heatScore)
-  };
-}
-
-export async function getMarketIdeas(
-  request: Request,
-  env: AppEnv,
-  session: SessionContext,
-  fetcher: Fetcher = runtimeFetch
-): Promise<Response> {
-  if (env.MARKET_CONTEXT_ENABLED !== "1") {
-    throw new AppError(503, "MARKET_CONTEXT_DISABLED", "公開市場資料功能目前暫停。 ");
-  }
-  await enforceRateLimit(request, env, session);
-  const ttlSeconds = positiveInteger(env.MARKET_CACHE_TTL_SECONDS, 86_400);
-  const staleSeconds = positiveInteger(env.MARKET_CACHE_STALE_SECONDS, 604_800);
-  const alphaVantage = await getCachedPublicData(env, {
-    cacheKey: "alpha-vantage:movers:v1",
-    source: "ALPHA_VANTAGE",
-    symbol: null,
-    dataType: "MARKET_MOVERS",
-    ttlSeconds,
-    staleSeconds,
-    loader: () => fetchAlphaMarketMovers(env, fetcher)
-  });
-  const watchlist = await cachedEquityIdeas(env);
-  console.info("market_ideas_served", {
-    alphaVantageStatus: alphaVantage.status,
-    watchlistSize: watchlist.universeSize
-  });
-  return jsonResponse({
-    marketIdeas: {
-      generatedAt: nowIso(),
-      alphaVantage,
-      watchlist
     }
   });
 }

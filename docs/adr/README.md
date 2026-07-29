@@ -56,5 +56,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0021: Opt-in public market resources](0021-opt-in-public-market-resources.md)
 - [ADR 0022: Worker-normalized SEC and FRED market context](0022-worker-normalized-sec-fred-context.md)
 - [ADR 0023: Alpha Vantage end-of-day prices and market ideas](0023-alpha-vantage-eod-market-ideas.md)
+- [ADR 0024: Homepage TradingView hot lists; Alpha Vantage narrowed to previous close](0024-homepage-tradingview-hotlists.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

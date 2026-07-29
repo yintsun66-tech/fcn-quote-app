@@ -3,6 +3,17 @@
 This runbook applies only after explicit migration/Secret/deployment authorization. It must not be
 used to change RFQ, ranking, mail-routing or ownership data.
 
+Current production baseline (2026-07-29): migration `0012` and the Secret name are present, and
+Worker `0c63296c-f61f-4a11-a358-30db6e783ac6` is deployed. The first three Alpha Vantage requests
+returned an `Information` envelope and no normalized payload. Verify the key's source and
+activation through the hidden Secret workflow before changing application logic or clearing cache.
+
+**ADR 0024 scope change.** Alpha Vantage now serves only the per-symbol previous close that fills
+「輸入標的參考現價」. Market hot lists moved to the homepage as a TradingView widget and no longer
+touch the provider, the D1 cache or the daily budget, so an Alpha Vantage outage no longer affects
+them. `GET /api/v1/market/ideas` no longer exists. The daily budget therefore covers per-symbol
+daily-series requests only, which materially reduces pressure on the free-tier limit.
+
 ## Production prerequisites
 
 1. Confirm `ALPHA_VANTAGE_API_KEY` is available. Enter it only through Cloudflare's encrypted Secret
@@ -33,9 +44,11 @@ used to change RFQ, ranking, mail-routing or ownership data.
 3. Deploy the Worker only after the two previous steps succeed.
 4. Verify the public health endpoint and static asset version.
 5. Sign in as a normal test user and open one existing FCN analysis page. Confirm an empty
-   reference-spot field receives the previous trading day's close, then load the market-ideas
-   panel. Do not create or send a real RFQ merely to test this feature.
-6. Sign in as ADMIN and verify the RFQ time-axis dialog shows the separate public-cache health
+   reference-spot field receives the previous trading day's close. Do not create or send a real RFQ
+   merely to test this feature.
+6. On the homepage, open 「美股／日股熱門榜」, tick consent, and confirm both 美股 and 日股 render
+   populated rows. Confirm no frame is created before consent is ticked.
+7. Sign in as ADMIN and verify the RFQ time-axis dialog shows the separate public-cache health
    panel without source payloads or Secrets.
 
 ## Normal health
@@ -72,10 +85,10 @@ Recommended capacity actions:
 
 ## Rollback
 
-Worker rollback uses the standard deployment runbook. Migration `0011` is additive; leave its
-empty/reconstructable tables in place during a Worker rollback. Dropping tables is destructive,
-unnecessary for functional rollback and requires a separately reviewed migration plus explicit
-authorization.
+Worker rollback uses the standard deployment runbook. Migrations `0011` and `0012` contain only
+public-reference/cache structures; leave their empty or reconstructable tables in place during a
+Worker rollback. Dropping tables is destructive, unnecessary for functional rollback and requires
+a separately reviewed migration plus explicit authorization.
 
 The old `FRED_API_KEY` Secret may remain encrypted during rollback but is not read by the new
 Worker. Delete or rotate any Secret only through Cloudflare Secret management and only with

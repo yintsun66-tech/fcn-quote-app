@@ -542,18 +542,14 @@ provider returns a safe error code and `data: null`; it does not fail or alter t
 The response never includes the Alpha Vantage key, upstream request URL/body, RFQ identifiers or user
 identity.
 
-`GET /api/v1/market/ideas`
+`GET /api/v1/market/ideas` was **removed** by ADR 0024, together with the Alpha Vantage
+`TOP_GAINERS_LOSERS` fetch, the cached-universe rankings and the composite heat score. Market hot
+lists are now a client-side TradingView screener widget on the homepage; they involve no Worker
+endpoint, no D1 cache row and no provider budget.
 
-- requires a valid application session and uses the same hashed user/IP rate limit;
-- returns the cached Alpha Vantage end-of-day `topGainers`, `topLosers` and `mostActive` lists;
-- returns derived rankings over currently cached equities: `realizedVolatility`,
-  `relativeVolume`, `absoluteMove` and `heat`;
-- labels the cached-equity universe size because those lists are not whole-market rankings;
-- never inserts a symbol into an RFQ and never changes a ranking or artifact.
-
-The heat score is a display-only percentile score: relative volume 40%, absolute daily change 35%
-and 20-day historical volatility 25%. The Worker permits at most
-`ALPHA_VANTAGE_DAILY_REQUEST_LIMIT` attempted upstream calls per UTC day.
+Alpha Vantage is therefore used for exactly one purpose: the per-symbol previous close that fills
+「輸入標的參考現價」. The Worker still permits at most `ALPHA_VANTAGE_DAILY_REQUEST_LIMIT` attempted
+upstream calls per UTC day, which now covers only those per-symbol daily-series requests.
 
 `GET /api/v1/admin/market-context-health`
 

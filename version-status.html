@@ -250,7 +250,7 @@
       <p class="eyebrow">FCN Quote App · Release Map</p>
       <h1>版本、分支與部署狀態</h1>
       <p>這個頁面區分完整 Cloudflare 正式版與 GitHub Pages 靜態相容版，避免把 repository、branch、commit 與實際上線環境混為一談。</p>
-      <span class="updated">狀態基準：2026-07-27（Asia/Taipei）</span>
+      <span class="updated">狀態基準：2026-07-29（Asia/Taipei）</span>
     </section>
 
     <section class="grid" aria-label="部署版本比較">
@@ -266,11 +266,11 @@
           <div><dt>應用網址</dt><dd><a href="https://app.yintsun66.com/">app.yintsun66.com</a></dd></div>
           <div><dt>API</dt><dd><a href="https://api.yintsun66.com/api/v1/health">api.yintsun66.com</a></dd></div>
           <div><dt>來源 repository</dt><dd><a href="https://github.com/yintsun66-tech/fcn-quote-app">yintsun66-tech/fcn-quote-app</a></dd></div>
-          <div><dt>來源分支</dt><dd><code>feature/subject-branch-correlation</code></dd></div>
-          <div><dt>正式功能 commit</dt><dd><code>481c220</code></dd></div>
-          <div><dt>交接文件基線</dt><dd><code>21ca68e</code></dd></div>
-          <div><dt>Worker Version ID</dt><dd><code>68c62104-aa1d-48b9-b391-ff03695224f6</code></dd></div>
-          <div><dt>功能範圍</dt><dd>登入、D1、收發信、回覆解析、排名、版本化重新排名、R2 與報價圖。</dd></div>
+          <div><dt>來源分支</dt><dd><code>codex/market-analysis-phase2-4</code></dd></div>
+          <div><dt>正式功能 commit</dt><dd><code>c487355</code></dd></div>
+          <div><dt>交接文件基線</dt><dd><code>7d903ee</code></dd></div>
+          <div><dt>Worker Version ID</dt><dd><code>0c63296c-f61f-4a11-a358-30db6e783ac6</code></dd></div>
+          <div><dt>功能範圍</dt><dd>登入、D1、收發信、回覆解析、排名、版本化重新排名、報價圖，以及市場與風險分析。</dd></div>
         </dl>
       </article>
 
@@ -286,9 +286,9 @@
           <div><dt>靜態網址</dt><dd><a href="https://yintsun66-tech.github.io/fcnV2/">yintsun66-tech.github.io/fcnV2</a></dd></div>
           <div><dt>repository</dt><dd><a href="https://github.com/yintsun66-tech/fcnV2">yintsun66-tech/fcnV2</a></dd></div>
           <div><dt>部署分支</dt><dd><code>main / root</code></dd></div>
-          <div><dt>同步來源</dt><dd><code>fcn-quote-app@21ca68e</code></dd></div>
-          <div><dt>靜態程式發布 commit</dt><dd><code>2d13926</code></dd></div>
-          <div><dt>靜態程式基線</dt><dd><code>481c220</code> 所使用的根目錄前端資產。</dd></div>
+          <div><dt>同步來源</dt><dd>經允許的公開根目錄前端資產快照</dd></div>
+          <div><dt>靜態程式發布 commit</dt><dd><code>3ae50b7</code></dd></div>
+          <div><dt>靜態程式基線</dt><dd>含 ZAR 的相容輸入頁；不含目前 Alpha Vantage 後端。</dd></div>
           <div><dt>用途</dt><dd>免登入的相容輸入頁、手動郵件流程、操作說明與版本狀態。</dd></div>
           <div><dt>不包含</dt><dd>Cloudflare Worker、D1、Queue、Email Worker、R2、Access 與後端 API。</dd></div>
         </dl>
@@ -301,7 +301,7 @@
       <div class="flow">
         <article>
           <h3>功能開發來源</h3>
-          <p><code>fcn-quote-app</code><br><code>feature/subject-branch-correlation</code></p>
+          <p><code>fcn-quote-app</code><br><code>codex/market-analysis-phase2-4</code></p>
           <p>包含完整後端與最新正式前端。尚未合併至該 repository 的 <code>main</code>。</p>
         </article>
         <div class="arrow" aria-hidden="true">→</div>
@@ -327,6 +327,8 @@
           <tr><td>十五分鐘報價＋六十秒轉送緩衝</td><td class="yes">有</td><td class="no">沒有</td></tr>
           <tr><td>經濟前四名＋自選第五家</td><td class="yes">有</td><td class="no">沒有</td></tr>
           <tr><td>晚到報價版本化重新排名</td><td class="yes">有</td><td class="no">沒有</td></tr>
+          <tr><td>SEC／Alpha Vantage 前一日收盤價與公司資料</td><td class="yes">已部署；Alpha Vantage 資料驗證待完成</td><td class="no">沒有後端資料服務</td></tr>
+          <tr><td>首頁美股／日股熱門榜（TradingView，需同意）</td><td class="yes">已實作，待部署</td><td class="yes">已實作，待同步</td></tr>
           <tr><td>私人報價圖與 R2</td><td class="yes">有</td><td class="no">沒有後端私人儲存</td></tr>
         </tbody>
       </table>

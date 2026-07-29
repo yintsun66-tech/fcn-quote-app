@@ -32,8 +32,8 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `c487355` is documented by handoff commit `7d903ee` and
-  deployed as Worker `0c63296c-f61f-4a11-a358-30db6e783ac6` on 2026-07-29. Resolve the current
+- Production implementation commit `584d33d` is documented by this handoff and
+  deployed as Worker `a71a2da2-26fa-42b2-818a-ea966cc57d8d` on 2026-07-29. Resolve the current
   branch HEAD from Git rather than copying a historical handoff hash. The current verification
   baseline is 19 test files / 131 tests. A deployment record is evidence of Worker/static-asset
   publication, not evidence that Alpha Vantage returned usable data or that real bank mail was

@@ -4,14 +4,22 @@ Updated: 2026-07-29 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current Git baseline: implementation commit `c487355` and deployment-handoff commit `7d903ee` are
-pushed to `origin/codex/market-analysis-phase2-4`. The current handoff/README/Claude documentation
-refresh is local and uncommitted until the user explicitly requests a commit.
+Current Git baseline: implementation commit `584d33d` is the production source, deployed as Worker
+`a71a2da2-26fa-42b2-818a-ea966cc57d8d` on 2026-07-29. It also absorbed the previously uncommitted
+2026-07-29 documentation refresh. Previous baseline: `c487355` / handoff `7d903ee` / Worker
+`0c63296c-f61f-4a11-a358-30db6e783ac6`.
 
 ## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
 
-Implemented locally, **not yet committed or deployed**. Production still runs Worker
-`0c63296c-f61f-4a11-a358-30db6e783ac6`.
+Commit `584d33d`, deployed as Worker `a71a2da2-26fa-42b2-818a-ea966cc57d8d`. No D1 migration,
+Secret or binding change.
+
+Post-deploy verification: API health 200; `market-resources.mjs` returns HTTP 200 and contains
+`hotlistWidgetUrl`, `hotlistDescriptor`, `Object.hasOwn`, `embed-widget/screener` and
+`HOTLIST_CONSENT_KEY`; the live homepage contains `hotlistPanel`, `hotlistConsent`,
+`hotlistMarket`, `hotlistScreen` and the `market-hotlist-v1` cache key; `app.js` contains
+`setupHotlist`. `GET /api/v1/market/ideas` returns 401 at the session gate — the route itself is
+gone, so an authenticated caller now receives 404.
 
 Why: the Alpha Vantage market-movers panel never returned a usable payload in production (the
 provider answered with an `Information` envelope), and a shared market-wide list is the worst use

@@ -44,9 +44,9 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `c487355`，交接文件 commit 為 `7d903ee`；實際最新分支 HEAD
+- 正式功能程式基線為 `584d33d`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `0c63296c-f61f-4a11-a358-30db6e783ac6`（2026-07-29
+- 最新正式 Worker 版本為 `a71a2da2-26fa-42b2-818a-ea966cc57d8d`（2026-07-29
   部署）。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；

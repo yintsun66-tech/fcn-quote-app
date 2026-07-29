@@ -1,7 +1,7 @@
 export interface AppEnv extends Env {
   EMPLOYEE_DATA_KEY: string;
   EMPLOYEE_LOOKUP_KEY: string;
-  FRED_API_KEY: string;
+  ALPHA_VANTAGE_API_KEY: string;
 }
 
 export type UserStatus = "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED" | "DISABLED";

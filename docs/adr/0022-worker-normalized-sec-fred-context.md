@@ -1,6 +1,6 @@
 # ADR 0022: Worker-normalized SEC and FRED market context
 
-Status: Accepted
+Status: Superseded by ADR 0023
 Date: 2026-07-28
 
 ## Context

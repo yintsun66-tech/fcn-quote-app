@@ -4,11 +4,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import {
   cleanupExpiredMarketData,
-  fetchFredContext,
+  fetchAlphaEquityContext,
+  fetchAlphaMarketMovers,
   fetchSecFilings,
   fetchSecInstrument,
   getCachedPublicData,
   getMarketContext,
+  getMarketIdeas,
   marketContextHealth,
   normalizeMarketSymbol
 } from "../src/market-context";
@@ -69,23 +71,35 @@ function publicDataFetcher(onRequest?: (url: URL) => void): typeof fetch {
         }
       });
     }
-    if (url.hostname === "api.stlouisfed.org" && url.pathname === "/fred/series") {
-      const id = url.searchParams.get("series_id");
+    if (url.hostname === "www.alphavantage.co" && url.searchParams.get("function") === "TIME_SERIES_DAILY") {
+      const symbol = url.searchParams.get("symbol") ?? "AAPL";
       return jsonResponse({
-        seriess: [{
-          id,
-          title: `${id} synthetic title`,
-          units: id === "VIXCLS" ? "Index" : "Percent",
-          units_short: id === "VIXCLS" ? "Index" : "%"
-        }]
+        "Meta Data": { "2. Symbol": symbol, "3. Last Refreshed": "2026-07-28" },
+        "Time Series (Daily)": Object.fromEntries(Array.from({ length: 25 }, (_, index) => {
+          const date = new Date(Date.UTC(2026, 6, 28 - index)).toISOString().slice(0, 10);
+          const close = 200 - index;
+          return [date, {
+            "1. open": String(close - 1),
+            "2. high": String(close + 2),
+            "3. low": String(close - 3),
+            "4. close": String(close),
+            "5. volume": String(2_000_000 - index * 10_000)
+          }];
+        }))
       });
     }
-    if (url.hostname === "api.stlouisfed.org" && url.pathname === "/fred/series/observations") {
+    if (url.hostname === "www.alphavantage.co" && url.searchParams.get("function") === "TOP_GAINERS_LOSERS") {
       return jsonResponse({
-        observations: [
-          { date: "2026-07-25", value: "." },
-          { date: "2026-07-24", value: "4.25" },
-          { date: "2026-07-23", value: "4.10" }
+        metadata: "Top gainers, losers, and most actively traded US tickers",
+        last_updated: "2026-07-28 16:15:59 US/Eastern",
+        top_gainers: [
+          { ticker: "GAIN", price: "25.50", change_amount: "5.10", change_percentage: "25.00%", volume: "1000000" }
+        ],
+        top_losers: [
+          { ticker: "LOSS", price: "8.10", change_amount: "-1.90", change_percentage: "-19.00%", volume: "900000" }
+        ],
+        most_actively_traded: [
+          { ticker: "AAPL", price: "200.00", change_amount: "2.00", change_percentage: "1.01%", volume: "88000000" }
         ]
       });
     }
@@ -99,13 +113,20 @@ beforeAll(async () => {
 
 describe("official public market context", () => {
   it("requires an authenticated application session", async () => {
-    const response = await worker.fetch(
+    const contextResponse = await worker.fetch(
       new Request("https://api.yintsun66.com/api/v1/market/instruments/AAPL/context"),
       testEnv,
       createExecutionContext()
     );
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
+    expect(contextResponse.status).toBe(401);
+    expect(await contextResponse.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
+    const ideasResponse = await worker.fetch(
+      new Request("https://api.yintsun66.com/api/v1/market/ideas"),
+      testEnv,
+      createExecutionContext()
+    );
+    expect(ideasResponse.status).toBe(401);
+    expect(await ideasResponse.json()).toMatchObject({ error: { code: "AUTHENTICATION_REQUIRED" } });
   });
 
   it("normalizes only safe market symbols", () => {
@@ -161,67 +182,69 @@ describe("official public market context", () => {
     expect(filings.data.recentFilings.every(item => item.officialUrl.startsWith("https://www.sec.gov/Archives/"))).toBe(true);
   });
 
-  it("normalizes FRED latest, prior and change without treating missing observations as zero", async () => {
-    const fred = await fetchFredContext(testEnv, publicDataFetcher());
-    expect(fred.data.series).toHaveLength(3);
-    expect(fred.data.series[0]).toMatchObject({
-      observationDate: "2026-07-24",
-      value: 4.25,
-      previousObservationDate: "2026-07-23",
-      previousValue: 4.1
+  it("normalizes Alpha Vantage previous close and derives daily market metrics", async () => {
+    const equity = await fetchAlphaEquityContext(testEnv, "AAPL", publicDataFetcher());
+    expect(equity.sourceAsOf).toBe("2026-07-28");
+    expect(equity.data).toMatchObject({
+      symbol: "AAPL",
+      tradingDate: "2026-07-28",
+      closePrice: 200,
+      priorTradingDate: "2026-07-27",
+      priorClosePrice: 199,
+      volume: 2_000_000
     });
-    expect(fred.data.series[0]?.change).toBeCloseTo(0.15);
+    expect(equity.data.dailyChangePct).toBeCloseTo(0.5025);
+    expect(equity.data.relativeVolume20d).toBeGreaterThan(1);
+    expect(equity.data.realizedVolatility20dPct).toBeGreaterThan(0);
+    expect(equity.data.range20dPct).toBeGreaterThan(0);
   });
 
-  it("trims a copied FRED key and rejects an invalid key before any upstream request", async () => {
+  it("normalizes the Alpha Vantage daily market movers response", async () => {
+    const movers = await fetchAlphaMarketMovers(testEnv, publicDataFetcher());
+    expect(movers.sourceAsOf).toBe("2026-07-28");
+    expect(movers.data.topGainers[0]).toMatchObject({ symbol: "GAIN", changePct: 25 });
+    expect(movers.data.topLosers[0]).toMatchObject({ symbol: "LOSS", changePct: -19 });
+    expect(movers.data.mostActive[0]).toMatchObject({ symbol: "AAPL", volume: 88_000_000 });
+  });
+
+  it("trims a copied Alpha Vantage key and rejects an invalid key before any upstream request", async () => {
     let observedKey = "";
     const trimmingFetcher = publicDataFetcher(url => {
-      if (url.hostname === "api.stlouisfed.org") observedKey = url.searchParams.get("api_key") ?? "";
+      if (url.hostname === "www.alphavantage.co") observedKey = url.searchParams.get("apikey") ?? "";
     });
-    await fetchFredContext(
-      { ...testEnv, FRED_API_KEY: "  abcdefghijklmnopqrstuvwxyz123456\r\n" },
+    await fetchAlphaEquityContext(
+      { ...testEnv, ALPHA_VANTAGE_API_KEY: "  SYNTHETIC12345678\r\n" },
+      "AAPL",
       trimmingFetcher
     );
-    expect(observedKey).toBe("abcdefghijklmnopqrstuvwxyz123456");
+    expect(observedKey).toBe("SYNTHETIC12345678");
 
     let requestCount = 0;
-    await expect(fetchFredContext(
-      { ...testEnv, FRED_API_KEY: "not-a-valid-key" },
+    await expect(fetchAlphaEquityContext(
+      { ...testEnv, ALPHA_VANTAGE_API_KEY: "not a valid key" },
+      "AAPL",
       (async () => {
         requestCount += 1;
         return jsonResponse({});
       }) as typeof fetch
     )).rejects.toMatchObject({
       status: 503,
-      code: "FRED_KEY_INVALID_FORMAT"
+      code: "ALPHA_VANTAGE_KEY_INVALID_FORMAT"
     });
     expect(requestCount).toBe(0);
   });
 
-  it("retries one transient FRED edge failure and avoids parallel upstream requests", async () => {
-    const delegate = publicDataFetcher();
-    let requestCount = 0;
-    let activeRequests = 0;
-    let maximumConcurrentRequests = 0;
-    const transientFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      requestCount += 1;
-      activeRequests += 1;
-      maximumConcurrentRequests = Math.max(maximumConcurrentRequests, activeRequests);
-      try {
-        if (requestCount === 1) return new Response("temporary edge failure", { status: 520 });
-        return await delegate(input, init);
-      } finally {
-        activeRequests -= 1;
-      }
-    }) as typeof fetch;
-
-    const fred = await fetchFredContext(testEnv, transientFetcher);
-    expect(fred.data.series).toHaveLength(3);
-    expect(requestCount).toBe(7);
-    expect(maximumConcurrentRequests).toBe(1);
+  it("treats Alpha Vantage informational quota responses as unavailable data", async () => {
+    const limitedFetcher = (async () => jsonResponse({
+      Information: "Synthetic rate limit response that must not be exposed."
+    })) as typeof fetch;
+    await expect(fetchAlphaEquityContext(testEnv, "AAPL", limitedFetcher)).rejects.toMatchObject({
+      status: 503,
+      code: "ALPHA_VANTAGE_RATE_LIMITED"
+    });
   });
 
-  it("returns authenticated SEC and FRED context and reuses shared fresh cache", async () => {
+  it("returns authenticated SEC and Alpha Vantage context and reuses shared fresh cache", async () => {
     const fetcher = publicDataFetcher();
     const first = await getMarketContext(
       new Request("https://api.yintsun66.com/api/v1/market/instruments/AAPL/context", {
@@ -234,7 +257,8 @@ describe("official public market context", () => {
     );
     const firstPayload = await first.json<Record<string, any>>();
     expect(firstPayload.marketContext.sec.status).toBe("FRESH");
-    expect(firstPayload.marketContext.fred.status).toBe("FRESH");
+    expect(firstPayload.marketContext.alphaVantage.status).toBe("FRESH");
+    expect(firstPayload.marketContext.alphaVantage.data.closePrice).toBe(200);
 
     const unavailableFetcher = (async () => {
       throw new Error("network must not be used for a fresh cache hit");
@@ -250,21 +274,21 @@ describe("official public market context", () => {
     );
     const secondPayload = await second.json<Record<string, any>>();
     expect(secondPayload.marketContext.sec.data.company.ticker).toBe("AAPL");
-    expect(secondPayload.marketContext.fred.data.series).toHaveLength(3);
+    expect(secondPayload.marketContext.alphaVantage.data.symbol).toBe("AAPL");
   });
 
-  it("keeps FRED available and retains a safe diagnostic when SEC fails", async () => {
+  it("keeps Alpha Vantage available and retains a safe diagnostic when SEC fails", async () => {
     await testEnv.DB.prepare(
-      "DELETE FROM public_data_cache WHERE cache_key IN ('sec:instrument:v1:NVDA', 'fred:macro:v1')"
+      "DELETE FROM public_data_cache WHERE cache_key IN ('sec:instrument:v1:NVDA', 'alpha-vantage:daily:v1:NVDA')"
     ).run();
     const delegate = publicDataFetcher();
-    let fredRequests = 0;
+    let alphaRequests = 0;
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
       if (url.pathname.endsWith("/company_tickers_exchange.json")) {
         throw new TypeError("Illegal invocation: function called with incorrect this reference");
       }
-      if (url.hostname === "api.stlouisfed.org") fredRequests += 1;
+      if (url.hostname === "www.alphavantage.co") alphaRequests += 1;
       return delegate(input, init);
     }) as typeof fetch;
     const response = await getMarketContext(
@@ -286,9 +310,9 @@ describe("official public market context", () => {
       errorCode: "UPSTREAM_RUNTIME_INVOCATION",
       data: null
     });
-    expect(payload.marketContext.fred.status).toBe("FRESH");
-    expect(payload.marketContext.fred.data.series).toHaveLength(3);
-    expect(fredRequests).toBe(6);
+    expect(payload.marketContext.alphaVantage.status).toBe("FRESH");
+    expect(payload.marketContext.alphaVantage.data.symbol).toBe("NVDA");
+    expect(alphaRequests).toBe(1);
 
     const beforeCleanup = await testEnv.DB.prepare(
       `SELECT status, fetched_at, stale_until, updated_at
@@ -337,23 +361,29 @@ describe("official public market context", () => {
       new Date(now + 60_000).toISOString(),
       new Date(now - 120_000).toISOString()
     ).run();
-    const stale = await getCachedPublicData(testEnv, {
+    let staleRefreshAttempts = 0;
+    const staleOptions = {
       cacheKey: "test:stale:v1",
-      source: "FRED",
+      source: "FRED" as const,
       symbol: null,
       dataType: "TEST",
       ttlSeconds: 60,
       staleSeconds: 60,
       loader: async () => {
+        staleRefreshAttempts += 1;
         throw new Error("synthetic upstream failure");
       }
-    });
+    };
+    const stale = await getCachedPublicData(testEnv, staleOptions);
     expect(stale).toMatchObject({
       status: "STALE",
       isStale: true,
       errorCode: "UPSTREAM_UNAVAILABLE",
       data: { value: 2 }
     });
+    const staleAgain = await getCachedPublicData(testEnv, staleOptions);
+    expect(staleAgain.status).toBe("STALE");
+    expect(staleRefreshAttempts).toBe(1);
   });
 
   it("serves 50 concurrent users from one shared SEC refresh path", async () => {
@@ -381,6 +411,70 @@ describe("official public market context", () => {
     expect(payloads).toHaveLength(50);
     expect(payloads.every(payload => payload.marketContext.sec.data.company.ticker === "MSFT")).toBe(true);
     expect(secRequests).toBe(2);
+  });
+
+  it("returns one cached market-movers payload and rankings from cached equity metrics", async () => {
+    const first = await getMarketIdeas(
+      new Request("https://api.yintsun66.com/api/v1/market/ideas", {
+        headers: { "cf-connecting-ip": "198.51.100.200" }
+      }),
+      testEnv,
+      {
+        ...session,
+        id: "ses_market_ideas",
+        user: { ...session.user, id: "usr_market_ideas" }
+      },
+      publicDataFetcher()
+    );
+    const payload = await first.json<Record<string, any>>();
+    expect(payload.marketIdeas.alphaVantage.status).toBe("FRESH");
+    expect(payload.marketIdeas.alphaVantage.data.mostActive[0]).toMatchObject({ symbol: "AAPL" });
+    expect(payload.marketIdeas.watchlist.universeSize).toBeGreaterThan(0);
+    expect(payload.marketIdeas.watchlist.heat[0]).toHaveProperty("heatScore");
+
+    const second = await getMarketIdeas(
+      new Request("https://api.yintsun66.com/api/v1/market/ideas", {
+        headers: { "cf-connecting-ip": "198.51.100.201" }
+      }),
+      testEnv,
+      {
+        ...session,
+        id: "ses_market_ideas_second",
+        user: { ...session.user, id: "usr_market_ideas_second" }
+      },
+      (async () => {
+        throw new Error("fresh market-movers cache must prevent another provider call");
+      }) as typeof fetch
+    );
+    expect((await second.json<Record<string, any>>()).marketIdeas.alphaVantage.status).toBe("FRESH");
+  });
+
+  it("stops before the provider request when the configured daily Alpha Vantage budget is exhausted", async () => {
+    const usageDate = new Date().toISOString().slice(0, 10);
+    await testEnv.DB.prepare(
+      `INSERT INTO market_provider_daily_usage
+        (provider, usage_date, request_count, updated_at)
+       VALUES ('ALPHA_VANTAGE', ?, 2, ?)
+       ON CONFLICT(provider, usage_date) DO UPDATE SET
+         request_count = 2,
+         updated_at = excluded.updated_at`
+    ).bind(usageDate, new Date().toISOString()).run();
+    let upstreamRequests = 0;
+    await expect(fetchAlphaEquityContext(
+      { ...testEnv, ALPHA_VANTAGE_DAILY_REQUEST_LIMIT: "2" } as unknown as AppEnv,
+      "AAPL",
+      (async () => {
+        upstreamRequests += 1;
+        return jsonResponse({});
+      }) as typeof fetch
+    )).rejects.toMatchObject({
+      status: 503,
+      code: "ALPHA_VANTAGE_DAILY_BUDGET_EXHAUSTED"
+    });
+    expect(upstreamRequests).toBe(0);
+    await testEnv.DB.prepare(
+      "UPDATE market_provider_daily_usage SET request_count = 0 WHERE provider = 'ALPHA_VANTAGE' AND usage_date = ?"
+    ).bind(usageDate).run();
   });
 
   it("enforces the configured per-user request limit without storing the raw user or IP", async () => {
@@ -434,6 +528,7 @@ describe("official public market context", () => {
     ).bind(expired, expired).run();
     const before = await marketContextHealth(testEnv);
     expect(before.expiredRows).toBeGreaterThan(0);
+    expect(before.providerUsageToday).toEqual(expect.any(Array));
     const cleaned = await cleanupExpiredMarketData(testEnv);
     expect(cleaned.cacheRows).toBeGreaterThan(0);
     expect(cleaned.rateLimitRows).toBeGreaterThan(0);

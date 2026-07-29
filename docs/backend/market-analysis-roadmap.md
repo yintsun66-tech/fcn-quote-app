@@ -1,6 +1,6 @@
 # FCN market analysis roadmap — Phases 2 to 4
 
-Status: Phases 2–4 implemented locally; production Secret, migration and deployment not yet applied
+Status: Alpha Vantage end-of-day extension implemented locally; Secret, migration and deployment pending
 Baseline: Phase 1 in `codex/market-analysis-phase1`; Phase 2 work in `codex/market-analysis-phase2-4`
 Updated: 2026-07-28 (Asia/Taipei)
 
@@ -80,7 +80,9 @@ examples are historical research examples, not current production API contracts:
 - `pytrends` relies on an unofficial Google Trends interface. Google's official Trends API is
   currently limited to approved alpha testers. Google Trends is therefore link-only until this
   project receives official API access.
-- FRED has a documented key-based API and remains suitable for Phase 3 after a Secret is provided.
+- Alpha Vantage has a documented key-based end-of-day API and is used for the approved limited
+  proof-of-concept underlying pool. Its institutional/multi-user licence still requires written
+  confirmation before broader production use.
 - SEC EDGAR provides keyless JSON APIs and remains suitable for Phase 3 under SEC fair-access
   requirements.
 
@@ -97,27 +99,31 @@ Primary references:
 - Yahoo developer APIs: <https://developer.yahoo.com/api/>
 - Google Trends API alpha: <https://developers.google.com/search/apis/trends>
 
-## Phase 3 — Worker-normalized SEC and FRED context
+## Phase 3 — Worker-normalized SEC and Alpha Vantage context
 
 ### Goal
 
-Add issuer-independent company filings and macro context through a controlled Worker cache. This
-phase still does not provide a tradeable stock/option price.
+Add issuer-independent company filings, the previous completed US-equity daily close and
+end-of-day market-idea lists through a controlled Worker cache. These are reference values, not
+tradeable quotes.
 
 ### Approved release boundary
 
-The user approved migration `0011`, the FRED Secret/configuration boundary, cache retention,
-monitoring, cleanup, a 50-user concurrent test and the following first-release fields:
+The user approved migrations `0011` and `0012`, the Alpha Vantage Secret/configuration boundary,
+cache retention, monitoring, cleanup, a 50-user concurrent test and the following fields:
 
 - SEC company identity: CIK, legal name, exchange and ticker;
 - SEC recent filings: latest five 10-K, 10-Q and 8-K filings with filing date and official link;
-- FRED: latest observation, prior observation, change, units and observation date for `DGS10`,
-  `FEDFUNDS` and `VIXCLS`;
+- Alpha Vantage: latest completed daily OHLCV, prior close, daily change, 20-day historical
+  volatility, relative volume and 20-day high/low range;
+- Alpha Vantage: end-of-day gainers, losers and most-active lists;
+- cached-underlying rankings for historical volatility, relative volume, absolute daily movement
+  and the documented composite heat score;
 - no Yahoo Finance or Google Trends values in the Worker response until approved official access
   exists.
 
-The key value is ready but is not stored in the repository. It must be entered only through
-Cloudflare Secret management before the first production deployment.
+The Alpha Vantage key must be obtained separately and is not stored in the repository. It must be
+entered only through Cloudflare Secret management before the first production deployment.
 
 ### Implemented data model
 
@@ -154,6 +160,12 @@ Cloudflare Secret management before the first production deployment.
 - `scope USER|IP`
 - bounded window/count timestamps
 
+`market_provider_daily_usage`
+
+- `provider + usage_date` primary key
+- attempted upstream request count and update time
+- no user or RFQ identity
+
 Indexes:
 
 - unique `cache_key`;
@@ -170,11 +182,15 @@ UI actually displays; use private R2 for an approved raw/large cache if later re
 - returns normalized source records with `source`, `sourceAsOf`, `fetchedAt`, `expiresAt`,
   `isStale` and safe error codes;
 - never returns API keys, raw upstream errors or unrestricted upstream payloads.
+- `GET /api/v1/market/ideas`
+- returns the daily market movers and rankings derived from currently cached equities;
+- labels the cached-equity universe size and never changes an RFQ.
 
 ADMIN-only cache health:
 
 - `GET /api/v1/admin/market-context-health`
-- returns aggregate source/status/stale/expired/rate-limit counts only.
+- returns aggregate source/status/stale/expired/rate-limit counts plus today's provider request
+  count only.
 
 ### Fetch/cache flow
 
@@ -191,12 +207,13 @@ Implemented TTL:
 
 - instrument mapping: 30 days;
 - SEC filing index and normalized company identity: 24 hours;
-- FRED observations: 24 hours.
+- Alpha Vantage daily equity and market movers: 24 hours.
 - stale fallback: no more than 7 days and always labelled stale.
 
 ### Security and operating controls
 
-- Store `FRED_API_KEY` only as a Cloudflare Secret.
+- Store `ALPHA_VANTAGE_API_KEY` only as a Cloudflare Secret.
+- Enforce a shared daily attempted-request budget, defaulting to 24, before calling the provider.
 - Identify the SEC client according to SEC fair-access guidance.
 - Bind upstream hosts exactly; reject arbitrary proxy URLs.
 - Apply per-user and per-IP rate limits.
@@ -207,8 +224,8 @@ Implemented TTL:
 ### Verification
 
 - Synthetic tests cover fresh-cache reuse, stale fallback, upstream failure, strict symbol
-  normalization, SEC filing filtering, FRED missing observations, ADMIN authorization, cleanup,
-  same-key miss coalescing and 50 simultaneous users.
+  normalization, SEC filing filtering, Alpha Vantage response normalization and daily-budget
+  exhaustion, ADMIN authorization, cleanup, same-key miss coalescing and 50 simultaneous users.
 - The complete repository suite, typecheck and dry-run build remain mandatory before handoff.
 - Production D1 query/write and upstream latency evidence remain unverified until explicit
   migration/Secret/deployment authorization.
@@ -216,7 +233,8 @@ Implemented TTL:
 Primary references:
 
 - SEC EDGAR APIs: <https://www.sec.gov/search-filings/edgar-application-programming-interfaces>
-- FRED API: <https://fred.stlouisfed.org/docs/api/fred/overview.html>
+- Alpha Vantage API: <https://www.alphavantage.co/documentation/>
+- Alpha Vantage support/limits: <https://www.alphavantage.co/support/>
 
 ## Phase 4 — capacity, monitoring, retention and production hardening
 
@@ -237,12 +255,13 @@ This sample must be re-measured before Phase 4 implementation. Its rough density
 trade across the whole application) implies that 10,000 trades could add roughly 330 MB before
 indexes/retention variation. Therefore a 500 MB free D1 database is not a safe long-term 365-day
 store at that volume. Existing email, quote and audit records are a larger capacity driver than
-the Phase 1 browser-only calculations or a shared SEC/FRED cache.
+the Phase 1 browser-only calculations or a shared SEC/Alpha Vantage cache.
 
 ### Monitoring dashboard
 
 Track D1 size/growth, rows read/written, cache hit/miss/stale rates, upstream success/latency,
-analysis-input API traffic/latency/errors, active users and cache cleanup failures.
+analysis-input API traffic/latency/errors, Alpha Vantage daily usage, active users and cache
+cleanup failures.
 
 The implemented first step is an ADMIN-only safe cache-health panel plus structured Worker error
 events. It intentionally avoids per-view D1 analytics. Plan-level D1/Worker measurements remain in

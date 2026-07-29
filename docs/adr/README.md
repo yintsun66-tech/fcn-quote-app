@@ -55,5 +55,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0020: Owner-scoped FCN market and risk analysis](0020-owner-scoped-fcn-market-analysis.md)
 - [ADR 0021: Opt-in public market resources](0021-opt-in-public-market-resources.md)
 - [ADR 0022: Worker-normalized SEC and FRED market context](0022-worker-normalized-sec-fred-context.md)
+- [ADR 0023: Alpha Vantage end-of-day prices and market ideas](0023-alpha-vantage-eod-market-ideas.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

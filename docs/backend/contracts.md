@@ -478,7 +478,7 @@ The quote-card footer displays the complete outbound subject reference as `[RFQ:
 - requires a valid application session;
 - accepts only a normalized public US ticker, never an arbitrary URL;
 - is independently rate-limited by hashed user and IP keys;
-- returns display-only official SEC and FRED envelopes;
+- returns display-only SEC and Alpha Vantage envelopes;
 - never changes RFQ, quote, ranking, analysis-input or artifact state.
 
 Response shape:
@@ -508,16 +508,29 @@ Response shape:
         "recentFilings": []
       }
     },
-    "fred": {
-      "source": "FRED",
+    "alphaVantage": {
+      "source": "ALPHA_VANTAGE",
       "status": "FRESH",
-      "sourceAsOf": "2026-07-25",
+      "sourceAsOf": "2026-07-28",
       "fetchedAt": "2026-07-28T00:00:00.000Z",
       "expiresAt": "2026-07-29T00:00:00.000Z",
       "isStale": false,
       "errorCode": null,
       "data": {
-        "series": []
+        "symbol": "AAPL",
+        "tradingDate": "2026-07-28",
+        "openPrice": 198,
+        "highPrice": 202,
+        "lowPrice": 197,
+        "closePrice": 200,
+        "volume": 88000000,
+        "priorTradingDate": "2026-07-27",
+        "priorClosePrice": 198,
+        "dailyChangePct": 1.0101,
+        "averageVolume20d": 72000000,
+        "relativeVolume20d": 1.2222,
+        "realizedVolatility20dPct": 24.5,
+        "range20dPct": 13.75
       }
     }
   }
@@ -526,13 +539,27 @@ Response shape:
 
 `status` is `FRESH`, `STALE` or `UNAVAILABLE`. `STALE` is always visibly labelled. An unavailable
 provider returns a safe error code and `data: null`; it does not fail or alter the FCN analysis.
-The response never includes the FRED key, upstream request URL/body, RFQ identifiers or user
+The response never includes the Alpha Vantage key, upstream request URL/body, RFQ identifiers or user
 identity.
+
+`GET /api/v1/market/ideas`
+
+- requires a valid application session and uses the same hashed user/IP rate limit;
+- returns the cached Alpha Vantage end-of-day `topGainers`, `topLosers` and `mostActive` lists;
+- returns derived rankings over currently cached equities: `realizedVolatility`,
+  `relativeVolume`, `absoluteMove` and `heat`;
+- labels the cached-equity universe size because those lists are not whole-market rankings;
+- never inserts a symbol into an RFQ and never changes a ranking or artifact.
+
+The heat score is a display-only percentile score: relative volume 40%, absolute daily change 35%
+and 20-day historical volatility 25%. The Worker permits at most
+`ALPHA_VANTAGE_DAILY_REQUEST_LIMIT` attempted upstream calls per UTC day.
 
 `GET /api/v1/admin/market-context-health`
 
 - requires effective role `ADMIN`;
-- returns only grouped cache status/counts plus expired, stale and rate-limit row counts;
+- returns only grouped cache status/counts, expired/stale/rate-limit row counts and today's
+  provider request count;
 - never returns normalized payloads, symbols, user/IP hashes, Secrets or upstream bodies.
 
 ## Error response

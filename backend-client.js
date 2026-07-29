@@ -33,7 +33,8 @@ import {
     rfqListScope: "active",
     rfqListCursor: null,
     rfqListItems: [],
-    analysisInput: null
+    analysisInput: null,
+    marketContextRequests: new Map()
   };
 
   const shell = document.createElement("section");
@@ -55,7 +56,7 @@ import {
           <div><p class="eyebrow">FCN MARKET &amp; RISK</p><h1>市場與風險分析</h1></div>
           <a id="backendAnalysisBack" class="secondary backend-analysis-back" href="./">返回詢價結果</a>
         </header>
-        <p class="backend-analysis-lead">以正式排名中的單一發行機構報價為基礎，搭配您手動輸入的參考現價做試算。</p>
+        <p class="backend-analysis-lead">以正式排名中的單一發行機構報價為基礎，搭配前一交易日收盤價或您手動輸入的參考現價做試算。</p>
         <p id="backendAnalysisError" class="backend-error" role="alert"></p>
         <div id="backendAnalysisContent" aria-live="polite"><p class="backend-analysis-loading">正在載入分析資料…</p></div>
       </section>
@@ -511,23 +512,25 @@ import {
     }).join("");
 
     return `<details class="backend-market-resources">
-      <summary>公開市場資源（第三方）</summary>
+      <summary>每日市場資料與標的靈感</summary>
       <div class="backend-market-resources-body">
-        <p class="backend-analysis-note">下列圖表與連結是獨立的公開參考資訊，不會帶入上方試算、報價排名或報價圖。Yahoo Finance 與 Google Trends 僅提供主動開啟的連結，本系統不自動擷取其資料。</p>
+        <p class="backend-analysis-note">Alpha Vantage 提供前一交易日股價與收盤後熱門榜；系統另以已快取標的的最近日線計算歷史波動與量能排行。這些內容只供組合發想，不會改變詢價、正式排名或報價圖。</p>
         <div class="backend-market-consent">
           <label><input type="checkbox" data-market-consent${consentChecked}> 我了解載入圖表後，TradingView 會收到我的 IP、瀏覽器資訊與所選股票代碼；不會傳送 RFQ、行編、分行、報價或發行機構資料。</label>
         </div>
         ${supported.length ? `<div class="backend-market-controls">
           <label>圖表標的<select data-market-symbol>${options}</select></label>
-          <button type="button" class="secondary" data-market-context-load>載入 SEC／FRED 公開資料</button>
+          <button type="button" class="secondary" data-market-context-load>載入公司與前收資料</button>
+          <button type="button" class="secondary" data-market-ideas-load>載入每日熱門榜</button>
           <button type="button" class="secondary" data-market-load>載入外部圖表</button>
           <button type="button" class="secondary" data-market-unload hidden>卸載圖表</button>
         </div>
         <p class="backend-market-status" data-market-status role="status"></p>
         <div class="backend-market-context" data-market-context aria-live="polite"></div>
+        <div class="backend-market-ideas" data-market-ideas aria-live="polite"></div>
         <div class="backend-market-widget" data-market-widget></div>` : `<p class="backend-market-status">目前標的沒有可確認的美股交易所代碼，因此不載入外部圖表。</p>`}
         <div class="backend-market-links">${links}</div>
-        <p class="backend-market-source-note">圖表來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。請以各網站顯示的時間與條款為準。</p>
+        <p class="backend-market-source-note">股價與熱門榜來源：Alpha Vantage（免費資料為收盤後更新）。圖表來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。所有內容均為公開資訊參考，不構成投資建議。</p>
       </div>
     </details>`;
   }
@@ -593,14 +596,47 @@ import {
     }
   }
 
+  function marketNumber(value, maximumFractionDigits = 2) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? number.toLocaleString("zh-TW", { maximumFractionDigits })
+      : "—";
+  }
+
+  function marketPercent(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? `${number > 0 ? "+" : ""}${number.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`
+      : "—";
+  }
+
+  function marketVolume(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.round(number).toLocaleString("zh-TW")
+      : "—";
+  }
+
+  function marketContextRequest(descriptor) {
+    const existing = state.marketContextRequests.get(descriptor.ticker);
+    if (existing) return existing;
+    const pending = request(`/market/instruments/${encodeURIComponent(descriptor.ticker)}/context`)
+      .catch(error => {
+        state.marketContextRequests.delete(descriptor.ticker);
+        throw error;
+      });
+    state.marketContextRequests.set(descriptor.ticker, pending);
+    return pending;
+  }
+
   function renderMarketContext(container, marketContext) {
     const host = container.querySelector("[data-market-context]");
     if (!host) return;
     const sec = marketContext?.sec;
-    const fred = marketContext?.fred;
+    const alphaVantage = marketContext?.alphaVantage;
     const company = sec?.data?.company;
     const filings = Array.isArray(sec?.data?.recentFilings) ? sec.data.recentFilings : [];
-    const series = Array.isArray(fred?.data?.series) ? fred.data.series : [];
+    const equity = alphaVantage?.data;
     const secContent = company
       ? `<article class="backend-market-context-card">
           <header><div><p class="eyebrow">SEC EDGAR</p><h3>${escapeHtml(company.companyName)}</h3></div><span>${escapeHtml(publicSourceStatus(sec))}</span></header>
@@ -613,21 +649,72 @@ import {
           <small>資料日期 ${escapeHtml(sec.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(sec.fetchedAt))}${sec.isStale ? "｜資料已過期，暫供參考" : ""}</small>
         </article>`
       : `<article class="backend-market-context-card"><header><h3>SEC EDGAR</h3><span>${escapeHtml(publicSourceStatus(sec))}</span></header><p>目前無法取得此標的的 SEC 公司與申報資料。</p></article>`;
-    const fredContent = `<article class="backend-market-context-card">
-      <header><div><p class="eyebrow">FRED</p><h3>美國總體市場指標</h3></div><span>${escapeHtml(publicSourceStatus(fred))}</span></header>
-      ${series.length ? `<div class="backend-fred-grid">${series.map(item => `
-        <section>
-          <b>${escapeHtml(item.seriesId)}</b>
-          <strong>${escapeHtml(item.value)}${item.unitsShort ? ` ${escapeHtml(item.unitsShort)}` : ""}</strong>
-          <small>${escapeHtml(item.title)}</small>
-          <span>前值 ${item.previousValue === null ? "—" : escapeHtml(item.previousValue)}｜變動 ${item.change === null ? "—" : escapeHtml(Number(item.change).toFixed(4))}</span>
-          <time>${escapeHtml(item.observationDate)}</time>
-        </section>`).join("")}</div>` : "<p>目前無法取得 FRED 指標。</p>"}
-      <small>資料日期 ${escapeHtml(fred?.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(fred?.fetchedAt))}${fred?.isStale ? "｜資料已過期，暫供參考" : ""}</small>
-      <p class="backend-fred-disclaimer">This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis. <a href="https://fred.stlouisfed.org/docs/api/terms_of_use.html" target="_blank" rel="noopener noreferrer">FRED API 使用條款</a></p>
+    const alphaContent = equity
+      ? `<article class="backend-market-context-card backend-alpha-card">
+          <header><div><p class="eyebrow">ALPHA VANTAGE</p><h3>${escapeHtml(equity.symbol)} 前一交易日</h3></div><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header>
+          <strong class="backend-market-close">USD ${escapeHtml(marketNumber(equity.closePrice, 4))}</strong>
+          <small>交易日 ${escapeHtml(equity.tradingDate)}｜較前收 ${escapeHtml(marketPercent(equity.dailyChangePct))}</small>
+          <dl>
+            <div><dt>成交量</dt><dd>${escapeHtml(marketVolume(equity.volume))}</dd></div>
+            <div><dt>相對量能</dt><dd>${escapeHtml(marketNumber(equity.relativeVolume20d))}×</dd></div>
+            <div><dt>20日歷史波動</dt><dd>${escapeHtml(marketNumber(equity.realizedVolatility20dPct))}%</dd></div>
+            <div><dt>20日高低區間</dt><dd>${escapeHtml(marketNumber(equity.range20dPct))}%</dd></div>
+          </dl>
+          <small>資料日期 ${escapeHtml(alphaVantage.sourceAsOf || equity.tradingDate)}｜擷取 ${escapeHtml(formatDateTime(alphaVantage.fetchedAt))}${alphaVantage.isStale ? "｜資料已過期，暫供參考" : ""}</small>
+        </article>`
+      : `<article class="backend-market-context-card"><header><h3>Alpha Vantage 前一交易日</h3><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header><p>目前無法取得此標的的前一交易日股價。</p></article>`;
+    host.innerHTML = `<div class="backend-market-context-grid">${secContent}${alphaContent}</div>
+      <p class="backend-market-source-note">SEC／Alpha Vantage 資料僅供公開資訊參考。前收可作為上方試算的起始值，但不會寫回詢價條件、正式排名或報價圖。</p>`;
+  }
+
+  function moverTable(title, rows, valueLabel) {
+    const items = Array.isArray(rows) ? rows.slice(0, 10) : [];
+    return `<article class="backend-market-idea-card"><h3>${escapeHtml(title)}</h3>
+      ${items.length ? `<ol>${items.map(item => `<li>
+        <b>${escapeHtml(item.symbol)}</b>
+        <span>${escapeHtml(valueLabel(item))}</span>
+        <small>量 ${escapeHtml(marketVolume(item.volume))}</small>
+      </li>`).join("")}</ol>` : "<p>目前沒有可顯示資料。</p>"}
     </article>`;
-    host.innerHTML = `<div class="backend-market-context-grid">${secContent}${fredContent}</div>
-      <p class="backend-market-source-note">SEC／FRED 資料僅供公開資訊參考，不會寫入詢價條件、報價排名、風險試算或報價圖。</p>`;
+  }
+
+  function watchlistTable(title, rows, valueLabel) {
+    const items = Array.isArray(rows) ? rows.slice(0, 10) : [];
+    return `<article class="backend-market-idea-card"><h3>${escapeHtml(title)}</h3>
+      ${items.length ? `<ol>${items.map(item => `<li>
+        <b>${escapeHtml(item.symbol)}</b>
+        <span>${escapeHtml(valueLabel(item))}</span>
+        <small>${escapeHtml(item.tradingDate)}｜收 ${escapeHtml(marketNumber(item.closePrice, 4))}</small>
+      </li>`).join("")}</ol>` : "<p>尚無足夠的已快取標的資料。</p>"}
+    </article>`;
+  }
+
+  function renderMarketIdeas(container, marketIdeas) {
+    const host = container.querySelector("[data-market-ideas]");
+    if (!host) return;
+    const alphaVantage = marketIdeas?.alphaVantage;
+    const movers = alphaVantage?.data;
+    const watchlist = marketIdeas?.watchlist ?? {};
+    host.innerHTML = `
+      <section class="backend-market-ideas-section">
+        <header><div><p class="eyebrow">US MARKET MOVERS</p><h2>前一交易日市場熱門榜</h2></div><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header>
+        <div class="backend-market-idea-grid">
+          ${moverTable("成交最活躍", movers?.mostActive, item => `收 ${marketNumber(item.price, 4)}｜${marketPercent(item.changePct)}`)}
+          ${moverTable("漲幅最高", movers?.topGainers, item => marketPercent(item.changePct))}
+          ${moverTable("跌幅最高", movers?.topLosers, item => marketPercent(item.changePct))}
+        </div>
+        <small>Alpha Vantage 更新 ${escapeHtml(movers?.updatedAt || alphaVantage?.sourceAsOf || "—")}${alphaVantage?.isStale ? "｜目前顯示過期快取" : ""}</small>
+      </section>
+      <section class="backend-market-ideas-section">
+        <header><div><p class="eyebrow">CACHED UNDERLYING POOL</p><h2>已載入標的排行</h2></div><span>${escapeHtml(watchlist.universeSize || 0)} 檔</span></header>
+        <div class="backend-market-idea-grid">
+          ${watchlistTable("綜合熱度", watchlist.heat, item => `${marketNumber(item.heatScore)} 分`)}
+          ${watchlistTable("20日歷史波動", watchlist.realizedVolatility, item => `${marketNumber(item.realizedVolatility20dPct)}%`)}
+          ${watchlistTable("相對量能", watchlist.relativeVolume, item => `${marketNumber(item.relativeVolume20d)}×`)}
+          ${watchlistTable("單日波動", watchlist.absoluteMove, item => marketPercent(item.dailyChangePct))}
+        </div>
+        <p class="backend-market-source-note">綜合熱度只比較系統已快取的標的：相對量能 40%＋單日絕對漲跌 35%＋20日歷史波動 25%。它不是全市場排名，也不代表投資推薦。</p>
+      </section>`;
   }
 
   async function loadMarketContext(container, button) {
@@ -641,9 +728,9 @@ import {
     button.disabled = true;
     const original = button.textContent;
     button.textContent = "載入中…";
-    host.innerHTML = "<p class=\"backend-market-status\">正在讀取 SEC 與 FRED 官方公開資料…</p>";
+    host.innerHTML = "<p class=\"backend-market-status\">正在讀取 SEC 與 Alpha Vantage 公開資料…</p>";
     try {
-      const payload = await request(`/market/instruments/${encodeURIComponent(descriptor.ticker)}/context`);
+      const payload = await marketContextRequest(descriptor);
       renderMarketContext(container, payload.marketContext);
     } catch (error) {
       host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "公開資料載入失敗。")}</p>`;
@@ -653,8 +740,96 @@ import {
     }
   }
 
+  async function loadMarketIdeas(container, button) {
+    const host = container.querySelector("[data-market-ideas]");
+    if (!host) return;
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "載入中…";
+    host.innerHTML = "<p class=\"backend-market-status\">正在載入前一交易日熱門榜與標的池排行…</p>";
+    try {
+      const payload = await request("/market/ideas");
+      renderMarketIdeas(container, payload.marketIdeas);
+    } catch (error) {
+      host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "熱門榜載入失敗。")}</p>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+
+  function analysisSpotFields(underlying) {
+    const spot = [...analysisContent.querySelectorAll("[data-analysis-spot]")]
+      .find(field => field.dataset.analysisSpot === underlying);
+    const observed = [...analysisContent.querySelectorAll("[data-analysis-observed]")]
+      .find(field => field.dataset.analysisObserved === underlying);
+    const source = [...analysisContent.querySelectorAll("[data-analysis-source]")]
+      .find(field => field.dataset.analysisSource === underlying);
+    return { spot, observed, source };
+  }
+
+  function alphaSpotSourceHtml(underlying, equity, mode) {
+    const summary = `Alpha Vantage 前一交易日 ${equity.tradingDate} 收盤 USD ${marketNumber(equity.closePrice, 4)}`;
+    if (mode === "manual") {
+      return `${escapeHtml(summary)}；目前保留瀏覽器中的手動值。
+        <button type="button" class="link-button backend-apply-close" data-apply-previous-close="${escapeHtml(underlying)}" data-close-price="${escapeHtml(equity.closePrice)}" data-close-date="${escapeHtml(equity.tradingDate)}">套用前收</button>`;
+    }
+    return `${escapeHtml(summary)}（自動帶入；可手動修改）`;
+  }
+
+  function applyPreviousClose(underlying, closePrice, tradingDate, persist) {
+    const fields = analysisSpotFields(underlying);
+    const close = parseIndicativeSpot(closePrice);
+    if (!fields.spot || !fields.source || close === null || !/^\d{4}-\d{2}-\d{2}$/u.test(tradingDate)) return;
+    fields.spot.value = String(close);
+    if (fields.observed) fields.observed.value = `${tradingDate}T16:00`;
+    fields.source.innerHTML = `${escapeHtml(`Alpha Vantage 前一交易日 ${tradingDate} 收盤 USD ${marketNumber(close, 4)}`)}${persist ? "（已套用並儲存在此瀏覽器）" : "（自動帶入；可手動修改）"}`;
+    if (persist && state.analysisInput) {
+      saveSpotDraft(
+        state.analysisInput.rfq.id,
+        state.analysisInput.trade.tradeCode,
+        underlying,
+        close,
+        fields.observed?.value ?? ""
+      );
+    }
+    renderAnalysisCalculation();
+  }
+
+  async function autoFillPreviousCloses(input) {
+    for (const underlying of input.terms.underlyings) {
+      const descriptor = marketResourceDescriptor(underlying);
+      const fields = analysisSpotFields(underlying);
+      if (!fields.source) continue;
+      if (!descriptor.supported) {
+        fields.source.textContent = "來源：無法確認美股交易所代碼，請手動輸入。";
+        continue;
+      }
+      fields.source.textContent = "正在取得前一交易日收盤價…";
+      try {
+        const payload = await marketContextRequest(descriptor);
+        if (state.analysisInput !== input) return;
+        const equity = payload.marketContext?.alphaVantage?.data;
+        if (!equity || !Number.isFinite(Number(equity.closePrice))) {
+          fields.source.textContent = "Alpha Vantage 暫時無法提供前一交易日收盤價，請手動輸入。";
+          continue;
+        }
+        if (parseIndicativeSpot(fields.spot?.value) === null) {
+          applyPreviousClose(underlying, equity.closePrice, equity.tradingDate, false);
+        } else {
+          fields.source.innerHTML = alphaSpotSourceHtml(underlying, equity, "manual");
+        }
+      } catch (error) {
+        if (state.analysisInput === input) {
+          fields.source.textContent = `前收自動載入失敗：${error.message || "請手動輸入。"}`;
+        }
+      }
+    }
+  }
+
   function renderAnalysisPage(input, quotes) {
     state.analysisInput = input;
+    state.marketContextRequests.clear();
     const selectedQuoteId = input.quote.id;
     const quoteOptions = quotes.some(item => item.quoteId === selectedQuoteId)
       ? quotes
@@ -663,9 +838,9 @@ import {
       const saved = loadSpotDraft(input.rfq.id, input.trade.tradeCode, underlying);
       return `<article class="backend-analysis-spot-card">
         <h3>${escapeHtml(underlying)}</h3>
-        <label>參考現價<input type="number" min="0.000001" step="any" inputmode="decimal" data-analysis-spot="${escapeHtml(underlying)}" value="${saved.spot ?? ""}" placeholder="請手動輸入"></label>
+        <label>參考現價<input type="number" min="0.000001" step="any" inputmode="decimal" data-analysis-spot="${escapeHtml(underlying)}" value="${saved.spot ?? ""}" placeholder="自動取得或手動輸入"></label>
         <label>參考時間<input type="datetime-local" data-analysis-observed="${escapeHtml(underlying)}" value="${escapeHtml(saved.observedAt)}"></label>
-        <small>來源：使用者手動輸入（僅儲存在此瀏覽器）</small>
+        <small data-analysis-source="${escapeHtml(underlying)}">${saved.spot ? "來源：使用者手動輸入（僅儲存在此瀏覽器）" : "正在準備前一交易日收盤價…"}</small>
       </article>`;
     }).join("");
     analysisContent.innerHTML = `
@@ -700,6 +875,7 @@ import {
       <div id="backendAnalysisCalculation"></div>
       ${renderMarketResourcesPanel(input.terms.underlyings)}`;
     renderAnalysisCalculation();
+    void autoFillPreviousCloses(input);
   }
 
   async function openAnalysis(route) {
@@ -1070,9 +1246,10 @@ import {
       return;
     }
     const sources = Array.isArray(health.sources) ? health.sources : [];
+    const providerUsage = Array.isArray(health.providerUsageToday) ? health.providerUsageToday : [];
     adminMarketHealth.innerHTML = `
       <section class="backend-health-panel">
-        <header><h3>SEC／FRED 公開資料快取</h3><small>不含 API Key、使用者資料或上游回應全文</small></header>
+        <header><h3>SEC／Alpha Vantage 公開資料快取</h3><small>不含 API Key、使用者資料或上游回應全文</small></header>
         ${sources.length ? `<div class="backend-health-grid">${sources.map(item => `
           <article>
             <b>${escapeHtml(item.source)}｜${escapeHtml(item.status)}</b>
@@ -1083,6 +1260,7 @@ import {
           <span><b>待清理</b>${escapeHtml(health.expiredRows)}</span>
           <span><b>暫用舊資料</b>${escapeHtml(health.staleRows)}</span>
           <span><b>速率限制紀錄</b>${escapeHtml(health.rateLimitRows)}</span>
+          ${providerUsage.map(item => `<span><b>${escapeHtml(item.provider)} 今日上游請求</b>${escapeHtml(item.request_count)}</span>`).join("")}
         </div>
       </section>`;
   }
@@ -1785,6 +1963,9 @@ import {
       spot,
       observedField?.value ?? ""
     );
+    const source = [...analysisContent.querySelectorAll("[data-analysis-source]")]
+      .find(field => field.dataset.analysisSource === underlying);
+    if (source) source.textContent = "來源：使用者手動輸入（僅儲存在此瀏覽器）";
     renderAnalysisCalculation();
   }
   analysisContent.addEventListener("input", event => {
@@ -1822,10 +2003,26 @@ import {
     }
   });
   analysisContent.addEventListener("click", event => {
+    const previousClose = event.target.closest("[data-apply-previous-close]");
+    if (previousClose) {
+      applyPreviousClose(
+        previousClose.dataset.applyPreviousClose,
+        previousClose.dataset.closePrice,
+        previousClose.dataset.closeDate,
+        true
+      );
+      return;
+    }
     const contextLoad = event.target.closest("[data-market-context-load]");
     if (contextLoad) {
       const container = contextLoad.closest(".backend-market-resources");
       if (container) loadMarketContext(container, contextLoad);
+      return;
+    }
+    const ideasLoad = event.target.closest("[data-market-ideas-load]");
+    if (ideasLoad) {
+      const container = ideasLoad.closest(".backend-market-resources");
+      if (container) loadMarketIdeas(container, ideasLoad);
       return;
     }
     const load = event.target.closest("[data-market-load]");

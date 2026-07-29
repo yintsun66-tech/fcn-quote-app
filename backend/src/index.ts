@@ -28,7 +28,7 @@ import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "./artifacts";
 import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
-import { cleanupExpiredMarketData, getMarketContext } from "./market-context";
+import { cleanupExpiredMarketData, getMarketContext, getMarketIdeas } from "./market-context";
 import {
   downloadArtifact,
   finalizeRfqNow,
@@ -144,6 +144,9 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const marketContextMatch = /^\/api\/v1\/market\/instruments\/([^/]+)\/context$/.exec(path);
   if (method === "GET" && marketContextMatch?.[1]) {
     return getMarketContext(request, env, session, decodeURIComponent(marketContextMatch[1]));
+  }
+  if (method === "GET" && path === "/api/v1/market/ideas") {
+    return getMarketIdeas(request, env, session);
   }
   const tradeCardMatch = /^\/api\/v1\/rfqs\/([^/]+)\/trades\/([^/]+)\/card$/.exec(path);
   if (method === "GET" && tradeCardMatch?.[1] && tradeCardMatch[2]) {

@@ -149,6 +149,6 @@ describe("administrator RFQ timeline", () => {
       staleRows: 0,
       rateLimitRows: 0
     });
-    expect(JSON.stringify(payload)).not.toContain("FRED_API_KEY");
+    expect(JSON.stringify(payload)).not.toContain("ALPHA_VANTAGE_API_KEY");
   });
 });

@@ -29,11 +29,12 @@ Durable Object、R2 與測試位於 `backend/`。
 Phase 1 只使用該筆經後端授權的單一發行機構報價；參考現價由使用者手動輸入並只
 保存在目前瀏覽器，不會改變排名、寄件、報價圖或 D1。Phase 2 已加入使用者同意後才
 載入的 TradingView 單一圖表，以及 Yahoo Finance、Google
-Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入試算或排名。SEC/FRED 快取與
-容量治理已在功能分支實作：登入使用者可按需載入 SEC 公司／最近申報文件，以及
-FRED 的 DGS10、FEDFUNDS、VIXCLS；資料由 Worker 正規化、共用短期快取且明確標示
-時間與過期狀態，仍不會進入試算、排名或報價圖。正式啟用前仍須安全設定
-`FRED_API_KEY`、套用 migration `0011` 並取得部署指示。詳細規格與操作程序記錄於
+Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式排名。市場資料功能分支
+已改用 SEC 與 Alpha Vantage：登入使用者可查看 SEC 公司／最近申報文件，空白的分析
+現價欄位會自動帶入前一交易日美股收盤價，並可載入成交活躍、漲跌幅、20 日歷史
+波動、相對量能與綜合熱度排行。資料由 Worker 正規化、所有使用者共用 D1 短期快取，
+且明確標示時間與過期狀態；它不會寫回詢價條件、正式排名或報價圖。正式啟用前仍須
+安全設定 `ALPHA_VANTAGE_API_KEY`、套用 migration `0012` 並完成部署驗證。詳細規格與操作程序記錄於
 [market-analysis-roadmap](docs/backend/market-analysis-roadmap.md)。
 
 ## 目前正式環境基線
@@ -80,4 +81,4 @@ FRED 的 DGS10、FEDFUNDS、VIXCLS；資料由 Worker 正規化、共用短期�
 - [API 合約](docs/backend/contracts.md)
 - [部署操作手冊](docs/runbooks/deploy.md)
 - [管理者操作手冊](docs/runbooks/admin.md)
-- [SEC／FRED 公開資料操作手冊](docs/runbooks/market-context-operations.md)
+- [SEC／Alpha Vantage 公開資料操作手冊](docs/runbooks/market-context-operations.md)

@@ -7,18 +7,17 @@ import type { AppEnv, SessionContext } from "./types";
 const SEC_TICKER_DIRECTORY_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
 const SEC_SUBMISSIONS_ORIGIN = "https://data.sec.gov";
 const SEC_ARCHIVES_ORIGIN = "https://www.sec.gov";
-const FRED_ORIGIN = "https://api.stlouisfed.org";
-const FRED_SERIES = Object.freeze(["DGS10", "FEDFUNDS", "VIXCLS"]);
+const ALPHA_VANTAGE_ORIGIN = "https://www.alphavantage.co";
 const CACHE_LEASE_SECONDS = 30;
 const ERROR_DIAGNOSTIC_SECONDS = 10 * 60;
 const INSTRUMENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SEC_DIRECTORY_BYTES = 5_000_000;
 const MAX_SEC_SUBMISSIONS_BYTES = 5_000_000;
-const MAX_FRED_BYTES = 500_000;
+const MAX_ALPHA_VANTAGE_BYTES = 3_000_000;
 const TRANSIENT_UPSTREAM_STATUSES = new Set([502, 503, 504, 520]);
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type SourceName = "SEC" | "FRED";
+type SourceName = "SEC" | "FRED" | "ALPHA_VANTAGE";
 
 const runtimeFetch: Fetcher = (input, init) => globalThis.fetch(input, init);
 
@@ -87,20 +86,58 @@ interface SecContext {
   recentFilings: SecFiling[];
 }
 
-interface FredObservation {
-  seriesId: string;
-  title: string;
-  units: string;
-  unitsShort: string;
-  observationDate: string;
-  value: number;
-  previousObservationDate: string | null;
-  previousValue: number | null;
-  change: number | null;
+interface AlphaDailyPoint {
+  tradingDate: string;
+  openPrice: number;
+  highPrice: number;
+  lowPrice: number;
+  closePrice: number;
+  volume: number;
 }
 
-interface FredContext {
-  series: FredObservation[];
+export interface AlphaEquityContext extends AlphaDailyPoint {
+  symbol: string;
+  priorTradingDate: string;
+  priorClosePrice: number;
+  dailyChangePct: number;
+  averageVolume20d: number | null;
+  relativeVolume20d: number | null;
+  realizedVolatility20dPct: number | null;
+  range20dPct: number | null;
+}
+
+export interface AlphaMarketMover {
+  symbol: string;
+  price: number;
+  changeAmount: number;
+  changePct: number;
+  volume: number;
+}
+
+interface AlphaMarketMovers {
+  updatedAt: string | null;
+  topGainers: AlphaMarketMover[];
+  topLosers: AlphaMarketMover[];
+  mostActive: AlphaMarketMover[];
+}
+
+interface AlphaDailyResponse {
+  "Meta Data"?: Record<string, unknown>;
+  "Time Series (Daily)"?: Record<string, Record<string, unknown>>;
+  Information?: unknown;
+  Note?: unknown;
+  "Error Message"?: unknown;
+}
+
+interface AlphaMoversResponse {
+  metadata?: unknown;
+  last_updated?: unknown;
+  top_gainers?: unknown;
+  top_losers?: unknown;
+  most_actively_traded?: unknown;
+  Information?: unknown;
+  Note?: unknown;
+  "Error Message"?: unknown;
 }
 
 interface SecTickerDirectory {
@@ -112,14 +149,6 @@ interface SecSubmissions {
   filings?: {
     recent?: Record<string, unknown>;
   };
-}
-
-interface FredSeriesResponse {
-  seriess?: Array<Record<string, unknown>>;
-}
-
-interface FredObservationsResponse {
-  observations?: Array<Record<string, unknown>>;
 }
 
 const inFlightRefreshes = new Map<string, Promise<PublicSourceEnvelope<unknown>>>();
@@ -156,7 +185,7 @@ function errorCode(error: unknown): string {
 function safeErrorMessage(value: unknown): string {
   if (typeof value !== "string") return "";
   return value
-    .replace(/([?&]api_key=)[^&\s]+/giu, "$1[REDACTED]")
+    .replace(/([?&](?:api_key|apikey)=)[^&\s]+/giu, "$1[REDACTED]")
     .replace(/https?:\/\/\S+/giu, "[URL]")
     .replace(/[A-Za-z0-9_-]{24,}/gu, "[TOKEN]")
     .replace(/\s+/gu, " ")
@@ -339,84 +368,238 @@ export async function fetchSecFilings(
   };
 }
 
-async function fetchFredSeries(
-  apiKey: string,
-  seriesId: string,
-  fetcher: Fetcher
-): Promise<FredObservation> {
-  const metadataUrl = new URL("/fred/series", FRED_ORIGIN);
-  metadataUrl.searchParams.set("series_id", seriesId);
-  metadataUrl.searchParams.set("api_key", apiKey);
-  metadataUrl.searchParams.set("file_type", "json");
-  const observationsUrl = new URL("/fred/series/observations", FRED_ORIGIN);
-  observationsUrl.searchParams.set("series_id", seriesId);
-  observationsUrl.searchParams.set("api_key", apiKey);
-  observationsUrl.searchParams.set("file_type", "json");
-  observationsUrl.searchParams.set("sort_order", "desc");
-  observationsUrl.searchParams.set("limit", "10");
+function rounded(value: number, digits = 6): number {
+  return Number(value.toFixed(digits));
+}
 
-  const { data: metadata } = await fetchJson<FredSeriesResponse>(
-    metadataUrl,
-    MAX_FRED_BYTES,
-    { accept: "application/json" },
-    fetcher,
-    true
-  );
-  const { data: observations } = await fetchJson<FredObservationsResponse>(
-    observationsUrl,
-    MAX_FRED_BYTES,
-    { accept: "application/json" },
-    fetcher,
-    true
-  );
-  const series = metadata.seriess?.[0];
-  const validObservations = (observations.observations ?? [])
-    .map(item => ({
-      date: validDate(item.date),
-      value: finiteNumber(item.value)
-    }))
-    .filter((item): item is { date: string; value: number } => !!item.date && item.value !== null);
-  const latest = validObservations[0];
-  if (!series || !latest) {
-    throw new AppError(503, "FRED_SERIES_INVALID", "FRED 資料無法正規化。 ");
+function average(values: number[]): number | null {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function sampleStandardDeviation(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = average(values);
+  if (mean === null) return null;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
+  return Math.sqrt(variance);
+}
+
+function alphaVantageKey(env: AppEnv): string {
+  const apiKey = String(env.ALPHA_VANTAGE_API_KEY ?? "").trim();
+  if (!apiKey) {
+    throw new AppError(503, "ALPHA_VANTAGE_NOT_CONFIGURED", "Alpha Vantage API 尚未設定。 ");
   }
-  const previous = validObservations[1] ?? null;
-  const title = String(series.title ?? "").trim();
-  const units = String(series.units ?? "").trim();
-  const unitsShort = String(series.units_short ?? "").trim();
-  if (!title || !units) {
-    throw new AppError(503, "FRED_SERIES_INVALID", "FRED 系列欄位不完整。 ");
+  if (!/^[A-Za-z0-9]{4,128}$/u.test(apiKey)) {
+    throw new AppError(503, "ALPHA_VANTAGE_KEY_INVALID_FORMAT", "Alpha Vantage API Key 格式不正確。 ");
   }
+  return apiKey;
+}
+
+async function consumeAlphaVantageBudget(env: AppEnv): Promise<void> {
+  const now = nowIso();
+  const usageDate = now.slice(0, 10);
+  const maximum = positiveInteger(env.ALPHA_VANTAGE_DAILY_REQUEST_LIMIT, 24);
+  const result = await env.DB.prepare(
+    `INSERT INTO market_provider_daily_usage
+      (provider, usage_date, request_count, updated_at)
+     VALUES ('ALPHA_VANTAGE', ?, 1, ?)
+     ON CONFLICT(provider, usage_date) DO UPDATE SET
+       request_count = market_provider_daily_usage.request_count + 1,
+       updated_at = excluded.updated_at
+     WHERE market_provider_daily_usage.request_count < ?`
+  ).bind(usageDate, now, maximum).run();
+  if (Number(result.meta.changes ?? 0) !== 1) {
+    throw new AppError(
+      503,
+      "ALPHA_VANTAGE_DAILY_BUDGET_EXHAUSTED",
+      "今日公開股價資料額度已用完，請使用快取資料或稍後再試。 "
+    );
+  }
+}
+
+function alphaVantagePayloadError(payload: AlphaDailyResponse | AlphaMoversResponse): AppError | null {
+  if (typeof payload["Error Message"] === "string") {
+    return new AppError(404, "ALPHA_VANTAGE_SYMBOL_NOT_FOUND", "Alpha Vantage 找不到此股票代碼。 ");
+  }
+  if (typeof payload.Note === "string" || typeof payload.Information === "string") {
+    return new AppError(503, "ALPHA_VANTAGE_RATE_LIMITED", "Alpha Vantage 今日額度或頻率已達限制。 ");
+  }
+  return null;
+}
+
+async function fetchAlphaVantageJson<T extends AlphaDailyResponse | AlphaMoversResponse>(
+  env: AppEnv,
+  parameters: Record<string, string>,
+  fetcher: Fetcher
+): Promise<T> {
+  const apiKey = alphaVantageKey(env);
+  await consumeAlphaVantageBudget(env);
+  const url = new URL("/query", ALPHA_VANTAGE_ORIGIN);
+  for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
+  url.searchParams.set("apikey", apiKey);
+  const { data } = await fetchJson<T>(
+    url,
+    MAX_ALPHA_VANTAGE_BYTES,
+    { accept: "application/json" },
+    fetcher
+  );
+  const payloadError = alphaVantagePayloadError(data);
+  if (payloadError) throw payloadError;
+  return data;
+}
+
+function normalizeAlphaDailyPoint(
+  tradingDateRaw: string,
+  values: Record<string, unknown>
+): AlphaDailyPoint | null {
+  const tradingDate = validDate(tradingDateRaw);
+  const openPrice = finiteNumber(values["1. open"]);
+  const highPrice = finiteNumber(values["2. high"]);
+  const lowPrice = finiteNumber(values["3. low"]);
+  const closePrice = finiteNumber(values["4. close"]);
+  const volume = finiteNumber(values["5. volume"]);
+  if (
+    !tradingDate
+    || openPrice === null
+    || highPrice === null
+    || lowPrice === null
+    || closePrice === null
+    || volume === null
+    || openPrice <= 0
+    || highPrice <= 0
+    || lowPrice <= 0
+    || closePrice <= 0
+    || volume < 0
+  ) return null;
   return {
-    seriesId,
-    title,
-    units,
-    unitsShort,
-    observationDate: latest.date,
-    value: latest.value,
-    previousObservationDate: previous?.date ?? null,
-    previousValue: previous?.value ?? null,
-    change: previous ? latest.value - previous.value : null
+    tradingDate,
+    openPrice: rounded(openPrice),
+    highPrice: rounded(highPrice),
+    lowPrice: rounded(lowPrice),
+    closePrice: rounded(closePrice),
+    volume: Math.round(volume)
   };
 }
 
-export async function fetchFredContext(
+function alphaVantageProviderSymbol(symbol: string): string {
+  return symbol.replace(/-([A-Z0-9]{1,3})$/u, ".$1");
+}
+
+export async function fetchAlphaEquityContext(
+  env: AppEnv,
+  symbol: string,
+  fetcher: Fetcher = runtimeFetch
+): Promise<CacheLoadResult<AlphaEquityContext>> {
+  const data = await fetchAlphaVantageJson<AlphaDailyResponse>(
+    env,
+    {
+      function: "TIME_SERIES_DAILY",
+      symbol: alphaVantageProviderSymbol(symbol),
+      outputsize: "compact"
+    },
+    fetcher
+  );
+  const points = Object.entries(data["Time Series (Daily)"] ?? {})
+    .map(([tradingDate, values]) => normalizeAlphaDailyPoint(tradingDate, values))
+    .filter((point): point is AlphaDailyPoint => point !== null)
+    .sort((left, right) => right.tradingDate.localeCompare(left.tradingDate))
+    .slice(0, 100);
+  const latest = points[0];
+  const prior = points[1];
+  if (!latest || !prior) {
+    throw new AppError(503, "ALPHA_VANTAGE_DAILY_INVALID", "Alpha Vantage 日線資料無法正規化。 ");
+  }
+
+  const priorVolumes = points.slice(1, 21).map(point => point.volume);
+  const averageVolume20d = average(priorVolumes);
+  const returnPoints = points.slice(0, 21);
+  const logReturns = returnPoints.slice(0, -1).map((point, index) =>
+    Math.log(point.closePrice / returnPoints[index + 1]!.closePrice)
+  );
+  const dailyVolatility = sampleStandardDeviation(logReturns);
+  const rangePoints = points.slice(0, 20);
+  const highest = Math.max(...rangePoints.map(point => point.highPrice));
+  const lowest = Math.min(...rangePoints.map(point => point.lowPrice));
+
+  return {
+    data: {
+      symbol,
+      ...latest,
+      priorTradingDate: prior.tradingDate,
+      priorClosePrice: prior.closePrice,
+      dailyChangePct: rounded((latest.closePrice / prior.closePrice - 1) * 100, 4),
+      averageVolume20d: averageVolume20d === null ? null : rounded(averageVolume20d, 2),
+      relativeVolume20d: averageVolume20d && averageVolume20d > 0
+        ? rounded(latest.volume / averageVolume20d, 4)
+        : null,
+      realizedVolatility20dPct: dailyVolatility === null
+        ? null
+        : rounded(dailyVolatility * Math.sqrt(252) * 100, 4),
+      range20dPct: lowest > 0 ? rounded((highest / lowest - 1) * 100, 4) : null
+    },
+    sourceAsOf: latest.tradingDate
+  };
+}
+
+function normalizeMoverRows(value: unknown): AlphaMarketMover[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map(row => {
+    if (!row || typeof row !== "object") return null;
+    const raw = row as Record<string, unknown>;
+    let symbol: string;
+    try {
+      symbol = normalizeMarketSymbol(String(raw.ticker ?? ""));
+    } catch {
+      return null;
+    }
+    const price = finiteNumber(raw.price);
+    const changeAmount = finiteNumber(raw.change_amount);
+    const changePct = finiteNumber(String(raw.change_percentage ?? "").replace(/%$/u, ""));
+    const volume = finiteNumber(raw.volume);
+    if (
+      price === null
+      || changeAmount === null
+      || changePct === null
+      || volume === null
+      || price <= 0
+      || volume < 0
+    ) return null;
+    return {
+      symbol,
+      price: rounded(price),
+      changeAmount: rounded(changeAmount),
+      changePct: rounded(changePct, 4),
+      volume: Math.round(volume)
+    };
+  }).filter((row): row is AlphaMarketMover => row !== null);
+}
+
+export async function fetchAlphaMarketMovers(
   env: AppEnv,
   fetcher: Fetcher = runtimeFetch
-): Promise<CacheLoadResult<FredContext>> {
-  const apiKey = String(env.FRED_API_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new AppError(503, "FRED_NOT_CONFIGURED", "FRED API 尚未設定。 ");
+): Promise<CacheLoadResult<AlphaMarketMovers>> {
+  const data = await fetchAlphaVantageJson<AlphaMoversResponse>(
+    env,
+    { function: "TOP_GAINERS_LOSERS" },
+    fetcher
+  );
+  const updatedAt = typeof data.last_updated === "string"
+    ? data.last_updated.normalize("NFKC").replace(/\s+/gu, " ").trim().slice(0, 80) || null
+    : null;
+  const normalized = {
+    updatedAt,
+    topGainers: normalizeMoverRows(data.top_gainers),
+    topLosers: normalizeMoverRows(data.top_losers),
+    mostActive: normalizeMoverRows(data.most_actively_traded)
+  };
+  if (!normalized.topGainers.length && !normalized.topLosers.length && !normalized.mostActive.length) {
+    throw new AppError(503, "ALPHA_VANTAGE_MOVERS_INVALID", "Alpha Vantage 熱門榜資料無法正規化。 ");
   }
-  if (!/^[a-z0-9]{32}$/u.test(apiKey)) {
-    throw new AppError(503, "FRED_KEY_INVALID_FORMAT", "FRED API Key 格式不正確。 ");
-  }
-  const series: FredObservation[] = [];
-  for (const seriesId of FRED_SERIES) {
-    series.push(await fetchFredSeries(apiKey, seriesId, fetcher));
-  }
-  const sourceAsOf = series.map(item => item.observationDate).sort().at(-1) ?? null;
-  return { data: { series }, sourceAsOf };
+  return {
+    data: normalized,
+    sourceAsOf: updatedAt?.match(/\d{4}-\d{2}-\d{2}/u)?.[0] ?? null
+  };
 }
 
 async function cacheRow(env: AppEnv, cacheKey: string): Promise<CacheRow | null> {
@@ -543,9 +726,9 @@ async function refreshCache<T>(
       `UPDATE public_data_cache
           SET status = 'ERROR', last_error_code = ?,
               stale_until = CASE WHEN fetched_at IS NULL THEN ? ELSE stale_until END,
-              refresh_lease_expires_at = NULL, updated_at = ?
+              refresh_lease_expires_at = ?, updated_at = ?
         WHERE cache_key = ?`
-    ).bind(code, diagnosticUntil, now, options.cacheKey).run();
+    ).bind(code, diagnosticUntil, diagnosticUntil, now, options.cacheKey).run();
     console.warn("market_context_refresh", {
       source: options.source,
       dataType: options.dataType,
@@ -707,7 +890,7 @@ export async function getMarketContext(
   const instrument = await instrumentForSymbol(env, symbol, fetcher);
   const ttlSeconds = positiveInteger(env.MARKET_CACHE_TTL_SECONDS, 86_400);
   const staleSeconds = positiveInteger(env.MARKET_CACHE_STALE_SECONDS, 604_800);
-  const [sec, fred] = await Promise.all([
+  const [sec, alphaVantage] = await Promise.all([
     instrument.data
       ? getCachedPublicData(env, {
         cacheKey: `sec:filings:v1:${instrument.data.cik}`,
@@ -720,18 +903,18 @@ export async function getMarketContext(
       })
       : Promise.resolve(instrument),
     getCachedPublicData(env, {
-      cacheKey: "fred:macro:v1",
-      source: "FRED",
-      symbol: null,
-      dataType: "MACRO_SERIES",
+      cacheKey: `alpha-vantage:daily:v1:${symbol}`,
+      source: "ALPHA_VANTAGE",
+      symbol,
+      dataType: "DAILY_EQUITY",
       ttlSeconds,
       staleSeconds,
-      loader: () => fetchFredContext(env, fetcher)
+      loader: () => fetchAlphaEquityContext(env, symbol, fetcher)
     })
   ]);
   console.info("market_context_served", {
     secStatus: sec.status,
-    fredStatus: fred.status
+    alphaVantageStatus: alphaVantage.status
   });
 
   return jsonResponse({
@@ -739,7 +922,124 @@ export async function getMarketContext(
       symbol,
       generatedAt: nowIso(),
       sec,
-      fred
+      alphaVantage
+    }
+  });
+}
+
+interface CachedEquityIdea extends AlphaEquityContext {
+  heatScore: number;
+}
+
+function percentileScores(
+  rows: AlphaEquityContext[],
+  selector: (row: AlphaEquityContext) => number | null
+): Map<string, number> {
+  const values = rows
+    .map(row => ({ symbol: row.symbol, value: selector(row) }))
+    .filter((row): row is { symbol: string; value: number } => row.value !== null && Number.isFinite(row.value))
+    .sort((left, right) => left.value - right.value || left.symbol.localeCompare(right.symbol));
+  const scores = new Map<string, number>();
+  if (!values.length) return scores;
+  for (let start = 0; start < values.length;) {
+    let end = start;
+    while (end + 1 < values.length && values[end + 1]!.value === values[start]!.value) end += 1;
+    const percentile = values.length === 1 ? 1 : ((start + end) / 2) / (values.length - 1);
+    for (let index = start; index <= end; index += 1) {
+      scores.set(values[index]!.symbol, percentile);
+    }
+    start = end + 1;
+  }
+  return scores;
+}
+
+async function cachedEquityIdeas(env: AppEnv): Promise<{
+  universeSize: number;
+  realizedVolatility: CachedEquityIdea[];
+  relativeVolume: CachedEquityIdea[];
+  absoluteMove: CachedEquityIdea[];
+  heat: CachedEquityIdea[];
+}> {
+  const now = nowIso();
+  const rows = await env.DB.prepare(
+    `SELECT normalized_payload_json
+       FROM public_data_cache
+      WHERE source = 'ALPHA_VANTAGE'
+        AND data_type = 'DAILY_EQUITY'
+        AND fetched_at IS NOT NULL
+        AND stale_until > ?
+      ORDER BY source_as_of DESC, symbol
+      LIMIT 250`
+  ).bind(now).all<{ normalized_payload_json: string }>();
+  const equities = rows.results
+    .map(row => safeJson<AlphaEquityContext>(row.normalized_payload_json))
+    .filter((row): row is AlphaEquityContext =>
+      !!row
+      && typeof row.symbol === "string"
+      && Number.isFinite(row.closePrice)
+      && Number.isFinite(row.dailyChangePct)
+    );
+  const volumePercentiles = percentileScores(equities, row => row.relativeVolume20d);
+  const movePercentiles = percentileScores(equities, row => Math.abs(row.dailyChangePct));
+  const volatilityPercentiles = percentileScores(equities, row => row.realizedVolatility20dPct);
+  const withHeat = equities.map(row => ({
+    ...row,
+    heatScore: rounded((
+      (volumePercentiles.get(row.symbol) ?? 0) * 0.4
+      + (movePercentiles.get(row.symbol) ?? 0) * 0.35
+      + (volatilityPercentiles.get(row.symbol) ?? 0) * 0.25
+    ) * 100, 2)
+  }));
+  const descending = (selector: (row: CachedEquityIdea) => number | null) =>
+    [...withHeat]
+      .filter(row => {
+        const value = selector(row);
+        return value !== null && Number.isFinite(value);
+      })
+      .sort((left, right) =>
+        Number(selector(right)) - Number(selector(left)) || left.symbol.localeCompare(right.symbol)
+      )
+      .slice(0, 10);
+  return {
+    universeSize: withHeat.length,
+    realizedVolatility: descending(row => row.realizedVolatility20dPct),
+    relativeVolume: descending(row => row.relativeVolume20d),
+    absoluteMove: descending(row => Math.abs(row.dailyChangePct)),
+    heat: descending(row => row.heatScore)
+  };
+}
+
+export async function getMarketIdeas(
+  request: Request,
+  env: AppEnv,
+  session: SessionContext,
+  fetcher: Fetcher = runtimeFetch
+): Promise<Response> {
+  if (env.MARKET_CONTEXT_ENABLED !== "1") {
+    throw new AppError(503, "MARKET_CONTEXT_DISABLED", "公開市場資料功能目前暫停。 ");
+  }
+  await enforceRateLimit(request, env, session);
+  const ttlSeconds = positiveInteger(env.MARKET_CACHE_TTL_SECONDS, 86_400);
+  const staleSeconds = positiveInteger(env.MARKET_CACHE_STALE_SECONDS, 604_800);
+  const alphaVantage = await getCachedPublicData(env, {
+    cacheKey: "alpha-vantage:movers:v1",
+    source: "ALPHA_VANTAGE",
+    symbol: null,
+    dataType: "MARKET_MOVERS",
+    ttlSeconds,
+    staleSeconds,
+    loader: () => fetchAlphaMarketMovers(env, fetcher)
+  });
+  const watchlist = await cachedEquityIdeas(env);
+  console.info("market_ideas_served", {
+    alphaVantageStatus: alphaVantage.status,
+    watchlistSize: watchlist.universeSize
+  });
+  return jsonResponse({
+    marketIdeas: {
+      generatedAt: nowIso(),
+      alphaVantage,
+      watchlist
     }
   });
 }
@@ -749,6 +1049,7 @@ export async function cleanupExpiredMarketData(env: AppEnv): Promise<{ cacheRows
   const rateLimitCutoff = new Date(
     Date.now() - positiveInteger(env.MARKET_CONTEXT_RATE_LIMIT_WINDOW_SECONDS, 60) * 10 * 1_000
   ).toISOString();
+  const providerUsageCutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
   const [cache, rateLimits] = await env.DB.batch([
     env.DB.prepare(
       `DELETE FROM public_data_cache
@@ -756,7 +1057,10 @@ export async function cleanupExpiredMarketData(env: AppEnv): Promise<{ cacheRows
     ).bind(now, now),
     env.DB.prepare(
       "DELETE FROM market_context_rate_limits WHERE window_started_at < ?"
-    ).bind(rateLimitCutoff)
+    ).bind(rateLimitCutoff),
+    env.DB.prepare(
+      "DELETE FROM market_provider_daily_usage WHERE usage_date < ?"
+    ).bind(providerUsageCutoff)
   ]);
   return {
     cacheRows: Number(cache?.meta.changes ?? 0),
@@ -769,9 +1073,10 @@ export async function marketContextHealth(env: AppEnv): Promise<{
   expiredRows: number;
   staleRows: number;
   rateLimitRows: number;
+  providerUsageToday: Array<Record<string, unknown>>;
 }> {
   const now = nowIso();
-  const [sources, summary] = await Promise.all([
+  const [sources, summary, providerUsage] = await Promise.all([
     env.DB.prepare(
       `SELECT source, status, COUNT(*) AS row_count,
               SUM(CASE WHEN expires_at > ? THEN 1 ELSE 0 END) AS fresh_count,
@@ -792,12 +1097,19 @@ export async function marketContextHealth(env: AppEnv): Promise<{
       expired_rows: number;
       stale_rows: number;
       rate_limit_rows: number;
-    }>()
+    }>(),
+    env.DB.prepare(
+      `SELECT provider, usage_date, request_count, updated_at
+         FROM market_provider_daily_usage
+        WHERE usage_date = ?
+        ORDER BY provider`
+    ).bind(now.slice(0, 10)).all<Record<string, unknown>>()
   ]);
   return {
     sources: sources.results,
     expiredRows: Number(summary?.expired_rows ?? 0),
     staleRows: Number(summary?.stale_rows ?? 0),
-    rateLimitRows: Number(summary?.rate_limit_rows ?? 0)
+    rateLimitRows: Number(summary?.rate_limit_rows ?? 0),
+    providerUsageToday: providerUsage.results
   };
 }

@@ -27,9 +27,16 @@ of a 24-request daily budget. Hot lists also belong *before* an RFQ exists, not 
 ranking.
 
 - **Homepage panel.** `index.html` gains a collapsed 「美股／日股熱門榜」 section above the
-  trade-input workspace, with markets `us`/`japan` and screens
-  `volume_leaders`/`top_gainers`/`top_losers`/`most_capitalized`. It works in both runtime modes
-  because it is client-side only (`app.js` + `market-resources.mjs`).
+  trade-input workspace, using TradingView's **hotlists** widget. The widget supplies its own
+  活躍／漲幅榜／跌幅榜 tabs, so there is no ranking selector. Client-side only (`app.js` +
+  `market-resources.mjs`), so it works in both runtime modes.
+- **Japan is link-only, and must stay that way.** The first attempt used the screener widget, which
+  showed 「沒有商品符合您的條件」 in production. Probing the live widgets established that the
+  screener is unusable for any market, that `hotlists` `exchange: "TSE"` is refused outright, and
+  that `"JP"`, `"JPX"` and `"TYO"` are accepted but return **US** rows — i.e. they would display US
+  stocks under a Japan label. Selecting 日股 therefore shows an explanation plus a link to
+  TradingView's Japan market-movers page. **Do not set the Japan exchange to `JP`/`JPX`/`TYO`;** it
+  looks correct and is wrong. Full evidence table in ADR 0024.
 - **Consent still gates it.** No iframe exists until the user ticks consent (verified in-browser);
   unticking unloads it. Consent is per browser (`HOTLIST_CONSENT_KEY`).
 - **The widget URL is built directly** (no TradingView loader script in our origin), and the iframe
@@ -48,13 +55,10 @@ ranking.
 - Asset cache keys bumped to `market-hotlist-v1` for `index.html`, `app.js`, `backend-client.js`
   and `styles.css` (the previous rollout was served stale under an old key).
 - Verification: `node --check` on `app.js`, `backend-client.js` and `market-resources.mjs`;
-  typecheck; **19 files / 131 tests**; Wrangler dry-run build. In-browser on a local server:
-  consent gate blocks loading, US loads with the expected config/sandbox, switching to 日股 reloads
-  in place (one iframe, fallback link updates), unload clears it, no console errors.
-- **Not verified:** whether TradingView serves populated rows for `market: "japan"` from the
-  production domain. The widget accepts the parameter and renders its chrome, but a localhost probe
-  showed empty rows and widget providers may gate data by host. **Confirm both markets on
-  `app.yintsun66.com` after deployment**; the fallback link covers a blocked network.
+  typecheck; **19 files / 132 tests**; Wrangler dry-run build. In-browser on a local server: a
+  fresh visit has consent unticked and creates no iframe; loading without consent is refused;
+  美股 loads **live rows** with the 活躍/漲幅榜/跌幅榜 tabs in Chinese; switching to 日股 removes
+  the frame and shows the explanation plus the Japan link; unload clears it; no console errors.
 
 ## Alpha Vantage end-of-day market ideas (deployed; provider response still unavailable)
 

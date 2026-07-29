@@ -685,7 +685,6 @@ import {
     if (!panel) return;
     const consent = panel.querySelector("#hotlistConsent");
     const marketSelect = panel.querySelector("#hotlistMarket");
-    const screenSelect = panel.querySelector("#hotlistScreen");
     const loadButton = panel.querySelector("#hotlistLoad");
     const unloadButton = panel.querySelector("#hotlistUnload");
     const status = panel.querySelector("#hotlistStatus");
@@ -701,7 +700,7 @@ import {
     consent.checked = stored === "1";
 
     function syncFallback() {
-      const descriptor = hotlistDescriptor(marketSelect.value, screenSelect.value);
+      const descriptor = hotlistDescriptor(marketSelect.value);
       if (descriptor) fallbackLink.href = descriptor.fallbackUrl;
     }
 
@@ -717,14 +716,22 @@ import {
         status.textContent = "請先勾選同意，才會載入外部熱門榜。";
         return;
       }
-      const descriptor = hotlistDescriptor(marketSelect.value, screenSelect.value);
+      const descriptor = hotlistDescriptor(marketSelect.value);
       if (!descriptor) {
-        status.textContent = "不支援的熱門榜選項。";
+        status.textContent = "不支援的市場。";
+        return;
+      }
+      // TradingView's free hot-list widget covers US exchanges only, and its Japan-looking exchange
+      // values silently return US rows. Say so plainly and link out rather than show US stocks
+      // under a Japan label.
+      if (!descriptor.embeddable) {
+        unload();
+        status.textContent = `${descriptor.label}熱門榜目前無法內嵌（TradingView 免費 widget 僅提供美股），請改用下方連結開啟 TradingView 網站查看。`;
         return;
       }
       let url;
       try {
-        url = hotlistWidgetUrl(marketSelect.value, screenSelect.value);
+        url = hotlistWidgetUrl(marketSelect.value);
       } catch (error) {
         status.textContent = error.message;
         return;
@@ -751,10 +758,10 @@ import {
       }
       if (!consent.checked) unload();
     });
-    [marketSelect, screenSelect].forEach(select => select.addEventListener("change", () => {
+    marketSelect.addEventListener("change", () => {
       syncFallback();
       if (!unloadButton.hidden) load();
-    }));
+    });
     loadButton.addEventListener("click", load);
     unloadButton.addEventListener("click", unload);
     syncFallback();

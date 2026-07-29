@@ -1,26 +1,30 @@
 export const MARKET_RESOURCE_CONSENT_KEY = "fcn-market-resources-consent:v1";
 export const HOTLIST_CONSENT_KEY = "fcn-market-hotlist-consent:v1";
 
-// Screener markets and screens are fixed allowlists. Nothing a user types ever reaches the widget
+// Hot-list markets are a fixed allowlist. Nothing a user types ever reaches the widget
 // configuration — an unknown key fails closed instead of being passed through.
+//
+// Only US is embeddable. Measured against the live TradingView widgets on 2026-07-29:
+//   * hotlists exchange "US" returns real rows, with built-in 活躍/漲幅榜/跌幅榜 tabs;
+//   * exchange "TSE" is refused with "This exchange is not available for widget";
+//   * exchanges "JP", "JPX" and "TYO" are accepted but silently return **US** rows — that would
+//     show US stocks under a Japan label, which is worse than showing nothing in a trading tool;
+//   * the separate screener widget answers "No symbols match your criteria" for every market; and
+//   * TSE symbols in the market-overview widget resolve to errors with no prices.
+// Japan is therefore link-only until a licensed Japan source exists.
 export const HOTLIST_MARKETS = Object.freeze({
   us: Object.freeze({
     label: "美股",
-    market: "us",
+    exchange: "US",
+    embeddable: true,
     fallbackUrl: "https://www.tradingview.com/markets/stocks-usa/market-movers-active/"
   }),
   japan: Object.freeze({
     label: "日股",
-    market: "japan",
+    exchange: null,
+    embeddable: false,
     fallbackUrl: "https://www.tradingview.com/markets/stocks-japan/market-movers-active/"
   })
-});
-
-export const HOTLIST_SCREENS = Object.freeze({
-  volume_leaders: "成交最活躍",
-  top_gainers: "漲幅最高",
-  top_losers: "跌幅最高",
-  most_capitalized: "市值最大"
 });
 
 // Own-property lookups only: a plain `map[key]` would resolve inherited keys such as `__proto__`
@@ -29,31 +33,39 @@ function allowlisted(map, key) {
   return typeof key === "string" && Object.hasOwn(map, key) ? map[key] : null;
 }
 
-export function hotlistDescriptor(marketKey, screenKey) {
+export function hotlistDescriptor(marketKey) {
   const market = allowlisted(HOTLIST_MARKETS, marketKey);
-  const screenLabel = allowlisted(HOTLIST_SCREENS, screenKey);
-  if (!market || !screenLabel) return null;
-  return { marketKey, screenKey, label: `${market.label}｜${screenLabel}`, fallbackUrl: market.fallbackUrl };
+  if (!market) return null;
+  return {
+    marketKey,
+    label: market.label,
+    embeddable: market.embeddable,
+    fallbackUrl: market.fallbackUrl
+  };
 }
 
-// Builds the TradingView screener embed URL directly instead of injecting their loader script into
-// our page, so no third-party JavaScript executes in the application origin.
-export function hotlistWidgetUrl(marketKey, screenKey) {
+// Builds the TradingView hot-list embed URL directly instead of injecting their loader script into
+// our page, so no third-party JavaScript executes in the application origin. The widget supplies
+// its own 活躍/漲幅榜/跌幅榜 tabs, so this application does not add a ranking selector.
+//
+// The upstream loader also appends `page-uri` and `utm_*` fields; those are deliberately omitted so
+// the embed carries no page address.
+export function hotlistWidgetUrl(marketKey) {
   const market = allowlisted(HOTLIST_MARKETS, marketKey);
-  if (!market || !allowlisted(HOTLIST_SCREENS, screenKey)) {
-    throw new Error("無法建立未支援的熱門榜。");
+  if (!market?.embeddable || !market.exchange) {
+    throw new Error("此市場沒有可嵌入的熱門榜。");
   }
   const configuration = {
+    colorTheme: "light",
+    dateRange: "1D",
+    exchange: market.exchange,
+    showChart: false,
     width: "100%",
     height: "100%",
-    defaultColumn: "overview",
-    defaultScreen: screenKey,
-    market: market.market,
-    showToolbar: true,
-    colorTheme: "light",
-    isTransparent: false
+    isTransparent: false,
+    showSymbolLogo: true
   };
-  return `https://www.tradingview-widget.com/embed-widget/screener/?locale=zh_TW#${encodeURIComponent(JSON.stringify(configuration))}`;
+  return `https://www.tradingview-widget.com/embed-widget/hotlists/?locale=zh_TW#${encodeURIComponent(JSON.stringify(configuration))}`;
 }
 
 const BLOOMBERG_EXCHANGES = Object.freeze({

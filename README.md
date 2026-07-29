@@ -35,9 +35,11 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 短期快取，且明確標示時間與過期狀態；它不會寫回詢價條件、正式排名或報價圖。Secret
 名稱、migration `0012` 與新版 Worker 已部署，但第一次正式請求只收到 Alpha Vantage
 `Information` 回應，尚未取得可用市場資料；接手者應先確認 Key 來源與啟用狀態。
-依 ADR 0024，市場熱門榜已改放在**首頁**並改用 TradingView widget（美股／日股，
-成交最活躍／漲幅／跌幅／市值），需使用者勾選同意才會載入；Alpha Vantage 現在只
-負責「輸入標的參考現價」的前一日收盤價。
+依 ADR 0024，市場熱門榜已改放在**首頁**並改用 TradingView hotlists widget，內含
+活躍／漲幅榜／跌幅榜分頁，需使用者勾選同意才會載入；Alpha Vantage 現在只負責
+「輸入標的參考現價」的前一日收盤價。**日股熱門榜無法內嵌**：TradingView 免費
+widget 只提供美股，其 `JP`／`JPX`／`TYO` 參數雖可載入但回傳的其實是美股資料，
+因此日股改為導向 TradingView 網站連結（詳見 ADR 0024 的實測表）。
 詳細規格與操作程序記錄於
 [market-analysis-roadmap](docs/backend/market-analysis-roadmap.md)。
 
@@ -65,9 +67,11 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
   `DAC(T+7)`；規則詳見 ADR 0014。
 - Barclays 已回信但拒絕 Product=`DAC`，不是收信或 parser 遺失。Barclays 接受的
   DAC 商品代碼／主旨尚未確認，不可直接修改共用 BMJB 格式或猜成 `DRA`。
-- 首頁「美股／日股熱門榜」由 TradingView widget 提供（ADR 0024），需勾選同意才載入，
-  在靜態版與 Cloudflare 版皆可使用；不需 API Key、不佔 Alpha Vantage 額度。
-- 目前驗證基線為 19 個測試檔、131 項測試；JavaScript 語法、TypeScript typecheck、
+- 首頁「美股／日股熱門榜」由 TradingView hotlists widget 提供（ADR 0024），需勾選
+  同意才載入，在靜態版與 Cloudflare 版皆可使用；不需 API Key、不佔 Alpha Vantage
+  額度。美股為實際內嵌並已驗證有即時資料；日股因 TradingView 免費 widget 不支援，
+  改為外部連結，**不可**改用 `JP`／`JPX`／`TYO`（會顯示美股資料）。
+- 目前驗證基線為 19 個測試檔、132 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。

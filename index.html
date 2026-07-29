@@ -50,20 +50,12 @@
                   <option value="japan">日股</option>
                 </select>
               </label>
-              <label>排行
-                <select id="hotlistScreen">
-                  <option value="volume_leaders">成交最活躍</option>
-                  <option value="top_gainers">漲幅最高</option>
-                  <option value="top_losers">跌幅最高</option>
-                  <option value="most_capitalized">市值最大</option>
-                </select>
-              </label>
               <button id="hotlistLoad" type="button" class="secondary">載入熱門榜</button>
               <button id="hotlistUnload" type="button" class="secondary" hidden>卸載</button>
             </div>
             <p id="hotlistStatus" class="hotlist-status" role="status" aria-live="polite"></p>
             <div id="hotlistWidget" class="hotlist-widget"></div>
-            <p class="hotlist-fallback">若公司網路封鎖外部內容，可改用 TradingView 網站：
+            <p class="hotlist-fallback">熱門榜內含「活躍／漲幅榜／跌幅榜」分頁。若公司網路封鎖外部內容，可改用 TradingView 網站：
               <a id="hotlistFallbackLink" href="https://www.tradingview.com/markets/stocks-usa/market-movers-active/" target="_blank" rel="noopener noreferrer nofollow">開啟市場熱門榜</a>
             </p>
           </div>

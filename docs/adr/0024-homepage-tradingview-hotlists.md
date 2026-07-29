@@ -28,9 +28,9 @@ Phase 2 third-party resource in this application.
 
 ## Decision
 
-1. **Hot lists move to the homepage and are served by TradingView.** `index.html` gains a
-   collapsed 「美股／日股熱門榜」 panel above the trade-input workspace, offering markets `us` and
-   `japan` across four screens (`volume_leaders`, `top_gainers`, `top_losers`, `most_capitalized`).
+1. **Hot lists move to the homepage and are served by TradingView's hotlists widget.**
+   `index.html` gains a collapsed 「美股／日股熱門榜」 panel above the trade-input workspace. The
+   widget supplies its own 活躍／漲幅榜／跌幅榜 tabs, so this application adds no ranking selector.
    It runs in both runtime modes because it is pure client-side markup in `app.js` and
    `market-resources.mjs`.
 2. **Alpha Vantage is narrowed to the previous close.** The per-symbol
@@ -43,10 +43,36 @@ Phase 2 third-party resource in this application.
 4. **The widget URL is built directly**, as the existing chart already does, so TradingView's
    loader script never executes in the application origin. Iframe attributes match the deployed
    Phase 2 chart exactly (`referrerPolicy="no-referrer"` plus the same sandbox token set).
-5. **Markets and screens are fixed allowlists checked with own-property lookups.** Nothing a user
-   types reaches the widget configuration, and an unknown key fails closed.
-6. **A non-blocking fallback link** to TradingView's public market-movers page is always shown, for
+5. **Markets are a fixed allowlist checked with own-property lookups.** Nothing a user types
+   reaches the widget configuration, and an unknown key fails closed.
+6. **Japan is link-only, deliberately.** See the measured evidence below.
+7. **A non-blocking fallback link** to TradingView's public market-movers page is always shown, for
    networks that block embedded content.
+
+## Measured widget behavior (2026-07-29, against the live widgets)
+
+The first implementation used TradingView's **screener** widget with `market: "us"`/`"japan"`. It
+rendered the widget chrome but showed 「沒有商品符合您的條件」 in production. Probing the live
+widgets with TradingView's own embed tags established why:
+
+| Configuration | Result |
+| --- | --- |
+| `hotlists` `exchange: "US"` | **Real rows**, with built-in 活躍/漲幅榜/跌幅榜 tabs |
+| `hotlists` `exchange: "NASDAQ"` (control) | Different rows to `US` — the parameter *is* honoured |
+| `hotlists` `exchange: "TSE"` | Refused: "This exchange is not available for widget" |
+| `hotlists` `exchange: "JP"` / `"JPX"` / `"TYO"` | Accepted, but returns **US** rows |
+| `screener` `market: "america"` / `"japan"` | "No symbols match your criteria" — unusable |
+| `market-overview` with `TSE:` symbols | Symbols resolve to errors, no prices |
+
+Two conclusions follow. The screener widget is not usable for this purpose at all, and
+**TradingView's free widgets have no Japan hot list**. The `JP`/`JPX`/`TYO` values are the dangerous
+case: they look like they work while showing US stocks under a Japan label. In a trading tool that
+is worse than showing nothing, so those values are not used and Japan renders an explicit
+explanation plus a link to TradingView's Japan market-movers page.
+
+The shipped configuration was then verified end to end: the direct hot-list URL with
+`exchange: "US"`, `locale=zh_TW`, `referrerPolicy="no-referrer"` and the production sandbox tokens
+returns live rows with Chinese labels.
 
 ## Consequences
 
@@ -61,7 +87,7 @@ Phase 2 third-party resource in this application.
   being written. No migration, schema change or Secret change is required.
 - Hot-list values are display-only and reach no RFQ term, ranking, mail or quote card — unchanged
   from the Phase 2/3 rules.
-- **Not verified:** whether TradingView serves populated screener rows for `market: "japan"` from
-  the production domain. The widget accepts the parameter and renders its chrome, but a local probe
-  cannot confirm data because widget providers may gate content by host. Verify on
-  `app.yintsun66.com` after deployment.
+- Japan users get an honest explanation and a working link instead of a silently wrong embed. If a
+  licensed Japan hot-list source is obtained later, only `HOTLIST_MARKETS.japan` needs to change.
+- **Do not "fix" Japan by setting `exchange` to `JP`, `JPX` or `TYO`.** They render populated rows
+  and will pass a casual check, but the rows are US stocks.

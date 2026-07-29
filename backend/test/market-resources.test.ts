@@ -55,25 +55,33 @@ describe("public market resource mapping", () => {
     expect(url.toString()).not.toContain("s3.tradingview.com");
   });
 
-  it("builds US and Japan hot-list widget URLs from the fixed allowlist", () => {
-    for (const [marketKey, expectedMarket] of [["us", "us"], ["japan", "japan"]] as const) {
-      const url = new URL(hotlistWidgetUrl(marketKey, "volume_leaders"));
-      const settings = JSON.parse(decodeURIComponent(url.hash.slice(1)));
-      expect(url.origin).toBe("https://www.tradingview-widget.com");
-      expect(url.pathname).toBe("/embed-widget/screener/");
-      expect(settings.market).toBe(expectedMarket);
-      expect(settings.defaultScreen).toBe("volume_leaders");
-      // The hot list is market-wide: no underlying, RFQ or account identifier may travel with it.
-      expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
-      expect(url.toString()).not.toContain("s3.tradingview.com");
-    }
+  it("builds the US hot-list widget URL without a loader script or page address", () => {
+    const url = new URL(hotlistWidgetUrl("us"));
+    const settings = JSON.parse(decodeURIComponent(url.hash.slice(1)));
+    expect(url.origin).toBe("https://www.tradingview-widget.com");
+    expect(url.pathname).toBe("/embed-widget/hotlists/");
+    expect(settings.exchange).toBe("US");
+    // The upstream loader appends page-uri/utm_* fields; the embed must not carry a page address.
+    expect(Object.keys(settings)).not.toContain("page-uri");
+    expect(url.toString()).not.toMatch(/utm_|page-uri/i);
+    // The hot list is market-wide: no underlying, RFQ or account identifier may travel with it.
+    expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
+    expect(url.toString()).not.toContain("s3.tradingview.com");
   });
 
-  it("fails closed for hot-list markets or screens outside the allowlist", () => {
-    expect(hotlistDescriptor("us", "volume_leaders")).toMatchObject({ marketKey: "us" });
-    expect(hotlistDescriptor("taiwan", "volume_leaders")).toBeNull();
-    expect(hotlistDescriptor("us", "__proto__")).toBeNull();
-    expect(() => hotlistWidgetUrl("taiwan", "volume_leaders")).toThrow();
-    expect(() => hotlistWidgetUrl("us", "'; alert(1);//")).toThrow();
+  it("refuses to embed a market TradingView does not actually serve", () => {
+    // "JP"/"JPX"/"TYO" are accepted upstream but silently return US rows, so Japan must never be
+    // embedded — it would show US stocks under a Japan label.
+    expect(hotlistDescriptor("japan")).toMatchObject({ marketKey: "japan", embeddable: false });
+    expect(hotlistDescriptor("japan").fallbackUrl).toContain("stocks-japan");
+    expect(() => hotlistWidgetUrl("japan")).toThrow();
+  });
+
+  it("fails closed for hot-list markets outside the allowlist", () => {
+    expect(hotlistDescriptor("us")).toMatchObject({ marketKey: "us", embeddable: true });
+    expect(hotlistDescriptor("taiwan")).toBeNull();
+    expect(hotlistDescriptor("__proto__")).toBeNull();
+    expect(() => hotlistWidgetUrl("taiwan")).toThrow();
+    expect(() => hotlistWidgetUrl("'; alert(1);//")).toThrow();
   });
 });

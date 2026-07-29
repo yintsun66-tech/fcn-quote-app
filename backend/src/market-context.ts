@@ -152,6 +152,31 @@ function errorCode(error: unknown): string {
   return "UPSTREAM_UNAVAILABLE";
 }
 
+function safeErrorMessage(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/([?&]api_key=)[^&\s]+/giu, "$1[REDACTED]")
+    .replace(/https?:\/\/\S+/giu, "[URL]")
+    .replace(/[A-Za-z0-9_-]{24,}/gu, "[TOKEN]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+function safeErrorDiagnostic(error: unknown): Record<string, string | null> {
+  const cause = error instanceof Error ? error.cause : null;
+  const causeCode = cause && typeof cause === "object" && "code" in cause
+    ? String(cause.code ?? "")
+    : "";
+  return {
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorMessage: safeErrorMessage(error instanceof Error ? error.message : ""),
+    causeName: cause instanceof Error ? cause.name : null,
+    causeMessage: safeErrorMessage(cause instanceof Error ? cause.message : ""),
+    causeCode: /^[A-Z0-9_:-]{1,64}$/u.test(causeCode) ? causeCode : null
+  };
+}
+
 function validDate(value: unknown): string | null {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   return Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? null : value;
@@ -179,9 +204,12 @@ async function fetchJson<T>(
 ): Promise<{ data: T; etag: string | null }> {
   const response = await fetcher(url, {
     headers,
-    redirect: "error",
+    redirect: "manual",
     signal: AbortSignal.timeout(8_000)
   });
+  if (response.status >= 300 && response.status < 400) {
+    throw new AppError(503, "UPSTREAM_REDIRECT_REJECTED", "公開資料來源回傳未允許的重新導向。");
+  }
   if (!response.ok) {
     const code = response.status === 429 ? "UPSTREAM_RATE_LIMITED" : `UPSTREAM_HTTP_${response.status}`;
     throw new AppError(503, code, "公開資料來源暫時無法使用。 ");
@@ -499,7 +527,8 @@ async function refreshCache<T>(
       dataType: options.dataType,
       outcome: "ERROR",
       errorCode: code,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      ...safeErrorDiagnostic(error)
     });
     return cacheEnvelope<T>(await cacheRow(env, options.cacheKey), now, code);
   }

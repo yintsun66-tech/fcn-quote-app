@@ -4,36 +4,44 @@ Updated: 2026-07-28 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-## SEC/FRED first authenticated-load fix (local, not committed or deployed)
+## SEC/FRED first authenticated-load recovery (deployed; final UI check pending login)
 
 The first authenticated production load for `MU` reached the market-context API and rate limiter,
-but D1 recorded `sec:instrument:v1:MU` as `ERROR / UPSTREAM_UNAVAILABLE`. No instrument row or FRED
-cache row was created because the original flow returned before FRED whenever SEC instrument
-lookup failed. A direct request with the same SEC URL and declared identity returned HTTP 200,
-contained `MU`, did not redirect and was well below the five-megabyte limit.
+but D1 recorded both SEC and FRED as `ERROR / UPSTREAM_UNAVAILABLE`. A short, redacted production
+tail then identified the exact shared failure: Cloudflare's edge runtime rejects
+`RequestInit.redirect = "error"` before issuing the request. This affected both official sources;
+the SEC URL, FRED secret and response body were not the cause.
 
-The local fix:
+The deployed recovery:
 
+- uses Cloudflare-supported `redirect: "manual"` and explicitly rejects every 3xx response with
+  `UPSTREAM_REDIRECT_REJECTED`, preserving the security invariant that public-data requests must
+  never follow redirects;
 - wraps the runtime-provided global `fetch` and calls it as `globalThis.fetch(...)`, preserving the
   Cloudflare runtime receiver instead of passing the raw function as a detached default argument;
-- maps safe runtime-invocation and network-connection failures to
-  `UPSTREAM_RUNTIME_INVOCATION` / `UPSTREAM_NETWORK_ERROR`;
 - continues to load FRED even when SEC instrument lookup is unavailable;
 - keeps first-load error diagnostics for ten minutes without treating the placeholder `{}` as
-  stale source data, so scheduled cleanup no longer removes the evidence immediately; and
-- adds regression coverage for the runtime receiver, SEC/FRED failure isolation and diagnostic
-  retention.
+  stale source data, so scheduled cleanup does not remove the evidence immediately;
+- logs only bounded, sanitized diagnostic fields and redacts API keys, URLs and token-like values;
+  and
+- adds regression coverage for Cloudflare redirect handling, the runtime receiver, SEC/FRED failure
+  isolation and diagnostic retention.
 
-Verification completed:
+Deployment and verification evidence:
 
-- `pnpm test` — 19 files / 124 tests passed.
-- `pnpm run typecheck` — passed.
-- `pnpm run build` — Cloudflare dry-run passed with 14 static assets and all existing bindings.
+- initial recovery commit `affe086` is pushed to `origin/codex/market-analysis-phase2-4`;
+- final Worker version `6fbf2c51-66f2-4fd1-ba38-ad4c8091fe98` is deployed with the existing
+  domains, D1, R2, Email, Queue, Durable Object and scheduled bindings intact;
+- `pnpm test` passed: 19 files / 125 tests;
+- `pnpm run typecheck` passed;
+- `pnpm run build` passed with 14 static assets and all existing bindings;
+- a read-only D1 check after deployment found no residual SEC/FRED error placeholders; and
+- the existing `MU UW / TSM UN` production analysis page still renders, but its application session
+  expired immediately before the final load action. A fresh authenticated click is therefore the
+  only remaining production UI verification; it must not create or send an RFQ.
 
-This fix is only in the working tree. Production remains Worker
-`88ada066-5770-4417-8dff-66419fb651c4` until the user separately authorizes commit, push and
-deployment. After deployment, repeat the authenticated `MU` load, confirm SEC and FRED are `FRESH`,
-then query only safe cache metadata if either source is still unavailable.
+This change adds no migration, dependency, lockfile, Secret, binding or deployment-configuration
+change. Preserve `.claude/settings.local.json`; do not commit it.
 
 ## Public market analysis Phases 2–4 (committed, pushed and deployed)
 

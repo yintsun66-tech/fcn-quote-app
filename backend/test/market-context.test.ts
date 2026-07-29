@@ -115,6 +115,7 @@ describe("official public market context", () => {
 
   it("preserves the Cloudflare runtime receiver when using the default fetcher", async () => {
     const delegate = publicDataFetcher();
+    let redirectMode: RequestInit["redirect"];
     vi.stubGlobal("fetch", function runtimeAwareFetch(
       this: typeof globalThis,
       input: RequestInfo | URL,
@@ -123,14 +124,27 @@ describe("official public market context", () => {
       if (this !== globalThis) {
         throw new TypeError("Illegal invocation: function called with incorrect this reference");
       }
+      redirectMode = init?.redirect;
       return delegate(input, init);
     });
     try {
       const instrument = await fetchSecInstrument(testEnv, "AAPL");
       expect(instrument.data.ticker).toBe("AAPL");
+      expect(redirectMode).toBe("manual");
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("rejects upstream redirects without following them", async () => {
+    const redirectingFetcher = (async () => new Response(null, {
+      status: 302,
+      headers: { location: "https://example.com/not-allowed" }
+    })) as typeof fetch;
+    await expect(fetchSecInstrument(testEnv, "AAPL", redirectingFetcher)).rejects.toMatchObject({
+      status: 503,
+      code: "UPSTREAM_REDIRECT_REJECTED"
+    });
   });
 
   it("normalizes SEC instrument and the latest five supported filings", async () => {

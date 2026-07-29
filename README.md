@@ -46,9 +46,9 @@ widget 只提供美股，其 `JP`／`JPX`／`TYO` 參數雖可載入但回傳的
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `584d33d`；實際最新分支 HEAD
+- 正式功能程式基線為 `a49fc5e`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `a71a2da2-26fa-42b2-818a-ea966cc57d8d`（2026-07-29
+- 最新正式 Worker 版本為 `91dd551c-be59-494b-815e-423fbf99d6a3`（2026-07-30
   部署）。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；

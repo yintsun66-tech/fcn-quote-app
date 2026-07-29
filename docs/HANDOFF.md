@@ -11,8 +11,22 @@ Current Git baseline: implementation commit `584d33d` is the production source, 
 
 ## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
 
-Commit `584d33d`, deployed as Worker `a71a2da2-26fa-42b2-818a-ea966cc57d8d`. No D1 migration,
+Commits `584d33d` (initial), `91a465e` (switch to the working hot-list widget) and `a49fc5e`
+(asset-token fix), deployed as Worker `91dd551c-be59-494b-815e-423fbf99d6a3`. No D1 migration,
 Secret or binding change.
+
+**Asset-version lesson (cost one bad deploy).** The first hot-list deploy populated the edge cache
+key `market-resources.mjs?v=market-hotlist-v1`. The follow-up commit changed that file but reused
+the same token, so Cloudflare kept serving the stale 6,614-byte screener build
+(`CF-Cache-Status: HIT`) while `backend/public/` held the correct 7,336-byte module — users would
+have kept the broken widget. **Bump the `?v=` token whenever a versioned asset's content changes**,
+and verify a changed asset by byte size, not only by HTTP 200.
+
+Post-deploy verification on `https://app.yintsun66.com`: API health 200;
+`market-resources.mjs?v=market-hotlist-v2` returns the 7,336-byte module containing
+`embed-widget/hotlists` and no `embed-widget/screener`; the homepage references
+`?v=market-hotlist-v2` throughout and no longer contains `hotlistScreen`; and the loaded panel
+renders live rows with the 活躍/漲幅榜/跌幅榜 tabs.
 
 Post-deploy verification: API health 200; `market-resources.mjs` returns HTTP 200 and contains
 `hotlistWidgetUrl`, `hotlistDescriptor`, `Object.hasOwn`, `embed-widget/screener` and

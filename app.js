@@ -6,7 +6,7 @@ import {
   HOTLIST_CONSENT_KEY,
   hotlistDescriptor,
   hotlistWidgetUrl,
-} from "./market-resources.mjs?v=market-hotlist-v1";
+} from "./market-resources.mjs?v=market-hotlist-v2";
 
 (() => {
   "use strict";

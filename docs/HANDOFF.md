@@ -12,7 +12,7 @@ Current Git baseline: implementation commit `584d33d` is the production source, 
 ## Homepage TradingView hot lists; Alpha Vantage narrowed to previous close (ADR 0024)
 
 Commits `584d33d` (initial), `91a465e` (switch to the working hot-list widget) and `a49fc5e`
-(asset-token fix), deployed as Worker `91dd551c-be59-494b-815e-423fbf99d6a3`. No D1 migration,
+(asset-token fix), deployed as Worker `680e77ee-333d-4406-84bd-b71181c31d6d`. No D1 migration,
 Secret or binding change.
 
 **Asset-version lesson (cost one bad deploy).** The first hot-list deploy populated the edge cache

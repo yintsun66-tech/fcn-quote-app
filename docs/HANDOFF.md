@@ -4,9 +4,45 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `0a83d65`, currently served as Worker
-`e7ffba89-6926-45bf-ae36-60962903904e` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `dd8acb8`, currently served as Worker
+`a57d7aef-55b8-47ff-bd70-3a693b59cb90` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
+
+## Issuer-declared publication, automatic expiry and full-card follow-board (deployed)
+
+Implementation commit `dd8acb8` is committed and pushed to
+`origin/codex/market-analysis-phase2-4`. ADR 0028 and migration
+`0015_follow_board_expiry.sql` replace the old batch suffix with
+`MMDD deal-N PRODUCTCODE ISSUER跟單YYYYMMDD`, for example
+`0730 deal-03 PBZL BNP跟單20260730`. Multi-product subjects keep the ADR 0027 list/range rules.
+The declared issuer must exactly match the independently recognized issuer table; its legacy
+batch is derived only for correlation. The final date is the last available Taiwan date. The
+manifest hides the product at 00:00 the next day in `Asia/Taipei`, and the two-minute scheduled
+cleanup changes it to `ARCHIVED` without deleting products, publication commands, interests or
+audit history. Migrated legacy products have no expiry and remain manually archived.
+
+The product list now renders the same full quote-card DOM used for PNG output. `下載商品圖` opens
+a dedicated product preview tab; `下載 PNG` remains an explicit action in that tab. `我要跟單`
+first tells the viewer to contact 高資產業務處同事或信託處 through LINE or telephone, then retains
+the existing intent form.
+
+Migration `0015` is applied to remote D1. Wrangler reports no pending migration,
+`PRAGMA foreign_key_check` returned no rows, and the expected `expires_at`,
+`declared_issuer` and `expiry_date_yyyymmdd` columns exist. Source/test typechecks passed;
+the complete suite passed **22 files / 162 tests**; JavaScript syntax validation and the
+Cloudflare dry-run build passed with 18 public assets. Worker
+`a57d7aef-55b8-47ff-bd70-3a693b59cb90` serves both custom domains. Post-deploy checks returned
+health HTTP 200, application follow-board/assets HTTP 200, and manifest HTTP 401 without a PIN.
+
+The three changed public assets were separately committed to `yintsun66-tech/fcnV2` `main` as
+`db9da04`. GitHub Pages returned HTTP 200 and exposed the new HTML v3 module reference,
+preview-mode JavaScript and full-card CSS after propagation. No backend, database or secret was
+copied into the static repository.
+
+No real issuer publication email was sent during deployment verification. The first operational
+test must use the new issuer-plus-expiry subject, a future expiry date, an approved publisher and
+an issuer table that matches the declared issuer. Existing failed commands are not automatically
+reprocessed.
 
 ## PBZL HTML-entity normalization fix (deployed)
 

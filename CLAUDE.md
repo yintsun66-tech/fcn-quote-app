@@ -32,15 +32,15 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `6d2f3b2` is documented by this handoff and
-  currently served by Worker `c58e6ba9-844c-4121-91f7-d63ab639d4e7` on 2026-07-30. Resolve the current
+- Production implementation commit `dd8acb8` is documented by this handoff and
+  currently served by Worker `a57d7aef-55b8-47ff-bd70-3a693b59cb90` on 2026-07-30. Resolve the current
   branch HEAD from Git rather than copying a historical handoff hash. The current verification
-  baseline is 21 test files / 153 tests. A deployment record is evidence of Worker/static-asset
+  baseline is 22 test files / 162 tests. A deployment record is evidence of Worker/static-asset
   publication, not evidence that Alpha Vantage returned usable data or that real bank mail was
   delivered.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
-  program commit `0b81740` mirrors the approved public asset set with ZAR, market hot lists,
+  program commit `db9da04` mirrors the approved public asset set with ZAR, market hot lists,
   the Zimbra manual-mail fallback and the PIN-gated follow-board page with API fallback. It contains no Cloudflare
   backend or data. Future static syncs must copy only the allowlisted files from
   `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
@@ -73,12 +73,14 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.
-- ADR 0025 through ADR 0027 define the follow-board boundary. Publication commands are accepted
+- ADR 0025 through ADR 0028 define the follow-board boundary. Publication commands are accepted
   only from the three approved First Bank mailboxes with aligned authentication and unique
   reply/token evidence. The issuer and quote terms come only from one issuer table profile. Prefer
   an unambiguous table-local candidate with the exact product-code count; use message-wide unique
   complete rows only when no such table exists. `deal-N`/`deal-START~END` are audit/count metadata
-  and must never select a row, RFQ batch or ranking. Multi-product publication is atomic.
+  and must never select a row, RFQ batch or ranking. Multi-product publication is atomic. ADR
+  0028 requires an exact declared issuer/table issuer match and a future Taiwan removal date;
+  expired products are hidden immediately and archived without deletion.
   Public snapshots must never expose RFQ/correlation/user data. Full follow-interest employee
   numbers stay encrypted and are ADMIN/PS-only; public rows remain masked. Follow-board PNGs are
   browser-rendered and are not written to R2.

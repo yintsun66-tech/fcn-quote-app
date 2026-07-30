@@ -75,9 +75,9 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `dd8acb8`；實際最新分支 HEAD
+- 正式功能程式基線為 `061fe3b`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `a57d7aef-55b8-47ff-bd70-3a693b59cb90`（2026-07-30
+- 最新正式 Worker 版本為 `6429a8bf-a735-47b4-a5ba-5fa3684ec282`（2026-07-30
   部署）。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；
@@ -104,7 +104,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
-  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `db9da04`。它只包含公開前端，
+  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `d787aeb`。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。

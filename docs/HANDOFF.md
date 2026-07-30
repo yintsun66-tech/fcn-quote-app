@@ -4,11 +4,11 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `dd8acb8`, currently served as Worker
-`a57d7aef-55b8-47ff-bd70-3a693b59cb90` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `061fe3b`, currently served as Worker
+`6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## Follow-board sales-fee display (local, not committed or deployed)
+## Follow-board sales-fee display (deployed)
 
 ADR 0029 adds a `手收` line directly below each product's final available date. For non-CITI
 profiles the value is `100 - comparablePricePct`; for CITI Upfront quotes it is the raw Upfront.
@@ -17,10 +17,15 @@ products remain compatible because the client derives the same value from the al
 comparable NotePrice. Missing or invalid values display an em dash instead of zero. This display
 does not change ranking, parsing, D1 schema, the downloadable PNG contents or public endpoints.
 
-The local change is intentionally not committed, pushed or deployed because this request did not
-authorize those operations. Before release, run the follow-board regression test, complete
-typecheck/test/build, sync the three public follow-board assets to `yintsun66-tech/fcnV2`, and
-replace this paragraph with exact commit and deployment evidence.
+Implementation commit `061fe3b` is committed and pushed. Typecheck passed; the complete suite
+passed **22 files / 163 tests**; JavaScript syntax validation and the Cloudflare dry-run build
+passed with 18 public assets. No dependency, lockfile, migration, binding or Secret changed.
+
+Worker `6429a8bf-a735-47b4-a5ba-5fa3684ec282` serves both custom domains. Post-deploy checks
+returned health and application follow-board/assets HTTP 200, exposed the v4 module and sales-fee
+code/style, and returned HTTP 401 for a manifest request without the PIN. The three public assets
+were separately committed to `yintsun66-tech/fcnV2` `main` as `d787aeb`; GitHub Pages returned
+HTTP 200 with the same v4 module and sales-fee assets after propagation.
 
 ## Issuer-declared publication, automatic expiry and full-card follow-board (deployed)
 

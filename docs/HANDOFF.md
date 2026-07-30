@@ -8,6 +8,33 @@ Current production source: implementation commit `335a561`, deployed as Worker
 `2e32a971-b1e4-482b-b3e4-300b1bb89c50` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Follow-board implementation (branch implementation; production deployment pending)
+
+Branch `codex/market-analysis-phase2-4` adds ADR 0025 and D1 migration `0013` for a shared no-registration
+follow-board. Approved First Bank publishers (`i14053`, `i97293`, `i11147`) reply to the original
+inquiry thread or include an opaque token with `MMDD deal-N PRODUCTCODE BATCH跟單`. Publication
+version `follow-board-publication-v2` recognizes the issuer from distinctive table headers,
+parses `deal-N` with the existing issuer profile, and never selects terms from an RFQ batch or
+ranking. An external-channel reply is allowed when its thread/token evidence is unique. Multiple
+issuer signatures, missing rows, incomplete terms or table/BATCH mismatch fail closed. Public
+snapshots replace the RFQ reference with the product code and use Coupon as
+「預估年化配息率，非保證收益」.
+
+`follow-board.html`, `follow-board.css` and `follow-board.mjs` are copied by the static allowlist
+for both application and GitHub Pages modes. Visitors enter a four-digit Worker-verified PIN,
+generate PNGs locally (no R2 image), and submit branch code/name, five-digit employee number and
+whole-unit intended amount. Complete employee numbers are encrypted; the public table shows only
+the branch and masked employee number. ADMIN/PS can view complete rows and archive a product from
+the application follow-board page.
+
+Local evidence so far: TypeScript typecheck passed and the full suite passed at **21 test files /
+153 tests**. The Cloudflare dry-run build passed with 18 public assets. No migration, Secret,
+static sync or deployment has been performed yet.
+Before deployment, set the four-digit `FOLLOW_BOARD_VIEW_PIN` with hidden Wrangler input, apply
+migration `0013`, run the full validation/build again, then deploy Worker before syncing the three
+new public assets to the separate GitHub Pages repository. Preserve user-owned untracked
+`.claude/` and `output/`.
+
 ## Zimbra manual-mail fallback (committed, pushed and deployed)
 
 The static/manual email flow no longer immediately depends on `mailto:`. After issuer validation it

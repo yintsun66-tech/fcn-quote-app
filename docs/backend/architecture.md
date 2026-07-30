@@ -283,3 +283,20 @@ a new version and may admit only finite, matched, non-rejected late values.
   evidence and keep sender mismatch/manual-review behavior fail-closed.
 - Define and exercise the approved administrator recovery and user password-reset process.
 - Confirm Browser Rendering concurrency and Queue capacity with the expected-load test.
+
+## Public follow-board
+
+Migration `0013` and ADR 0025 add an email-published follow-board shared by the application and
+GitHub Pages compatibility site. Approved First Bank publishers reply to the original inquiry
+thread or include an opaque token with a strict `MMDD deal-N PRODUCTCODE BATCH跟單` subject. The
+Email Worker stores the raw MIME as usual; the parse consumer recognizes the command, validates
+aligned sender authentication and unique reply/token evidence, extracts the HTML tables, and
+identifies the issuer from distinctive headers such as `Client Ref`, `MS ID`, `Nomura ID`,
+`ISSUER PROD REF`, `Memory Autocall`, or `System Remark`. It then parses the requested `deal-N`
+row with the existing issuer profile. BATCH is only a consistency check and never selects a
+ranked quote. Multiple issuer signatures or incomplete rows are quarantined for manual review.
+
+The shared `follow-board.html` client requests a PIN-protected manifest, renders product cards and
+creates PNGs locally with the vendored html2canvas. Follow-board PNGs are not stored in R2. Public
+interest rows contain only masked employee numbers; authenticated ADMIN/PS requests can retrieve
+the encrypted full values through the dedicated support endpoint.

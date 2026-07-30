@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { invalidQuoteValue, parseIssuerTables } from "../src/issuer-profiles";
+import {
+  detectIssuerTableProfiles,
+  invalidQuoteValue,
+  parseIssuerTables
+} from "../src/issuer-profiles";
 import type { Issuer } from "../src/inbound-parser";
 
 function cells(length: number, values: Record<number, string | number | boolean>): string[] {
@@ -60,6 +64,106 @@ describe("issuer parser profiles", () => {
     const parsed = parseIssuerTables(issuer, { tables: [{ index: 0, rows: [row] }] });
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({ issuer, product: "FCN", currency: "USD", underlyings: ["AAA UW"], ...expected });
+  });
+
+  it.each([
+    {
+      issuer: "BNP" as const,
+      header: cells(25, {
+        0: "Client Ref", 1: "Product", 2: "Currency", 12: "Coupon p.a. (%)", 24: "Remarks"
+      })
+    },
+    {
+      issuer: "JPM" as const,
+      header: cells(25, {
+        0: "Product", 20: "Ref", 21: "System Remarks", 24: "Maturity Date"
+      })
+    },
+    {
+      issuer: "NOMURA" as const,
+      header: cells(25, {
+        0: "Nomura ID", 1: "Product", 4: "Guaranteed Coupon Periods", 24: "Max Size"
+      })
+    },
+    {
+      issuer: "DBS" as const,
+      header: cells(23, {
+        0: "Product", 17: "Funding Spread (bps)", 18: "Issue Date Lag", 22: "ISSUER PROD REF"
+      })
+    },
+    {
+      issuer: "UBS" as const,
+      header: cells(20, {
+        0: "Product", 2: "Non-call Periods (m)", 12: "Cost (%)", 18: "Funding Spread (bps)"
+      })
+    },
+    {
+      issuer: "GS" as const,
+      header: cells(21, {
+        0: "Product", 12: "Cost (%)", 19: "Max Notional Size(US$)", 20: "System Remark"
+      })
+    },
+    {
+      issuer: "CA" as const,
+      header: cells(21, {
+        0: "Product", 2: "BBG Code 1", 8: "Guaranteed Periods (m)",
+        18: "Remarks", 19: "Note", 20: "ID"
+      })
+    }
+  ])("detects $issuer from distinctive table headers instead of a mail batch", ({ issuer, header }) => {
+    const row = standardCases.find(item => item.issuer === issuer)?.row;
+    expect(row).toBeDefined();
+    const detected = detectIssuerTableProfiles({
+      tables: [{ index: 0, rows: [header, row ?? []] }]
+    });
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toMatchObject({ issuer, tableIndexes: [0] });
+    expect(detected[0]?.rows).toHaveLength(1);
+  });
+
+  it("detects the MS, SG and CITI special layouts from their distinctive headers", () => {
+    const msHeader = cells(23, {
+      0: "MS ID", 1: "Product", 9: "Curr", 13: "Put Strike",
+      19: "KO Memory", 22: "Note Price"
+    });
+    const msRow = cells(23, {
+      0: "MS-1", 1: "FCN", 3: "AAA UW", 9: "USD", 10: "6m", 11: "1m",
+      12: 0.125, 13: 0.8, 14: "NA", 15: "NA", 16: 1, 17: "DAILY",
+      18: "1m", 19: "Yes", 22: 0.98
+    });
+    const sgHeader = [
+      "Strike Date", "Issue Date", "Final Valuation Date", "Maturity Date",
+      "Underlying 1", "No. of Periods", "Settlement Frequency", "Currency",
+      "Coupon p.a.", "Fixed Coupons", "Non-Call (m)", "Put Strike",
+      "AutoCall", "KO Type", "KI Type", "KI", "Offer Price", "Comment"
+    ];
+    const sgRow = cells(sgHeader.length, {
+      4: "AAA UW", 5: 6, 6: "Monthly", 7: "USD", 8: "12.5%",
+      9: "All Periods", 10: 1, 11: "85%", 12: "100%", 13: "Daily Memory",
+      14: "EKI", 15: "70%", 16: "98%"
+    });
+    const citiHeader = cells(32, {
+      0: "Product", 16: "Memory Autocall", 17: "Daily KO", 19: "Upfront (%)",
+      30: "PriceID", 31: "Quote Validity (UTC)"
+    });
+    const citiRow = cells(32, {
+      0: "FCA", 2: "USD", 3: 6, 4: 7, 5: "AAA UW", 10: 80,
+      11: "European", 12: 70, 13: 1, 14: 0, 15: 100, 16: true,
+      17: true, 18: 12.5, 19: 2, 30: "CITI-1"
+    });
+
+    for (const sample of [
+      { issuer: "MS", header: msHeader, row: msRow },
+      { issuer: "SG", header: sgHeader, row: sgRow },
+      { issuer: "CITI", header: citiHeader, row: citiRow }
+    ] as const) {
+      const detected = detectIssuerTableProfiles({
+        tables: [{ index: 0, rows: [sample.header, sample.row] }]
+      });
+      expect(detected).toHaveLength(1);
+      expect(detected[0]).toMatchObject({ issuer: sample.issuer, tableIndexes: [0] });
+      expect(detected[0]?.rows).toHaveLength(1);
+    }
   });
 
   it("normalizes MS decimal fractions and memory fields", () => {

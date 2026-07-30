@@ -1,6 +1,10 @@
 import PostalMime, { type Address, type Email } from "postal-mime";
 import { keyedHash, sha256Text } from "./crypto";
 import { nowIso } from "./db";
+import {
+  parseFollowBoardPublicationSubject,
+  processFollowBoardPublicationEmail
+} from "./follow-board-publication";
 import type { AppEnv, InboundEmailJob, MailBatchCode, QuoteNormalizeJob } from "./types";
 
 export const INBOUND_PARSER_VERSION = "inbound-mime-v1";
@@ -538,6 +542,60 @@ export async function processInboundEmailJob(env: AppEnv, requested: InboundEmai
     email.inReplyTo ?? claimed.message.in_reply_to ?? "",
     email.references ?? claimed.message.references_header ?? ""
   );
+  const followBoardCommand = parseFollowBoardPublicationSubject(normalizedSubject);
+  if (followBoardCommand) {
+    const extracted = email.html
+      ? await extractHtmlTables(email.html)
+      : { tables: [], warnings: ["HTML_BODY_NOT_PRESENT"] };
+    const parsedAt = nowIso();
+    const parsedKey = `parsed-email/v1/${claimed.message.id}.json`;
+    await env.RAW_MAIL_BUCKET.put(parsedKey, JSON.stringify({
+      schemaVersion: 1,
+      parserVersion: INBOUND_PARSER_VERSION,
+      inboundMessageId: claimed.message.id,
+      parsedAt,
+      tableCount: extracted.tables.length,
+      tables: extracted.tables,
+      hasPlainText: Boolean(email.text?.trim()),
+      attachmentCount: email.attachments.length,
+      warnings: extracted.warnings
+    }), {
+      httpMetadata: { contentType: "application/json; charset=utf-8" },
+      customMetadata: { parserVersion: INBOUND_PARSER_VERSION, parsedAt }
+    });
+    const replyReferences = bounded(
+      `${email.inReplyTo ?? claimed.message.in_reply_to ?? ""} ${email.references ?? claimed.message.references_header ?? ""}`
+        .normalize("NFKC")
+        .replace(/\s+/gu, " ")
+        .trim(),
+      8_192
+    );
+    const sourceReferenceHash = tags
+      ? await keyedHash(env.EMPLOYEE_LOOKUP_KEY, `FOLLOW_BOARD_TOKEN_V1:${tags.batchCode}:${tags.token}`)
+      : replyReferences
+        ? await keyedHash(env.EMPLOYEE_LOOKUP_KEY, `FOLLOW_BOARD_REPLY_V1:${replyReferences}`)
+        : null;
+    await processFollowBoardPublicationEmail(env, {
+      command: followBoardCommand,
+      normalizedSubject,
+      inboundMessageId: claimed.message.id,
+      parseJobId: claimed.job.id,
+      email,
+      envelopeFrom: claimed.message.envelope_from,
+      headerFrom: claimed.message.header_from,
+      returnPath: claimed.message.return_path,
+      authenticationResults: claimed.message.authentication_results,
+      correlation,
+      correlationEvidenceConflict: evidence.conflict,
+      correlationEvidenceBatchCode: tags?.batchCode ?? correlation?.batchCode ?? null,
+      sourceReferenceHash,
+      tables: extracted.tables,
+      parsedTablesKey: parsedKey,
+      tableWarnings: extracted.warnings,
+      attachmentCount: email.attachments.length
+    });
+    return;
+  }
   const outcome = terminalOutcome(sender, subjectBatch, tags, correlation, evidence.conflict);
   const extracted = email.html ? await extractHtmlTables(email.html) : { tables: [], warnings: ["HTML_BODY_NOT_PRESENT"] };
   const warnings = [...new Set([...sender.warnings, ...extracted.warnings])];

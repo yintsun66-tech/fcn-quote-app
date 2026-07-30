@@ -68,6 +68,12 @@ interface ParsedTablesDocument {
   tables: TableLike[];
 }
 
+export interface DetectedIssuerTableProfile {
+  issuer: Issuer;
+  tableIndexes: number[];
+  rows: ParsedIssuerRow[];
+}
+
 type Unit = "WHOLE_PERCENT" | "DECIMAL_FRACTION";
 
 interface StandardColumns {
@@ -292,6 +298,85 @@ function findHeaderIndex(headers: readonly string[], aliases: readonly string[])
 
 function hasHeaders(headers: readonly string[], aliases: readonly string[]): boolean {
   return aliases.every(alias => findHeaderIndex(headers, [alias]) >= 0);
+}
+
+interface HeaderSignature {
+  required: readonly (readonly string[])[];
+  positioned?: ReadonlyArray<{ index: number; aliases: readonly string[] }>;
+}
+
+const ISSUER_HEADER_SIGNATURES: Readonly<Record<Issuer, HeaderSignature>> = Object.freeze({
+  BNP: {
+    required: [["Client Ref"], ["Product"], ["Coupon p.a. (%)"], ["Remarks"]],
+    positioned: [{ index: 0, aliases: ["Client Ref"] }, { index: 1, aliases: ["Product"] }]
+  },
+  BARCLAYS: {
+    required: [["Notional"], ["Quote Id", "Quote ID"], ["Maturity Date"]],
+    positioned: [{ index: 0, aliases: ["Product"] }]
+  },
+  MS: {
+    required: [["MS ID"], ["Put Strike"], ["KO Memory"], ["Note Price"]],
+    positioned: [{ index: 0, aliases: ["MS ID"] }, { index: 9, aliases: ["Curr", "Currency"] }]
+  },
+  JPM: {
+    required: [["Ref"], ["System Remarks", "System Remark"], ["Maturity Date"]],
+    positioned: [{ index: 0, aliases: ["Product"] }, { index: 20, aliases: ["Ref"] }]
+  },
+  NOMURA: {
+    required: [["Nomura ID"], ["Guaranteed Coupon Periods"], ["Max Size"]],
+    positioned: [{ index: 0, aliases: ["Nomura ID"] }, { index: 1, aliases: ["Product"] }]
+  },
+  DBS: {
+    required: [["Issue Date Lag"], ["Issuer Prod Ref", "Issuer Product Ref"], ["Funding Spread (bps)"]],
+    positioned: [{ index: 0, aliases: ["Product"] }, { index: 22, aliases: ["Issuer Prod Ref", "Issuer Product Ref"] }]
+  },
+  UBS: {
+    required: [["Cost (%)", "Cost"], ["Funding Spread (bps)"], ["Non-call Periods (m)"]],
+    positioned: [{ index: 0, aliases: ["Product"] }, { index: 12, aliases: ["Cost (%)", "Cost"] }]
+  },
+  SG: {
+    required: [["Settlement Frequency"], ["Fixed Coupons"], ["Offer Price"], ["Put Strike"]],
+    positioned: [{ index: 0, aliases: ["Strike Date"] }]
+  },
+  CITI: {
+    required: [["Memory Autocall"], ["Daily KO"], ["PriceID", "Price ID"], ["Quote Validity (UTC)"]],
+    positioned: [{ index: 0, aliases: ["Product"] }, { index: 19, aliases: ["Upfront (%)", "Upfront"] }]
+  },
+  GS: {
+    required: [["Cost (%)", "Cost"], ["Max Notional Size(US$)", "Max Notional Size"], ["System Remark", "System Remarks"]],
+    positioned: [{ index: 0, aliases: ["Product"] }, { index: 20, aliases: ["System Remark", "System Remarks"] }]
+  },
+  CA: {
+    required: [["Guaranteed Periods (m)"], ["Remarks"], ["Note"], ["ID"]],
+    positioned: [
+      { index: 0, aliases: ["Product"] },
+      { index: 2, aliases: ["BBG Code 1"] },
+      { index: 8, aliases: ["Guaranteed Periods (m)"] },
+      { index: 20, aliases: ["ID"] }
+    ]
+  }
+});
+
+function matchesHeaderSignature(headers: readonly string[], signature: HeaderSignature): boolean {
+  if (!signature.required.every(group => findHeaderIndex(headers, group) >= 0)) return false;
+  return (signature.positioned ?? []).every(({ index, aliases }) => {
+    const value = headers[index];
+    return typeof value === "string"
+      && aliases.some(alias => normalizedHeader(value) === normalizedHeader(alias));
+  });
+}
+
+export function detectIssuerTableProfiles(document: ParsedTablesDocument): DetectedIssuerTableProfile[] {
+  const issuers = Object.keys(ISSUER_HEADER_SIGNATURES) as Issuer[];
+  return issuers.flatMap(issuer => {
+    const signature = ISSUER_HEADER_SIGNATURES[issuer];
+    const tableIndexes = document.tables
+      .filter(table => table.rows.some(row => matchesHeaderSignature(row, signature)))
+      .map(table => table.index);
+    if (tableIndexes.length === 0) return [];
+    const rows = parseIssuerTables(issuer, document);
+    return rows.length > 0 ? [{ issuer, tableIndexes, rows }] : [];
+  });
 }
 
 function isForwardedOriginalRequestTable(issuer: Issuer, table: TableLike): boolean {

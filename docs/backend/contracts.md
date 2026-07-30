@@ -561,3 +561,42 @@ upstream calls per UTC day, which now covers only those per-symbol daily-series 
 ## Error response
 
 Errors use a stable machine code, user-safe message, request ID, and optional field errors. They never include raw mail, stack traces, secrets, password material, correlation tokens, or another user's identifiers.
+
+## Follow-board endpoints
+
+The follow-board is a no-registration surface protected by the shared four-digit
+`FOLLOW_BOARD_VIEW_PIN` Secret. Public requests send the PIN in `X-Follow-Board-Pin`.
+The Worker returns CORS headers only for `https://app.yintsun66.com` and
+`https://yintsun66-tech.github.io`.
+
+Publication email contract:
+
+- accepts only the approved First Bank publisher addresses with aligned DKIM/SPF evidence;
+- requires reply-thread evidence or an opaque correlation token;
+- recognizes exactly one issuer from distinctive HTML-table headers;
+- applies the existing issuer parser to the `deal-N` row;
+- treats BATCH only as an issuer/table consistency check, never as a ranking lookup; and
+- rejects ambiguous, missing, incomplete, rejected or mismatched table rows into manual review.
+
+`GET /api/v1/public/follow-board/manifest`
+
+- returns current published product snapshots and today's public interest rows;
+- masks employee numbers; and
+- never returns RFQ IDs, correlation tokens, requester data, source mail or documents.
+
+`POST /api/v1/public/follow-board/interests`
+
+- requires `Idempotency-Key`, JSON, an approved browser Origin and the shared PIN;
+- accepts `productCode`, `branchCode`, `branchName`, five-digit `employeeNumber` and a positive
+  whole-unit `amountValue`; and
+- updates the current amount when the same employee submits the same product again.
+
+`GET /api/v1/admin/follow-board/interests?date=YYYY-MM-DD`
+
+- requires effective role `ADMIN` or `PS`; and
+- returns complete employee numbers decrypted server-side and writes an audit event.
+
+`POST /api/v1/admin/follow-board/products/:productCode/archive`
+
+- requires effective role `ADMIN` or `PS`, a same-origin session and CSRF; and
+- archives rather than deletes the product.

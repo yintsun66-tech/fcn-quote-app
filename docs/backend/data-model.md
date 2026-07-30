@@ -395,3 +395,34 @@ Before creating the first migration, Phase 2 must provide:
 - initial administrator bootstrap design
 - review of password and employee-number protection
 - explicit user approval
+
+## Follow-board tables (migration 0013)
+
+### `follow_board_products`
+
+Immutable public-safe card snapshots keyed by a unique case-insensitive product code. Private
+source message, hashed thread/token evidence, detected parser profile and source table/row indexes
+remain server-side. Optional RFQ/batch foreign keys are populated only when the reply belongs to
+this system; external-channel quotes do not require a ranking or quote foreign key. Lifecycle is
+`PUBLISHED -> ARCHIVED`; source and audit evidence are never deleted by the public workflow.
+
+### `follow_board_publication_commands`
+
+One idempotent result per inbound publication-command message. It records only the parsed command,
+approved publisher address, outcome and safe error code.
+
+### `follow_board_interests`
+
+One current intended-follow record per product and keyed employee lookup hash. Complete employee
+numbers are AES-GCM encrypted; the public manifest reads only `employee_number_mask`. The record
+also stores branch code/name, whole-unit amount, currency, Taipei submission date and source site.
+
+### `follow_board_idempotency_keys`
+
+Short-lived replay responses for the public write endpoint. Expired rows are removed by the
+scheduled workflow.
+
+### `follow_board_request_attempts`
+
+Keyed client-network attempts used for PIN-failure and interest-submission rate limits. Rows older
+than seven days are removed by the scheduled workflow.

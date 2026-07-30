@@ -30,6 +30,16 @@ import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import { cleanupExpiredMarketData, getMarketContext } from "./market-context";
 import {
+  archiveFollowBoardProduct,
+  cleanupFollowBoardOperationalData,
+  followBoardCorsHeaders,
+  followBoardOptions,
+  getFollowBoardManifest,
+  isPublicFollowBoardPath,
+  listAdminFollowBoardInterests,
+  submitFollowBoardInterest
+} from "./follow-board";
+import {
   downloadArtifact,
   finalizeRfqNow,
   getRfqResults,
@@ -42,7 +52,9 @@ import type { AppEnv } from "./types";
 
 export { RfqCoordinator } from "./coordinator";
 
-function errorResponse(error: unknown, currentRequestId: string): Response {
+function errorResponse(error: unknown, currentRequestId: string, request: Request): Response {
+  const path = new URL(request.url).pathname.replace(/\/+$/, "") || "/";
+  const extraHeaders = isPublicFollowBoardPath(path) ? followBoardCorsHeaders(request) : undefined;
   if (isAppError(error)) {
     return jsonResponse({
       error: {
@@ -51,7 +63,7 @@ function errorResponse(error: unknown, currentRequestId: string): Response {
         requestId: currentRequestId,
         ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {})
       }
-    }, error.status);
+    }, error.status, extraHeaders);
   }
   console.error("request_failed", { requestId: currentRequestId, errorType: error instanceof Error ? error.name : "unknown" });
   return jsonResponse({
@@ -60,7 +72,7 @@ function errorResponse(error: unknown, currentRequestId: string): Response {
       message: "系統暫時無法處理請求。",
       requestId: currentRequestId
     }
-  }, 500);
+  }, 500, extraHeaders);
 }
 
 async function route(request: Request, env: AppEnv): Promise<Response> {
@@ -68,6 +80,13 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const method = request.method.toUpperCase();
 
+  if (method === "OPTIONS" && isPublicFollowBoardPath(path)) return followBoardOptions(request);
+  if (method === "GET" && path === "/api/v1/public/follow-board/manifest") {
+    return getFollowBoardManifest(request, env);
+  }
+  if (method === "POST" && path === "/api/v1/public/follow-board/interests") {
+    return submitFollowBoardInterest(request, env);
+  }
   if (method === "OPTIONS") return emptyResponse(204, { allow: "GET, POST, OPTIONS" });
   if (method === "GET" && path === "/api/v1/health") return jsonResponse({ status: "ok" });
   if (method === "POST" && path === "/api/v1/auth/register") return register(request, env);
@@ -83,6 +102,18 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && path === "/api/v1/admin/rfq-timelines") return listAdminRfqTimelines(request, env, session);
   if (method === "GET" && path === "/api/v1/admin/market-context-health") {
     return getAdminMarketContextHealth(request, env, session);
+  }
+  if (method === "GET" && path === "/api/v1/admin/follow-board/interests") {
+    return listAdminFollowBoardInterests(request, env, session);
+  }
+  const archiveFollowBoardMatch = /^\/api\/v1\/admin\/follow-board\/products\/([^/]+)\/archive$/.exec(path);
+  if (method === "POST" && archiveFollowBoardMatch?.[1]) {
+    return archiveFollowBoardProduct(
+      request,
+      env,
+      session,
+      decodeURIComponent(archiveFollowBoardMatch[1])
+    );
   }
   const outboundEmailMatch = /^\/api\/v1\/admin\/outbound-emails\/([^/]+)$/.exec(path);
   if (method === "GET" && outboundEmailMatch?.[1]) return getAdminOutboundEmail(request, env, session, outboundEmailMatch[1]);
@@ -171,7 +202,7 @@ export default {
     try {
       return await route(request, env);
     } catch (error) {
-      return errorResponse(error, currentRequestId);
+      return errorResponse(error, currentRequestId, request);
     }
   },
   async queue(batch: MessageBatch<unknown>, env): Promise<void> {
@@ -190,6 +221,13 @@ export default {
       await cleanupExpiredMarketData(env);
     } catch (error) {
       console.error("market_context_cleanup_failed", {
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
+    }
+    try {
+      await cleanupFollowBoardOperationalData(env);
+    } catch (error) {
+      console.error("follow_board_cleanup_failed", {
         errorType: error instanceof Error ? error.name : "unknown"
       });
     }

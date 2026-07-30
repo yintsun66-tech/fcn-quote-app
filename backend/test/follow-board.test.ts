@@ -10,7 +10,7 @@ import { encryptEmployeeNumber, keyedHash, sha256Text } from "../src/crypto";
 import {
   parseFollowBoardPublicationSubject,
   processFollowBoardPublicationEmail,
-  selectFollowBoardPublicationRow
+  selectFollowBoardPublicationRows
 } from "../src/follow-board-publication";
 import worker from "../src/index";
 import type { AppEnv } from "../src/types";
@@ -183,7 +183,9 @@ beforeAll(async () => {
     command: {
       subjectDateMmdd: "0730",
       dealSequence: 1,
+      dealSequenceEnd: 1,
       productCode: "PBZY",
+      productCodes: ["PBZY"],
       batchCode: "BMJB"
     },
     normalizedSubject: "0730 deal-1 PBZY BMJB跟單",
@@ -233,11 +235,39 @@ describe("follow board", () => {
     expect(parseFollowBoardPublicationSubject("0730 deal-1 PBXX BMJB跟單")).toEqual({
       subjectDateMmdd: "0730",
       dealSequence: 1,
+      dealSequenceEnd: 1,
       productCode: "PBXX",
+      productCodes: ["PBXX"],
+      batchCode: "BMJB"
+    });
+    expect(parseFollowBoardPublicationSubject(
+      "0730 deal-2~4 PBZB, PBZC, PBZD BMJB跟單"
+    )).toEqual({
+      subjectDateMmdd: "0730",
+      dealSequence: 2,
+      dealSequenceEnd: 4,
+      productCode: "PBZB",
+      productCodes: ["PBZB", "PBZC", "PBZD"],
+      batchCode: "BMJB"
+    });
+    expect(parseFollowBoardPublicationSubject(
+      "0728 deal2~4 PBZB, PBZC, PBZD, BMJB跟單"
+    )).toEqual({
+      subjectDateMmdd: "0728",
+      dealSequence: 2,
+      dealSequenceEnd: 4,
+      productCode: "PBZB",
+      productCodes: ["PBZB", "PBZC", "PBZD"],
       batchCode: "BMJB"
     });
     expect(parseFollowBoardPublicationSubject("0231 deal-1 PBXX BMJB跟單")).toBeNull();
     expect(parseFollowBoardPublicationSubject("0730 deal-21 PBXX BMJB跟單")).toBeNull();
+    expect(parseFollowBoardPublicationSubject(
+      "0730 deal-2~4 PBZB, PBZC BMJB跟單"
+    )).toBeNull();
+    expect(parseFollowBoardPublicationSubject(
+      "0730 deal-2~4 PBZB, PBZB, PBZD BMJB跟單"
+    )).toBeNull();
   });
 
   it("fails closed when one publication email contains conflicting issuer table signatures", () => {
@@ -255,28 +285,118 @@ describe("follow board", () => {
         })
       ]
     };
-    expect(selectFollowBoardPublicationRow(
+    expect(selectFollowBoardPublicationRows(
       [...BARCLAYS_PUBLICATION_TABLES, bnpTable],
       1
     )).toMatchObject({
-      row: null,
+      rows: [],
       errorCode: "FOLLOW_BOARD_ISSUER_TABLE_AMBIGUOUS"
     });
   });
 
-  it("fails closed when one publication email contains multiple quote tables for the same issuer", () => {
-    expect(selectFollowBoardPublicationRow(
+  it("ignores deal sequence, duplicate quote copies and the forwarded request table", () => {
+    const forwardedRequest = {
+      index: 4,
+      rows: [
+        [
+          "Product", "Currency", "Guaranteed Periods (m)", "BBG Code 1", "BBG Code 2",
+          "BBG Code 3", "BBG Code 4", "BBG Code 5", "Strike (%)", "KO Type",
+          "KO Barrier (%)", "Coupon p.a. (%)", "Upfront / NotePrice (%)", "Tenor (m)",
+          "Barrier Type", "KI Barrier (%)", "Observation Frequency (m)", "OTC",
+          "Effective Date Offset (Calendar Days)", "Trade Date"
+        ],
+        cells(20, {
+          0: "FCN", 1: "USD", 2: 1, 3: "AAPL UW", 4: "MSFT UW",
+          8: 85, 9: "Daily Memory", 10: 100, 11: 18.88,
+          13: 6, 14: "EKI", 15: 70, 16: 1, 17: "Note", 18: 7
+        })
+      ]
+    };
+    expect(selectFollowBoardPublicationRows(
       [
         ...BARCLAYS_PUBLICATION_TABLES,
         {
           index: 1,
           rows: BARCLAYS_PUBLICATION_TABLES[0]?.rows ?? []
-        }
+        },
+        forwardedRequest
       ],
       1
     )).toMatchObject({
-      row: null,
-      errorCode: "FOLLOW_BOARD_MULTIPLE_QUOTE_TABLES"
+      rows: [{
+        issuer: "BARCLAYS", couponPaPct: 18.88, sourceTableIndex: 0
+      }],
+      errorCode: null
+    });
+  });
+
+  it("fails closed when one publication email contains different complete quotes", () => {
+    const secondQuote = {
+      index: 1,
+      rows: [
+        BARCLAYS_PUBLICATION_TABLES[0]?.rows[0] ?? [],
+        cells(25, {
+          0: "FCN", 1: "USD", 2: 1, 3: "AAPL UW", 4: "MSFT UW",
+          8: 85, 9: "Daily Memory", 10: 100, 11: 19.25, 12: 98,
+          13: 6, 14: "EKI", 15: 70, 16: 1, 17: "Note", 18: 7,
+          19: 10_000_000, 24: "BARCLAYS-EXTERNAL-2"
+        })
+      ]
+    };
+    expect(selectFollowBoardPublicationRows(
+      [...BARCLAYS_PUBLICATION_TABLES, secondQuote],
+      1
+    )).toMatchObject({
+      rows: [],
+      errorCode: "FOLLOW_BOARD_MULTIPLE_COMPLETE_QUOTES"
+    });
+  });
+
+  it("selects the matching front publication table ahead of a larger forwarded BNP table", () => {
+    const selectedHeaders = [
+      "Client Ref", "Product", "Currency", "Guaranteed Periods (m)",
+      "BBG Code 1", "BBG Code 2", "BBG Code 3", "BBG Code 4", "BBG Code 5",
+      "Strike (%)", "KO Type", "KO Barrier (%)", "Coupon p.a. (%)",
+      "Upfront / NotePrice (%)", "Tenor (m)", "Barrier Type", "KI Barrier (%)",
+      "Observation Frequency (m)", "OTC", "Effective Date Offset(Calendar Days)",
+      "Trade Date", "Issue date", "Redemption Valuation Date", "Redemption date"
+    ];
+    const completedHeaders = [...selectedHeaders, "Remarks"];
+    const bnpQuote = (
+      reference: string,
+      currency: string,
+      firstUnderlying: string,
+      secondUnderlying: string,
+      coupon: number
+    ) => cells(25, {
+      0: reference, 1: "FCN", 2: currency, 3: 1,
+      4: firstUnderlying, 5: secondUnderlying,
+      9: 60, 10: "Daily Memory", 11: 100, 12: coupon, 13: 97.5,
+      14: 6, 15: "EKI", 16: 50, 17: 1, 18: "Note", 19: 7
+    });
+    const selectedRows = [
+      bnpQuote("BNP-PUBLISH-001", "JPY", "AAA UW", "BBB UW", 13.64),
+      bnpQuote("BNP-PUBLISH-002", "CNH", "CCC UW", "DDD UW", 6.89),
+      bnpQuote("BNP-PUBLISH-004", "USD", "EEE UW", "FFF UW", 13.49)
+    ];
+    const forwardedRows = [
+      ...selectedRows,
+      bnpQuote("BNP-HISTORY-003", "JPY", "GGG UW", "HHH UW", 7.04),
+      bnpQuote("BNP-HISTORY-005", "CNH", "III UW", "JJJ UW", 14.1),
+      bnpQuote("BNP-HISTORY-006", "USD", "KKK UW", "LLL UW", 15.54)
+    ];
+
+    expect(selectFollowBoardPublicationRows([
+      { index: 0, rows: [selectedHeaders, ...selectedRows] },
+      { index: 1, rows: [selectedHeaders, ...selectedRows] },
+      { index: 2, rows: [completedHeaders, ...forwardedRows] }
+    ], 3)).toMatchObject({
+      rows: [
+        { sourceTableIndex: 0, sourceRowIndex: 1, couponPaPct: 13.64 },
+        { sourceTableIndex: 0, sourceRowIndex: 2, couponPaPct: 6.89 },
+        { sourceTableIndex: 0, sourceRowIndex: 3, couponPaPct: 13.49 }
+      ],
+      errorCode: null
     });
   });
 
@@ -305,6 +425,8 @@ describe("follow board", () => {
       tradeDate: "30-Jul-26",
       estimatedYieldLabel: "預估年化配息率，非保證收益"
     });
+    expect(snapshot).not.toHaveProperty("sequence");
+    expect(snapshot).not.toHaveProperty("tradeCode");
     expect(JSON.stringify(snapshot)).not.toContain(RFQ_ID);
     const command = await testEnv.DB.prepare(
       "SELECT status FROM follow_board_publication_commands WHERE inbound_message_id = ?"
@@ -339,7 +461,9 @@ describe("follow board", () => {
       command: {
         subjectDateMmdd: "0730",
         dealSequence: 1,
+        dealSequenceEnd: 1,
         productCode: "PBZY",
+        productCodes: ["PBZY"],
         batchCode: "BMJB"
       },
       normalizedSubject: "0730 deal-1 PBZY BMJB跟單",
@@ -440,5 +564,211 @@ describe("follow board", () => {
       "SELECT status FROM follow_board_products WHERE product_code = 'PBZY'"
     ).first<{ status: string }>();
     expect(row?.status).toBe("ARCHIVED");
+  });
+
+  it("publishes one email with multiple completed quotes atomically in listed code order", async () => {
+    const now = new Date().toISOString();
+    const inboundMessageId = "inm_63000000-0000-4000-8000-000000000016";
+    const parseJobId = "job_63000000-0000-4000-8000-000000000017";
+    const headers = BARCLAYS_PUBLICATION_TABLES[0]?.rows[0] ?? [];
+    const quoteRows = [
+      cells(25, {
+        0: "FCN", 1: "USD", 2: 1, 3: "AAPL UW", 4: "MSFT UW",
+        8: 85, 9: "Daily Memory", 10: 100, 11: 18.1, 12: 98,
+        13: 6, 14: "EKI", 15: 70, 16: 1, 17: "Note", 18: 7,
+        19: 10_000_000, 24: "BARCLAYS-MULTI-1"
+      }),
+      cells(25, {
+        0: "FCN", 1: "USD", 2: 1, 3: "NVDA UW", 4: "TSM UN",
+        8: 80, 9: "Daily Memory", 10: 100, 11: 19.2, 12: 98,
+        13: 6, 14: "EKI", 15: 65, 16: 1, 17: "Note", 18: 7,
+        19: 10_000_000, 24: "BARCLAYS-MULTI-2"
+      }),
+      cells(25, {
+        0: "FCN", 1: "USD", 2: 1, 3: "AMD UW", 4: "AVGO UW",
+        8: 75, 9: "Daily Memory", 10: 100, 11: 20.3, 12: 98,
+        13: 6, 14: "EKI", 15: 60, 16: 1, 17: "Note", 18: 7,
+        19: 10_000_000, 24: "BARCLAYS-MULTI-3"
+      })
+    ];
+    const completedTable = { index: 10, rows: [headers, ...quoteRows] };
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO inbound_messages
+          (id, r2_raw_mime_key, message_id, content_hash, envelope_from, envelope_to,
+           header_from, return_path, raw_subject, in_reply_to, authentication_results,
+           raw_size_bytes, received_at, status)
+         VALUES (?, 'raw-email/board-multi.eml', '<board-multi@example.invalid>',
+                 'board-multi-hash', 'i14053@firstbank.com.tw', 'rfq@yintsun66.com',
+                 'Publisher <i14053@firstbank.com.tw>', '<i14053@firstbank.com.tw>',
+                 '0730 deal-2~4 PBZB, PBZC, PBZD BMJB跟單',
+                 '<board-multi-source@example.invalid>',
+                 'mx; dkim=pass header.d=firstbank.com.tw', 100, ?, 'PARSING')`
+      ).bind(inboundMessageId, now),
+      testEnv.DB.prepare(
+        `INSERT INTO email_parse_jobs
+          (id, inbound_message_id, idempotency_key, status, available_at, created_at, updated_at)
+         VALUES (?, ?, 'FOLLOW-BOARD-MULTI', 'RUNNING', ?, ?, ?)`
+      ).bind(parseJobId, inboundMessageId, now, now, now)
+    ]);
+
+    await processFollowBoardPublicationEmail(testEnv, {
+      command: {
+        subjectDateMmdd: "0730",
+        dealSequence: 2,
+        dealSequenceEnd: 4,
+        productCode: "PBZB",
+        productCodes: ["PBZB", "PBZC", "PBZD"],
+        batchCode: "BMJB"
+      },
+      normalizedSubject: "0730 deal-2~4 PBZB, PBZC, PBZD BMJB跟單",
+      inboundMessageId,
+      parseJobId,
+      email: {
+        from: { name: "Publisher", address: "i14053@firstbank.com.tw" },
+        attachments: []
+      } as never,
+      envelopeFrom: "i14053@firstbank.com.tw",
+      headerFrom: "Publisher <i14053@firstbank.com.tw>",
+      returnPath: "<i14053@firstbank.com.tw>",
+      authenticationResults: "mx; dkim=pass header.d=firstbank.com.tw",
+      correlation: null,
+      correlationEvidenceConflict: false,
+      correlationEvidenceBatchCode: "BMJB",
+      sourceReferenceHash: "external-multi-thread-reference-hash",
+      tables: [
+        completedTable,
+        { index: 11, rows: [headers, ...quoteRows] }
+      ],
+      parsedTablesKey: "parsed-email/v1/board-multi.json",
+      tableWarnings: [],
+      attachmentCount: 0
+    });
+
+    const products = await testEnv.DB.prepare(
+      `SELECT product_code, deal_sequence, estimated_yield_pct, source_inbound_message_id
+         FROM follow_board_products
+        WHERE product_code IN ('PBZB', 'PBZC', 'PBZD')
+        ORDER BY deal_sequence`
+    ).all<{
+      product_code: string;
+      deal_sequence: number;
+      estimated_yield_pct: number;
+      source_inbound_message_id: string;
+    }>();
+    expect(products.results).toEqual([
+      {
+        product_code: "PBZB", deal_sequence: 2, estimated_yield_pct: 18.1,
+        source_inbound_message_id: inboundMessageId
+      },
+      {
+        product_code: "PBZC", deal_sequence: 3, estimated_yield_pct: 19.2,
+        source_inbound_message_id: inboundMessageId
+      },
+      {
+        product_code: "PBZD", deal_sequence: 4, estimated_yield_pct: 20.3,
+        source_inbound_message_id: inboundMessageId
+      }
+    ]);
+
+    const command = await testEnv.DB.prepare(
+      `SELECT id, product_code, deal_sequence, deal_sequence_end, product_codes_json, status
+         FROM follow_board_publication_commands
+        WHERE inbound_message_id = ?`
+    ).bind(inboundMessageId).first<{
+      id: string;
+      product_code: string;
+      deal_sequence: number;
+      deal_sequence_end: number;
+      product_codes_json: string;
+      status: string;
+    }>();
+    expect(command).toMatchObject({
+      product_code: "PBZB",
+      deal_sequence: 2,
+      deal_sequence_end: 4,
+      status: "PUBLISHED"
+    });
+    expect(JSON.parse(command?.product_codes_json ?? "[]")).toEqual(["PBZB", "PBZC", "PBZD"]);
+
+    const items = await testEnv.DB.prepare(
+      `SELECT item_ordinal, product_code
+         FROM follow_board_publication_items
+        WHERE command_id = ?
+        ORDER BY item_ordinal`
+    ).bind(command?.id ?? "").all<{ item_ordinal: number; product_code: string }>();
+    expect(items.results).toEqual([
+      { item_ordinal: 1, product_code: "PBZB" },
+      { item_ordinal: 2, product_code: "PBZC" },
+      { item_ordinal: 3, product_code: "PBZD" }
+    ]);
+  });
+
+  it("publishes none of a multi-product command when any product code already exists", async () => {
+    const now = new Date().toISOString();
+    const inboundMessageId = "inm_63000000-0000-4000-8000-000000000018";
+    const parseJobId = "job_63000000-0000-4000-8000-000000000019";
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO inbound_messages
+          (id, r2_raw_mime_key, message_id, content_hash, envelope_from, envelope_to,
+           header_from, return_path, raw_subject, in_reply_to, authentication_results,
+           raw_size_bytes, received_at, status)
+         VALUES (?, 'raw-email/board-multi-duplicate.eml',
+                 '<board-multi-duplicate@example.invalid>', 'board-multi-duplicate-hash',
+                 'i14053@firstbank.com.tw', 'rfq@yintsun66.com',
+                 'Publisher <i14053@firstbank.com.tw>', '<i14053@firstbank.com.tw>',
+                 '0730 deal-1~2 PBZY, PBEA BMJB跟單',
+                 '<board-multi-duplicate-source@example.invalid>',
+                 'mx; dkim=pass header.d=firstbank.com.tw', 100, ?, 'PARSING')`
+      ).bind(inboundMessageId, now),
+      testEnv.DB.prepare(
+        `INSERT INTO email_parse_jobs
+          (id, inbound_message_id, idempotency_key, status, available_at, created_at, updated_at)
+         VALUES (?, ?, 'FOLLOW-BOARD-MULTI-DUPLICATE', 'RUNNING', ?, ?, ?)`
+      ).bind(parseJobId, inboundMessageId, now, now, now)
+    ]);
+
+    await processFollowBoardPublicationEmail(testEnv, {
+      command: {
+        subjectDateMmdd: "0730",
+        dealSequence: 1,
+        dealSequenceEnd: 2,
+        productCode: "PBZY",
+        productCodes: ["PBZY", "PBEA"],
+        batchCode: "BMJB"
+      },
+      normalizedSubject: "0730 deal-1~2 PBZY, PBEA BMJB跟單",
+      inboundMessageId,
+      parseJobId,
+      email: {
+        from: { name: "Publisher", address: "i14053@firstbank.com.tw" },
+        attachments: []
+      } as never,
+      envelopeFrom: "i14053@firstbank.com.tw",
+      headerFrom: "Publisher <i14053@firstbank.com.tw>",
+      returnPath: "<i14053@firstbank.com.tw>",
+      authenticationResults: "mx; dkim=pass header.d=firstbank.com.tw",
+      correlation: null,
+      correlationEvidenceConflict: false,
+      correlationEvidenceBatchCode: "BMJB",
+      sourceReferenceHash: "external-multi-duplicate-reference-hash",
+      tables: BARCLAYS_PUBLICATION_TABLES,
+      parsedTablesKey: "parsed-email/v1/board-multi-duplicate.json",
+      tableWarnings: [],
+      attachmentCount: 0
+    });
+
+    const inbound = await testEnv.DB.prepare(
+      "SELECT status, last_error_code FROM inbound_messages WHERE id = ?"
+    ).bind(inboundMessageId).first<{ status: string; last_error_code: string }>();
+    expect(inbound).toEqual({
+      status: "MANUAL_REVIEW",
+      last_error_code: "FOLLOW_BOARD_PRODUCT_CODE_EXISTS"
+    });
+    const unpublished = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS count FROM follow_board_products WHERE product_code = 'PBEA'"
+    ).first<{ count: number }>();
+    expect(Number(unpublished?.count ?? 0)).toBe(0);
   });
 });

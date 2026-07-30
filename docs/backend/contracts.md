@@ -574,7 +574,10 @@ Publication email contract:
 - accepts only the approved First Bank publisher addresses with aligned DKIM/SPF evidence;
 - requires reply-thread evidence or an opaque correlation token;
 - recognizes exactly one issuer from distinctive HTML-table headers;
-- applies the existing issuer parser to the `deal-N` row;
+- applies the existing issuer parser to unique complete rows from one issuer profile; `deal-N` is
+  audit/count metadata and never selects a row;
+- for multiple products, selects an unambiguous table-local candidate with the exact product-code
+  count before considering message-wide unique rows;
 - treats BATCH only as an issuer/table consistency check, never as a ranking lookup; and
 - rejects ambiguous, missing, incomplete, rejected or mismatched table rows into manual review.
 

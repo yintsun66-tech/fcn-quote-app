@@ -30,15 +30,29 @@ Example:
 0730 deal-1 PBZY BMJB跟單
 ```
 
+Multiple completed deals from one issuer table:
+
+```text
+0728 deal2~4 PBZB, PBZC, PBZD, BMJB跟單
+```
+
 Rules:
 
-- `deal-N` is 1–20 and selects that RFQ trade sequence.
+- `deal-N` remains 1–20 for subject compatibility and audit only; it does not select a quote.
+- For multiple products, the inclusive `deal-START~END` range length must equal the number of
+  comma-separated product codes. The range is an audit/count check and does not select rows.
+- A hyphen after `deal` and the comma immediately before `BATCH` are both optional for compatibility.
 - `PRODUCTCODE` is 4–12 uppercase letters/digits and is case-insensitively unique.
 - `BATCH` is `BMJB`, `NOMURA`, `UBS`, `DBS`, `SG`, `CITI`, `GS` or `CA`.
 - The issuer is recognized only from distinctive table headers. BATCH is a consistency check and
   never selects an RFQ ranking.
-- `deal-N` selects the Nth parsed quote row from that uniquely recognized issuer table.
-- The selected row must be complete, non-rejected and have a finite Coupon. Its Coupon becomes
+- Incomplete and rejected rows are excluded. Repeated identical completed quote rows are collapsed.
+- Product codes map in list order to the unique completed quote rows in their first table/row
+  order. When a forwarded thread also contains a larger historical quote table, a table-local
+  candidate with exactly the requested count takes precedence. Identical candidate copies collapse;
+  different same-sized candidates remain manual review. The counts must match exactly, and the
+  whole command fails if any code already exists.
+- Every selected quote must have a finite Coupon. Its Coupon becomes
   「預估年化配息率，非保證收益」.
 - Quotes from other inquiry channels are accepted when the approved publisher preserves unique
   reply-thread or opaque-token evidence.
@@ -75,7 +89,8 @@ Check, in order:
 3. whether reply-thread or opaque-token evidence exists and is conflict-free;
 4. the extracted HTML table headers and detected parser profile;
 5. whether more than one issuer signature was found;
-6. whether `deal-N` exists and contains complete, non-rejected terms with a finite Coupon;
+6. whether the unique complete, non-rejected quote count matches the product-code count after
+   duplicate copies are collapsed;
 7. whether the table issuer is consistent with BATCH; and
 8. whether the product code already exists.
 

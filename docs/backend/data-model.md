@@ -396,7 +396,7 @@ Before creating the first migration, Phase 2 must provide:
 - review of password and employee-number protection
 - explicit user approval
 
-## Follow-board tables (migration 0013)
+## Follow-board tables (migrations 0013–0014)
 
 ### `follow_board_products`
 
@@ -405,11 +405,22 @@ source message, hashed thread/token evidence, detected parser profile and source
 remain server-side. Optional RFQ/batch foreign keys are populated only when the reply belongs to
 this system; external-channel quotes do not require a ranking or quote foreign key. Lifecycle is
 `PUBLISHED -> ARCHIVED`; source and audit evidence are never deleted by the public workflow.
+Migration `0014` permits several product snapshots to reference one inbound message while keeping
+each case-insensitive product code unique.
 
 ### `follow_board_publication_commands`
 
 One idempotent result per inbound publication-command message. It records only the parsed command,
-approved publisher address, outcome and safe error code.
+approved publisher address, outcome and safe error code. Migration `0014` adds the inclusive
+sequence end and ordered product-code JSON snapshot. Legacy single-product columns retain the
+first item for compatibility.
+
+### `follow_board_publication_items`
+
+Ordered links from one publication command to one or more published products. Each product belongs
+to exactly one command item. `item_ordinal` preserves product-code/list order and
+`source_row_index` preserves safe parsing evidence. Migration `0014` backfills one item for every
+legacy published command.
 
 ### `follow_board_interests`
 

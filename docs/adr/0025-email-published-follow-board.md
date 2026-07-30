@@ -27,9 +27,9 @@ Deal documents prove eligibility but are not published.
 3. A command must carry unique source evidence through reply headers or an opaque token. Internal
    RFQ correlation is retained when available but is not required, because the completed quote may
    come from another inquiry channel.
-4. Distinctive table headers determine the issuer. The existing issuer profile parses the
-   requested `deal-N` row. BATCH validates consistency only; it must never select a quote from an
-   RFQ ranking.
+4. Distinctive table headers determine the issuer. BATCH validates consistency only; it must
+   never select a quote from an RFQ ranking. ADR 0026 replaces the original `deal-N` row-selection
+   rule with unique-complete-quote selection.
 5. A case-insensitive product code is unique. Duplicate codes, multiple issuer signatures,
    unrecognized layouts, missing/incomplete/rejected rows or table/BATCH mismatches become manual
    review and never guess a product.

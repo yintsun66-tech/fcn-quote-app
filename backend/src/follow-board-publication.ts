@@ -6,7 +6,7 @@ import {
 } from "./issuer-profiles";
 import type { AppEnv, MailBatchCode } from "./types";
 
-export const FOLLOW_BOARD_PUBLICATION_VERSION = "follow-board-publication-v2";
+export const FOLLOW_BOARD_PUBLICATION_VERSION = "follow-board-publication-v5";
 
 const AUTHORIZED_PUBLISHERS = new Set([
   "i14053@firstbank.com.tw",
@@ -31,7 +31,9 @@ const ISSUER_BATCH: Readonly<Record<string, MailBatchCode>> = Object.freeze({
 export interface FollowBoardPublicationCommand {
   subjectDateMmdd: string;
   dealSequence: number;
+  dealSequenceEnd: number;
   productCode: string;
+  productCodes: string[];
   batchCode: MailBatchCode;
 }
 
@@ -78,20 +80,33 @@ function validMmdd(value: string): boolean {
 }
 
 export function parseFollowBoardPublicationSubject(subject: string): FollowBoardPublicationCommand | null {
-  const withoutCorrelation = subject.replace(
+  const withoutCorrelation = subject.normalize("NFKC").replace(
     /\s*\[RFQ:[A-Za-z0-9_-]{10,128}\]\s*\[BATCH:(?:BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]\s*$/iu,
     ""
   ).trim();
-  const match = /^(\d{4})\s+deal-(\d{1,2})\s+([A-Z0-9]{4,12})\s+(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\s*跟單$/iu
+  const match = /^(\d{4})\s+deal-?(\d{1,2})(?:~(\d{1,2}))?\s+([A-Z0-9]{4,12}(?:\s*,\s*[A-Z0-9]{4,12})*)\s*,?\s+(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\s*跟單$/iu
     .exec(withoutCorrelation);
-  if (!match?.[1] || !match[2] || !match[3] || !match[4] || !validMmdd(match[1])) return null;
+  if (!match?.[1] || !match[2] || !match[4] || !match[5] || !validMmdd(match[1])) return null;
   const dealSequence = Number(match[2]);
-  if (!Number.isInteger(dealSequence) || dealSequence < 1 || dealSequence > 20) return null;
+  const dealSequenceEnd = match[3] ? Number(match[3]) : dealSequence;
+  const productCodes = match[4].split(",").map(code => code.trim().toUpperCase());
+  const expectedCount = dealSequenceEnd - dealSequence + 1;
+  if (!Number.isInteger(dealSequence)
+    || !Number.isInteger(dealSequenceEnd)
+    || dealSequence < 1
+    || dealSequenceEnd > 20
+    || expectedCount < 1
+    || productCodes.length !== expectedCount
+    || new Set(productCodes).size !== productCodes.length) {
+    return null;
+  }
   return {
     subjectDateMmdd: match[1],
     dealSequence,
-    productCode: match[3].toUpperCase(),
-    batchCode: match[4].toUpperCase() as MailBatchCode
+    dealSequenceEnd,
+    productCode: productCodes[0] ?? "",
+    productCodes,
+    batchCode: match[5].toUpperCase() as MailBatchCode
   };
 }
 
@@ -129,7 +144,7 @@ function trustedPublisher(input: PublicationInput): string | null {
 }
 
 interface PublicationTableSelection {
-  row: ParsedIssuerRow | null;
+  rows: ParsedIssuerRow[];
   errorCode: string | null;
 }
 
@@ -160,25 +175,105 @@ function validatePublicationRow(row: ParsedIssuerRow): string | null {
   return null;
 }
 
-export function selectFollowBoardPublicationRow(
+function publicationRowSignature(row: ParsedIssuerRow): string {
+  return JSON.stringify({
+    issuer: row.issuer,
+    parserProfile: row.parserProfile,
+    product: row.product,
+    currency: row.currency,
+    tenorMonths: row.tenorMonths,
+    guaranteedPeriodsMonths: row.guaranteedPeriodsMonths,
+    underlyings: row.underlyings,
+    strikePct: row.strikePct,
+    koType: row.koType,
+    koBarrierPct: row.koBarrierPct,
+    couponPaPct: row.couponPaPct,
+    rawPriceValue: row.rawPriceValue,
+    priceSemantics: row.priceSemantics,
+    comparablePricePct: row.comparablePricePct,
+    barrierType: row.barrierType,
+    kiBarrierPct: row.kiBarrierPct,
+    observationFrequencyMonths: row.observationFrequencyMonths,
+    otc: row.otc,
+    effectiveDateOffsetCalendarDays: row.effectiveDateOffsetCalendarDays,
+    quoteReference: row.quoteReference
+  });
+}
+
+function uniquePublicationRows(rows: readonly ParsedIssuerRow[]): ParsedIssuerRow[] {
+  const uniqueRows = new Map<string, ParsedIssuerRow>();
+  for (const row of rows) {
+    const signature = publicationRowSignature(row);
+    if (!uniqueRows.has(signature)) uniqueRows.set(signature, row);
+  }
+  return [...uniqueRows.values()];
+}
+
+function publicationRowListSignature(rows: readonly ParsedIssuerRow[]): string {
+  return JSON.stringify(rows.map(publicationRowSignature));
+}
+
+export function selectFollowBoardPublicationRows(
   tables: Array<{ index: number; rows: string[][] }>,
-  dealSequence: number
+  expectedCount: number
 ): PublicationTableSelection {
   const profiles = detectIssuerTableProfiles({ tables });
   if (profiles.length === 0) {
-    return { row: null, errorCode: "FOLLOW_BOARD_ISSUER_TABLE_NOT_RECOGNIZED" };
+    return { rows: [], errorCode: "FOLLOW_BOARD_ISSUER_TABLE_NOT_RECOGNIZED" };
   }
   if (profiles.length > 1) {
-    return { row: null, errorCode: "FOLLOW_BOARD_ISSUER_TABLE_AMBIGUOUS" };
+    return { rows: [], errorCode: "FOLLOW_BOARD_ISSUER_TABLE_AMBIGUOUS" };
   }
-  if (profiles[0]?.tableIndexes.length !== 1) {
-    return { row: null, errorCode: "FOLLOW_BOARD_MULTIPLE_QUOTE_TABLES" };
+
+  const parsedRows = profiles[0]?.rows ?? [];
+  const validRows = parsedRows.filter(row => validatePublicationRow(row) === null);
+  if (validRows.length === 0) {
+    const errors = [...new Set(parsedRows.map(validatePublicationRow).filter(
+      (error): error is string => Boolean(error)
+    ))];
+    return {
+      rows: [],
+      errorCode: errors.length === 1
+        ? errors[0] ?? "FOLLOW_BOARD_COMPLETE_QUOTE_NOT_FOUND"
+        : "FOLLOW_BOARD_COMPLETE_QUOTE_NOT_FOUND"
+    };
   }
-  const recognizedTableIndex = profiles[0].tableIndexes[0];
-  const rows = profiles[0].rows.filter(row => row.sourceTableIndex === recognizedTableIndex);
-  const row = rows[dealSequence - 1] ?? null;
-  if (!row) return { row: null, errorCode: "FOLLOW_BOARD_DEAL_ROW_NOT_FOUND" };
-  return { row, errorCode: validatePublicationRow(row) };
+
+  const rowsByTable = new Map<number, ParsedIssuerRow[]>();
+  for (const row of validRows) {
+    const tableRows = rowsByTable.get(row.sourceTableIndex) ?? [];
+    tableRows.push(row);
+    rowsByTable.set(row.sourceTableIndex, tableRows);
+  }
+  const matchingTableCandidates = [...rowsByTable.entries()]
+    .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
+    .map(([, rows]) => uniquePublicationRows(rows))
+    .filter(rows => rows.length === expectedCount);
+  if (matchingTableCandidates.length > 0) {
+    const uniqueCandidates = new Map<string, ParsedIssuerRow[]>();
+    for (const rows of matchingTableCandidates) {
+      const signature = publicationRowListSignature(rows);
+      if (!uniqueCandidates.has(signature)) uniqueCandidates.set(signature, rows);
+    }
+    if (uniqueCandidates.size > 1) {
+      return { rows: [], errorCode: "FOLLOW_BOARD_MULTIPLE_COMPLETE_QUOTES" };
+    }
+    return {
+      rows: uniqueCandidates.values().next().value ?? [],
+      errorCode: null
+    };
+  }
+
+  const uniqueRows = uniquePublicationRows(validRows);
+  if (uniqueRows.length !== expectedCount) {
+    return {
+      rows: [],
+      errorCode: uniqueRows.length > expectedCount
+        ? "FOLLOW_BOARD_MULTIPLE_COMPLETE_QUOTES"
+        : "FOLLOW_BOARD_QUOTE_COUNT_MISMATCH"
+    };
+  }
+  return { rows: uniqueRows, errorCode: null };
 }
 
 function tradeDateFromSubject(subjectDateMmdd: string, publishedAt: string): string {
@@ -208,8 +303,9 @@ async function completeFailure(
     env.DB.prepare(
       `INSERT OR IGNORE INTO follow_board_publication_commands
         (id, inbound_message_id, product_id, sender_email, product_code, batch_code,
-         deal_sequence, subject_date_mmdd, status, error_code, processed_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
+         deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
+         status, error_code, processed_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       newId("fbc"),
       input.inboundMessageId,
@@ -217,6 +313,8 @@ async function completeFailure(
       input.command.productCode,
       input.command.batchCode,
       input.command.dealSequence,
+      input.command.dealSequenceEnd,
+      JSON.stringify(input.command.productCodes),
       input.command.subjectDateMmdd,
       failure.commandStatus,
       failure.errorCode,
@@ -263,9 +361,10 @@ async function completeFailure(
       `queue:${input.parseJobId}`,
       JSON.stringify({
         errorCode: failure.errorCode,
-        productCode: input.command.productCode,
+        productCodes: input.command.productCodes,
         batchCode: input.command.batchCode,
-        dealSequence: input.command.dealSequence
+        dealSequenceStart: input.command.dealSequence,
+        dealSequenceEnd: input.command.dealSequenceEnd
       }),
       processedAt
     )
@@ -311,10 +410,28 @@ export async function processFollowBoardPublicationEmail(
     });
     return;
   }
-  const duplicate = await env.DB.prepare(
-    "SELECT id FROM follow_board_products WHERE product_code = ? COLLATE NOCASE"
-  ).bind(input.command.productCode).first<{ id: string }>();
-  if (duplicate) {
+  const expectedProductCount = input.command.dealSequenceEnd - input.command.dealSequence + 1;
+  if (input.command.dealSequence < 1
+    || input.command.dealSequenceEnd > 20
+    || expectedProductCount < 1
+    || input.command.productCodes.length !== expectedProductCount
+    || input.command.productCode !== input.command.productCodes[0]
+    || input.command.productCodes.some(code => !/^[A-Z0-9]{4,12}$/u.test(code))
+    || new Set(input.command.productCodes).size !== input.command.productCodes.length) {
+    await completeFailure(env, input, publisher, {
+      inboundStatus: "MANUAL_REVIEW",
+      commandStatus: "MANUAL_REVIEW",
+      errorCode: "FOLLOW_BOARD_COMMAND_COUNT_MISMATCH"
+    });
+    return;
+  }
+  const duplicatePlaceholders = input.command.productCodes.map(() => "?").join(", ");
+  const duplicates = await env.DB.prepare(
+    `SELECT product_code
+       FROM follow_board_products
+      WHERE product_code COLLATE NOCASE IN (${duplicatePlaceholders})`
+  ).bind(...input.command.productCodes).all<{ product_code: string }>();
+  if (duplicates.results.length > 0) {
     await completeFailure(env, input, publisher, {
       inboundStatus: "MANUAL_REVIEW",
       commandStatus: "MANUAL_REVIEW",
@@ -322,8 +439,11 @@ export async function processFollowBoardPublicationEmail(
     });
     return;
   }
-  const selection = selectFollowBoardPublicationRow(input.tables, input.command.dealSequence);
-  if (!selection.row || selection.errorCode) {
+  const selection = selectFollowBoardPublicationRows(
+    input.tables,
+    input.command.productCodes.length
+  );
+  if (selection.rows.length === 0 || selection.errorCode) {
     await completeFailure(env, input, publisher, {
       inboundStatus: "MANUAL_REVIEW",
       commandStatus: "MANUAL_REVIEW",
@@ -331,8 +451,7 @@ export async function processFollowBoardPublicationEmail(
     });
     return;
   }
-  const quote = selection.row;
-  if (ISSUER_BATCH[quote.issuer] !== input.command.batchCode) {
+  if (selection.rows.some(quote => ISSUER_BATCH[quote.issuer] !== input.command.batchCode)) {
     await completeFailure(env, input, publisher, {
       inboundStatus: "MANUAL_REVIEW",
       commandStatus: "MANUAL_REVIEW",
@@ -343,30 +462,48 @@ export async function processFollowBoardPublicationEmail(
 
   const publishedAt = nowIso();
   const tradeDate = tradeDateFromSubject(input.command.subjectDateMmdd, publishedAt);
-  const productId = newId("fbp");
-  const snapshot = {
-    schemaVersion: 1,
-    productCode: input.command.productCode,
-    sequence: input.command.dealSequence,
-    tradeCode: `T${String(input.command.dealSequence).padStart(2, "0")}`,
-    product: quote.product,
-    currency: quote.currency,
-    issuer: quote.issuer,
-    issuerDisplayName: quote.issuerDisplayName,
-    tradeDate,
-    tenorMonths: quote.tenorMonths,
-    guaranteedPeriodsMonths: quote.guaranteedPeriodsMonths,
-    underlyings: quote.underlyings.slice(0, 6),
-    couponPaPct: quote.couponPaPct,
-    strikePct: quote.strikePct,
-    koBarrierPct: quote.koBarrierPct,
-    koType: quote.koType,
-    barrierType: quote.barrierType,
-    kiBarrierPct: quote.kiBarrierPct,
-    comparablePricePct: quote.comparablePricePct,
-    estimatedYieldLabel: "預估年化配息率，非保證收益"
-  };
-  await env.DB.batch([
+  const commandId = newId("fbc");
+  const publications = selection.rows.map((quote, index) => {
+    const productCode = input.command.productCodes[index] ?? "";
+    const productId = newId("fbp");
+    const dealSequence = input.command.dealSequence + index;
+    return {
+      quote,
+      productCode,
+      productId,
+      dealSequence,
+      snapshot: {
+        schemaVersion: 1,
+        productCode,
+        product: quote.product,
+        currency: quote.currency,
+        issuer: quote.issuer,
+        issuerDisplayName: quote.issuerDisplayName,
+        tradeDate,
+        tenorMonths: quote.tenorMonths,
+        guaranteedPeriodsMonths: quote.guaranteedPeriodsMonths,
+        underlyings: quote.underlyings.slice(0, 6),
+        couponPaPct: quote.couponPaPct,
+        strikePct: quote.strikePct,
+        koBarrierPct: quote.koBarrierPct,
+        koType: quote.koType,
+        barrierType: quote.barrierType,
+        kiBarrierPct: quote.kiBarrierPct,
+        comparablePricePct: quote.comparablePricePct,
+        estimatedYieldLabel: "預估年化配息率，非保證收益"
+      }
+    };
+  });
+  const firstPublication = publications[0];
+  if (!firstPublication) {
+    await completeFailure(env, input, publisher, {
+      inboundStatus: "MANUAL_REVIEW",
+      commandStatus: "MANUAL_REVIEW",
+      errorCode: "FOLLOW_BOARD_COMPLETE_QUOTE_NOT_FOUND"
+    });
+    return;
+  }
+  const productStatements = publications.map(publication =>
     env.DB.prepare(
       `INSERT INTO follow_board_products
         (id, product_code, status, source_rfq_id, source_outbound_batch_id,
@@ -378,43 +515,90 @@ export async function processFollowBoardPublicationEmail(
        VALUES (?, ?, 'PUBLISHED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                NULL, NULL, ?, ?)`
     ).bind(
-      productId,
-      input.command.productCode,
+      publication.productId,
+      publication.productCode,
       input.correlation?.rfqId ?? null,
       input.correlation?.batchId ?? null,
       input.inboundMessageId,
       input.sourceReferenceHash,
-      quote.parserProfile,
-      quote.sourceTableIndex,
-      quote.sourceRowIndex,
+      publication.quote.parserProfile,
+      publication.quote.sourceTableIndex,
+      publication.quote.sourceRowIndex,
       input.command.batchCode,
-      input.command.dealSequence,
+      publication.dealSequence,
       input.command.subjectDateMmdd,
-      quote.issuer,
+      publication.quote.issuer,
       tradeDate,
-      quote.couponPaPct,
-      JSON.stringify(snapshot),
+      publication.quote.couponPaPct,
+      JSON.stringify(publication.snapshot),
       publisher,
       publishedAt,
       publishedAt,
       publishedAt
-    ),
+    )
+  );
+  const itemStatements = publications.map((publication, index) =>
+    env.DB.prepare(
+      `INSERT INTO follow_board_publication_items
+        (id, command_id, product_id, item_ordinal, product_code, source_row_index, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      newId("fbpi"),
+      commandId,
+      publication.productId,
+      index + 1,
+      publication.productCode,
+      publication.quote.sourceRowIndex,
+      publishedAt
+    )
+  );
+  const auditStatements = publications.map((publication, index) =>
+    env.DB.prepare(
+      `INSERT INTO audit_events
+        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+       VALUES (?, NULL, 'FOLLOW_BOARD_PRODUCT_PUBLISHED', 'FOLLOW_BOARD_PRODUCT', ?, ?, ?, ?)`
+    ).bind(
+      newId("aud"),
+      publication.productId,
+      `queue:${input.parseJobId}`,
+      JSON.stringify({
+        productCode: publication.productCode,
+        batchCode: input.command.batchCode,
+        dealSequence: publication.dealSequence,
+        itemOrdinal: index + 1,
+        itemCount: publications.length,
+        issuer: publication.quote.issuer,
+        parserProfile: publication.quote.parserProfile,
+        sourceTableIndex: publication.quote.sourceTableIndex,
+        sourceRowIndex: publication.quote.sourceRowIndex,
+        warningCodes: input.tableWarnings
+      }),
+      publishedAt
+    )
+  );
+  await env.DB.batch([
+    ...productStatements,
     env.DB.prepare(
       `INSERT INTO follow_board_publication_commands
         (id, inbound_message_id, product_id, sender_email, product_code, batch_code,
-         deal_sequence, subject_date_mmdd, status, error_code, processed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', NULL, ?)`
+         deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
+         status, error_code, processed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', NULL, ?)`
     ).bind(
-      newId("fbc"),
+      commandId,
       input.inboundMessageId,
-      productId,
+      firstPublication.productId,
       publisher,
       input.command.productCode,
       input.command.batchCode,
       input.command.dealSequence,
+      input.command.dealSequenceEnd,
+      JSON.stringify(input.command.productCodes),
       input.command.subjectDateMmdd,
       publishedAt
     ),
+    ...itemStatements,
+    ...auditStatements,
     env.DB.prepare(
       `UPDATE inbound_messages
           SET normalized_subject = ?, subject_batch_code = ?, sender_evidence_json = ?,
@@ -428,9 +612,13 @@ export async function processFollowBoardPublicationEmail(
       input.command.batchCode,
       JSON.stringify([
         { source: "FOLLOW_BOARD_PUBLISHER", address: publisher },
-        { source: "FOLLOW_BOARD_TABLE_PROFILE", issuer: quote.issuer, parserProfile: quote.parserProfile }
+        {
+          source: "FOLLOW_BOARD_TABLE_PROFILE",
+          issuer: firstPublication.quote.issuer,
+          parserProfile: firstPublication.quote.parserProfile
+        }
       ]),
-      quote.issuer,
+      firstPublication.quote.issuer,
       input.correlation?.rfqId ?? null,
       input.correlation?.batchId ?? null,
       input.correlation
@@ -449,26 +637,6 @@ export async function processFollowBoardPublicationEmail(
           SET status = 'COMPLETED', completed_at = ?, updated_at = ?,
               lease_expires_at = NULL, last_error_code = NULL
         WHERE id = ?`
-    ).bind(publishedAt, publishedAt, input.parseJobId),
-    env.DB.prepare(
-      `INSERT INTO audit_events
-        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
-       VALUES (?, NULL, 'FOLLOW_BOARD_PRODUCT_PUBLISHED', 'FOLLOW_BOARD_PRODUCT', ?, ?, ?, ?)`
-    ).bind(
-      newId("aud"),
-      productId,
-      `queue:${input.parseJobId}`,
-      JSON.stringify({
-        productCode: input.command.productCode,
-        batchCode: input.command.batchCode,
-        dealSequence: input.command.dealSequence,
-        issuer: quote.issuer,
-        parserProfile: quote.parserProfile,
-        sourceTableIndex: quote.sourceTableIndex,
-        sourceRowIndex: quote.sourceRowIndex,
-        warningCodes: input.tableWarnings
-      }),
-      publishedAt
-    )
+    ).bind(publishedAt, publishedAt, input.parseJobId)
   ]);
 }

@@ -292,9 +292,21 @@ thread or include an opaque token with a strict `MMDD deal-N PRODUCTCODE BATCH�
 Email Worker stores the raw MIME as usual; the parse consumer recognizes the command, validates
 aligned sender authentication and unique reply/token evidence, extracts the HTML tables, and
 identifies the issuer from distinctive headers such as `Client Ref`, `MS ID`, `Nomura ID`,
-`ISSUER PROD REF`, `Memory Autocall`, or `System Remark`. It then parses the requested `deal-N`
-row with the existing issuer profile. BATCH is only a consistency check and never selects a
-ranked quote. Multiple issuer signatures or incomplete rows are quarantined for manual review.
+`ISSUER PROD REF`, `Memory Autocall`, or `System Remark`. It parses rows with the existing issuer
+profile, excludes incomplete or rejected rows, and selects the one unique complete quote after
+collapsing identical forwarded copies. `deal-N` remains audit metadata and does not select a row.
+BATCH is only a consistency check and never selects a ranked quote. Multiple issuer signatures,
+different complete quotes or missing complete terms are quarantined for manual review.
+
+ADR 0027 and migration `0014` additionally support
+`MMDD deal-START~END CODE1, CODE2, ... BATCH跟單`. The range validates only the expected item
+count. Product codes map in list order to the same number of unique complete rows in their first
+source order. The observed no-hyphen/trailing-comma form
+`MMDD dealSTART~END CODE1, CODE2, ..., BATCH跟單` is also accepted. When the forwarded thread
+contains a front publication table plus a larger historical issuer table, the parser selects an
+unambiguous table-local candidate with the exact expected count; different same-sized candidates
+remain manual review. One command links to all products through
+`follow_board_publication_items`, and the entire D1 batch succeeds or fails atomically.
 
 The shared `follow-board.html` client requests a PIN-protected manifest, renders product cards and
 creates PNGs locally with the vendored html2canvas. Follow-board PNGs are not stored in R2. Public

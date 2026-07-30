@@ -73,10 +73,12 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.
-- ADR 0025 defines the follow-board boundary. Publication commands are accepted only from the
-  three approved First Bank mailboxes with aligned authentication and unique reply/token evidence.
-  The issuer and quote terms come only from a uniquely recognized issuer table profile and the
-  requested `deal-N` row; never select a follow-board product from an RFQ batch or ranking.
+- ADR 0025 through ADR 0027 define the follow-board boundary. Publication commands are accepted
+  only from the three approved First Bank mailboxes with aligned authentication and unique
+  reply/token evidence. The issuer and quote terms come only from one issuer table profile. Prefer
+  an unambiguous table-local candidate with the exact product-code count; use message-wide unique
+  complete rows only when no such table exists. `deal-N`/`deal-START~END` are audit/count metadata
+  and must never select a row, RFQ batch or ranking. Multi-product publication is atomic.
   Public snapshots must never expose RFQ/correlation/user data. Full follow-interest employee
   numbers stay encrypted and are ADMIN/PS-only; public rows remain masked. Follow-board PNGs are
   browser-rendered and are not written to R2.

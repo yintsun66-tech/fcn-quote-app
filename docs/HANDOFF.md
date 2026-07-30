@@ -8,6 +8,52 @@ Current production source: implementation commit `6d2f3b2`, currently served as 
 `c58e6ba9-844c-4121-91f7-d63ab639d4e7` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Pending local follow-board quote-selection and multi-product publication
+
+The current working tree contains an uncommitted, unpushed and undeployed correction for
+follow-board publication. Production diagnosis of product code `PBZK` proved that the authorized
+publisher mail reached the Worker and normalized successfully, but was quarantined with
+`FOLLOW_BOARD_MULTIPLE_QUOTE_TABLES`: the forwarded thread contained two identical completed
+Barclays quote tables, Barclays disclaimer/layout tables and the original request table.
+
+ADR 0026 changes `deal-N` to compatibility/audit metadata only. Publication version
+`follow-board-publication-v5` now excludes incomplete/rejected rows, collapses identical completed
+quote copies by canonical terms plus quote reference, and publishes only when exactly one unique
+complete quote remains. Different complete quotes and conflicting issuer signatures still fail
+closed for a single-product command. New public snapshots no longer copy `deal-N` into `sequence`
+or `tradeCode`.
+
+ADR 0027 and migration `0014_follow_board_multi_product_publication.sql` add the approved
+multi-product form. The observed mail uses
+`0728 deal2~4 PBZB, PBZC, PBZD, BMJB跟單`; the prior hyphen/no-trailing-comma form remains
+compatible. The inclusive range is audit/count metadata only. Product codes map in order to the
+same number of unique complete quote rows, and the whole command publishes atomically or fails
+without partial products. Migration `0014` safely
+rebuilds the three related follow-board tables, removes only the one-product-per-inbound-message
+constraint, preserves legacy products/interests/commands, extends the command audit snapshot and
+adds ordered `follow_board_publication_items`. There is no dependency, lockfile, binding, Secret,
+frontend manifest or public API change.
+
+The observed multi-product message contains two copies of the front three-row publication table
+followed by the original six-row BNP response. Version v5 first selects an unambiguous table-local
+candidate with the exact product-code count, collapses identical candidate copies, and does not mix
+the larger historical table into publication. Different same-sized candidates still fail closed.
+The real `.msg` remains outside the repository; only a synthetic anonymous regression structure is
+tracked.
+
+Verification on the combined local change: typecheck passed; the complete suite passed
+**22 files / 158 tests**; and the Wrangler dry-run build passed with 18 public assets. A migration
+regression test seeds legacy product, command and interest rows before applying `0014`, verifies
+they remain intact, verifies the ordered legacy item backfill and foreign keys, and proves two
+products can share one source message. The publication regression fixture reproduces the safe
+structure of the observed mail: duplicate completed Barclays tables plus a forwarded 20-column
+request table.
+
+The existing `PBZK` command remains `MANUAL_REVIEW`; deploying new code does not retroactively
+reprocess it. After explicit commit/push/deploy approval, send a new publication command with a
+unique product code or add a separately reviewed idempotent ADMIN reprocess operation. Apply
+migration `0014` before deploying `follow-board-publication-v5`. Do not edit D1 rows manually.
+
 ## Static follow-board network fallback (committed, pushed and deployed)
 
 A user confirmed that the same follow-board page loads from `app.yintsun66.com` while Edge reports

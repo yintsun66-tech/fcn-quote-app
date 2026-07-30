@@ -29,6 +29,12 @@
           <input id="viewPin" name="viewPin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required />
           <button type="submit">進入跟單專區</button>
           <p id="pinError" class="form-error" role="alert"></p>
+          <a
+            id="officialFollowBoardLink"
+            class="official-board-link"
+            href="https://app.yintsun66.com/follow-board.html"
+            hidden
+          >若無法連線，改用正式跟單頁</a>
         </form>
       </section>
 
@@ -121,6 +127,6 @@
     </main>
 
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./follow-board.mjs?v=follow-board-v1"></script>
+    <script type="module" src="./follow-board.mjs?v=follow-board-v2"></script>
   </body>
 </html>

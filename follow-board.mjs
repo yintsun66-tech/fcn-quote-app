@@ -1,5 +1,10 @@
-const API_ORIGIN = location.hostname === "app.yintsun66.com" ? "" : "https://app.yintsun66.com";
-const API_PREFIX = `${API_ORIGIN}/api/v1`;
+const OFFICIAL_FOLLOW_BOARD_URL = "https://app.yintsun66.com/follow-board.html";
+const API_ORIGINS = location.hostname === "app.yintsun66.com"
+  ? ["", "https://api.yintsun66.com"]
+  : location.hostname === "api.yintsun66.com"
+    ? ["", "https://app.yintsun66.com"]
+    : ["https://app.yintsun66.com", "https://api.yintsun66.com"];
+const IS_STATIC_SITE = location.hostname === "yintsun66-tech.github.io";
 const PIN_STORAGE_KEY = "fcn-follow-board-pin";
 const THEMES = {
   BNP: ["#008a4b", "#0875a8", "#e7f8ef"],
@@ -20,7 +25,7 @@ const elements = Object.fromEntries([
   "productGrid", "refreshBoard", "lockBoard", "interestPanel", "interestForm",
   "selectedProductCode", "interestCurrency", "interestStatus", "dailyInterestRows",
   "dailyTotal", "captureHost", "adminPanel", "adminDate", "refreshAdmin", "adminStatus",
-  "adminInterestRows"
+  "adminInterestRows", "officialFollowBoardLink"
 ].map(id => [id, document.getElementById(id)]));
 
 const state = {
@@ -44,11 +49,26 @@ async function publicRequest(path, options = {}) {
   const headers = new Headers(options.headers);
   headers.set("x-follow-board-pin", state.pin);
   if (options.body) headers.set("content-type", "application/json");
-  const response = await fetch(`${API_PREFIX}${path}`, { ...options, headers });
-  let payload = null;
-  try { payload = await response.json(); } catch { /* use fallback */ }
-  if (!response.ok) throw new Error(apiError(payload, `跟單專區載入失敗（${response.status}）。`));
-  return payload;
+  let lastNetworkError = null;
+  for (const origin of API_ORIGINS) {
+    try {
+      const response = await fetch(`${origin}/api/v1${path}`, { ...options, headers });
+      let payload = null;
+      try { payload = await response.json(); } catch { /* use fallback */ }
+      if (!response.ok) throw new Error(apiError(payload, `跟單專區載入失敗（${response.status}）。`));
+      return payload;
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      lastNetworkError = error;
+    }
+  }
+  const error = new Error(
+    IS_STATIC_SITE
+      ? "瀏覽器阻擋靜態網站連線，請改用下方的正式跟單頁。"
+      : "目前無法連線跟單服務，請確認網路後重新整理。"
+  );
+  error.cause = lastNetworkError;
+  throw error;
 }
 
 function themeStyle(issuer) {
@@ -373,6 +393,11 @@ elements.interestForm.addEventListener("submit", async event => {
 });
 
 elements.refreshAdmin.addEventListener("click", loadAdminInterests);
+
+if (IS_STATIC_SITE) {
+  elements.officialFollowBoardLink.href = OFFICIAL_FOLLOW_BOARD_URL;
+  elements.officialFollowBoardLink.hidden = false;
+}
 
 if (/^\d{4}$/.test(state.pin)) {
   unlock(state.pin).catch(() => {

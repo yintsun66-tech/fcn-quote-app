@@ -74,6 +74,14 @@ input {
 }
 input:focus { outline: 3px solid rgba(0, 138, 99, .18); border-color: var(--green); }
 .pin-gate button { width: 100%; margin-top: 16px; }
+.official-board-link {
+  display: block;
+  margin-top: 14px;
+  color: #0875a8;
+  font-weight: 800;
+  text-align: center;
+}
+.official-board-link[hidden] { display: none; }
 .form-error { min-height: 1.4em; color: #b42318; font-weight: 700; }
 .board-intro { margin: 34px 0 18px; }
 .board-intro h2, .section-heading h2 { margin: 4px 0 0; }

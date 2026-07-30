@@ -8,6 +8,17 @@ Current production source: implementation commit `4ede8e4`, currently served as 
 `a0361916-5522-4090-9135-91f6f86aae33` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Static follow-board network fallback (local, not committed/deployed)
+
+A user confirmed that the same follow-board page loads from `app.yintsun66.com` while Edge reports
+`Failed to fetch` from GitHub Pages. Remote D1 showed no corresponding PIN-validation attempt, and
+direct edge checks confirmed the Worker returns the expected CORS headers, so the failure occurs
+before the static browser request reaches the Worker. The local patch makes the static client try
+both `app.yintsun66.com` and `api.yintsun66.com`; if both cross-origin requests are blocked, it
+shows a precise message and a direct link to the working official follow-board. The PIN is never
+placed in a URL. `follow-board-v2` is used to invalidate the previous module cache. This patch
+still requires validation, commit, Cloudflare deployment and static repository sync.
+
 ## Follow-board implementation (committed, migrated and deployed)
 
 Branch `codex/market-analysis-phase2-4` adds ADR 0025 and D1 migration `0013` for a shared no-registration

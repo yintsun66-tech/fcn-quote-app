@@ -8,6 +8,31 @@ Current production source: implementation commit `061fe3b`, currently served as 
 `6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Legacy follow-board products never expired (fixed and deployed)
+
+Products stayed on the public board past their intended removal date. Diagnosis from production:
+`PBZK` (published 09:40) carried `expires_at` and archived correctly, while `PBZB`/`PBZD`/`PBZL`
+(published 08:11–08:14 the same day) had `expires_at` NULL and remained `PUBLISHED`.
+
+Recovering the original subjects via `inbound_messages.raw_subject` showed the cause: those three
+used the pre-ADR-0028 form `0730 Deal-03 PBZL BMJB跟單` — batch code, no issuer, **no removal date
+at all**. With nothing to parse, `expires_at` stayed NULL, and both the manifest query and the
+expiry job treat NULL as "never expires", so such a product stays public permanently.
+
+- `cleanupFollowBoardOperationalData` now backfills a NULL expiry from the product's stored
+  `subject_date_mmdd` before the existing expiry pass. That is the deal date, and ADR 0028's rule
+  is that a product stays available through its stated calendar date, so expiry becomes 00:00
+  Asia/Taipei the following day. The year comes from `published_at` and rolls back across a
+  December boundary. Only NULL expiries are written; a stored expiry is never rewritten.
+- Affected products then archive through the normal audited path, so **no manual D1 mutation was
+  required**.
+- Deployed as Worker `32637625-9b1d-48b9-a806-0f7c366ac723` from `15ff94c`. Verified in production
+  after the scheduled tick: `PBZB` and `PBZD` now hold `2026-07-28T16:00:00Z`, `PBZL` holds
+  `2026-07-30T16:00:00Z`, and all are `ARCHIVED`. No expired product remains on the board.
+- `PBZC` keeps a NULL expiry because it was already archived manually before this fix; the backfill
+  only touches `status = 'PUBLISHED'` rows and does not rewrite archived history.
+- Verification baseline is now **23 test files / 168 tests**.
+
 ## Scheduled retention implemented, disabled by default (ADR 0030)
 
 Retention was documented since the first backend build but **never implemented** — nothing deleted
@@ -52,9 +77,9 @@ Current evidence:
 
 - backend implementation baseline: `061fe3b`
 - documentation branch HEAD before this local documentation update: `9b39359`
-- production Worker version: `1742a8de-583b-43fd-b89d-174a1f0be576` (retention deployed disabled)
+- production Worker version: `32637625-9b1d-48b9-a806-0f7c366ac723` (retention deployed disabled)
 - remote migrations: `0001` through `0015`
-- backend verification baseline: 23 test files / 167 tests
+- backend verification baseline: 23 test files / 168 tests
 - static GitHub Pages baseline: `d787aeb`
 - read-only production D1 inspection found fresh SEC instrument and filing cache rows for three
   symbols

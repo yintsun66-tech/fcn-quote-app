@@ -100,7 +100,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 首頁「美股／日股熱門榜」（ADR 0024）在靜態版與 Cloudflare 版皆可使用；不需 API Key、
   不佔 Alpha Vantage 額度。五種排行以官網連結提供、美日皆可用；美股另內嵌即時熱門榜，
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
-- 目前驗證基線為 23 個測試檔、167 項測試；JavaScript 語法、TypeScript typecheck、
+- 目前驗證基線為 23 個測試檔、168 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。

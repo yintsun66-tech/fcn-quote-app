@@ -32,10 +32,10 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `8cff188` is documented by this handoff and
-  currently served by Worker `1742a8de-583b-43fd-b89d-174a1f0be576` on 2026-07-31. Resolve the
+- Production implementation commit `15ff94c` is documented by this handoff and
+  currently served by Worker `32637625-9b1d-48b9-a806-0f7c366ac723` on 2026-07-31. Resolve the
   current branch HEAD from Git rather than copying a historical handoff hash. The current
-  verification baseline is 23 test files / 167 tests. A deployment record is evidence of
+  verification baseline is 23 test files / 168 tests. A deployment record is evidence of
   Worker/static-asset publication, not evidence that real bank mail was delivered.
 - Retention (ADR 0030) is implemented but **disabled**: `RETENTION_ENABLED="0"`. Enabling it
   deletes production R2 objects and D1 rows irreversibly and requires explicit authorization. Run

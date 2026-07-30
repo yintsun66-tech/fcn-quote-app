@@ -27,6 +27,10 @@ days**.
      the run. The query now excludes all three paths (rfq, inbound message, outbound batch).
 - Verified: typecheck clean, **23 files / 167 tests**, dry-run build shows all four variables bound
   with `RETENTION_ENABLED ("0")`.
+- **Deployed disabled** as Worker `1742a8de-583b-43fd-b89d-174a1f0be576` on 2026-07-31 from
+  `8cff188`. The live deployment lists `RETENTION_ENABLED ("0")`, API health returned 200, and the
+  R2 baseline recorded immediately after the deploy was **1,778 objects / 123 MB** for comparison
+  across scheduled ticks.
 - **Not done:** no production deletion has occurred, and none will until the flag is enabled. Run
   `applyRetention(env, true)` (dry run) first to see the counts before enabling.
 
@@ -48,9 +52,9 @@ Current evidence:
 
 - backend implementation baseline: `061fe3b`
 - documentation branch HEAD before this local documentation update: `9b39359`
-- production Worker version: `6429a8bf-a735-47b4-a5ba-5fa3684ec282`
+- production Worker version: `1742a8de-583b-43fd-b89d-174a1f0be576` (retention deployed disabled)
 - remote migrations: `0001` through `0015`
-- backend verification baseline: 22 test files / 163 tests
+- backend verification baseline: 23 test files / 167 tests
 - static GitHub Pages baseline: `d787aeb`
 - read-only production D1 inspection found fresh SEC instrument and filing cache rows for three
   symbols

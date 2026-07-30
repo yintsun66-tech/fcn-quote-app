@@ -32,12 +32,15 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `061fe3b` is documented by this handoff and
-  currently served by Worker `6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Resolve the current
-  branch HEAD from Git rather than copying a historical handoff hash. The current verification
-  baseline is 22 test files / 163 tests. A deployment record is evidence of Worker/static-asset
-  publication, not evidence that Alpha Vantage returned usable data or that real bank mail was
-  delivered.
+- Production implementation commit `8cff188` is documented by this handoff and
+  currently served by Worker `1742a8de-583b-43fd-b89d-174a1f0be576` on 2026-07-31. Resolve the
+  current branch HEAD from Git rather than copying a historical handoff hash. The current
+  verification baseline is 23 test files / 167 tests. A deployment record is evidence of
+  Worker/static-asset publication, not evidence that real bank mail was delivered.
+- Retention (ADR 0030) is implemented but **disabled**: `RETENTION_ENABLED="0"`. Enabling it
+  deletes production R2 objects and D1 rows irreversibly and requires explicit authorization. Run
+  `applyRetention(env, true)` for a dry-run count first. Never clear
+  `inbound_messages.r2_raw_mime_key` — it is `NOT NULL` and doing so aborts every scheduled run.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
   program commit `d787aeb` mirrors the approved public asset set with ZAR, market hot lists,

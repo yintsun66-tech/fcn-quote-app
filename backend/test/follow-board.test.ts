@@ -8,6 +8,7 @@ import {
 import { beforeAll, describe, expect, it } from "vitest";
 import { encryptEmployeeNumber, keyedHash, sha256Text } from "../src/crypto";
 import {
+  calculateFollowBoardSalesFeePct,
   parseFollowBoardPublicationSubject,
   processFollowBoardPublicationEmail,
   selectFollowBoardPublicationRows
@@ -234,6 +235,27 @@ beforeAll(async () => {
 });
 
 describe("follow board", () => {
+  it("calculates sales fee from NotePrice and uses raw Upfront for CITI", () => {
+    expect(calculateFollowBoardSalesFeePct({
+      issuer: "BNP",
+      rawPriceValue: 97.19,
+      priceSemantics: "NOTE_PRICE",
+      comparablePricePct: 97.19
+    })).toBe(2.81);
+    expect(calculateFollowBoardSalesFeePct({
+      issuer: "CITI",
+      rawPriceValue: 2,
+      priceSemantics: "UPFRONT",
+      comparablePricePct: 98
+    })).toBe(2);
+    expect(calculateFollowBoardSalesFeePct({
+      issuer: "CITI",
+      rawPriceValue: null,
+      priceSemantics: "UPFRONT",
+      comparablePricePct: 98
+    })).toBe(2);
+  });
+
   it("accepts the exact publication command and rejects malformed commands", () => {
     expect(parseFollowBoardPublicationSubject("0730 deal-03 PBZL BNP跟單20260730")).toEqual({
       subjectDateMmdd: "0730",
@@ -470,6 +492,7 @@ describe("follow board", () => {
       couponPaPct: 18.88,
       tradeDate: "30-Jul-26",
       expiresAt: "2099-12-31T16:00:00.000Z",
+      salesFeePct: 2,
       estimatedYieldLabel: "預估年化配息率，非保證收益"
     });
     expect(snapshot).not.toHaveProperty("sequence");

@@ -182,6 +182,19 @@ function finite(value: number | null): value is number {
   return value !== null && Number.isFinite(value);
 }
 
+export function calculateFollowBoardSalesFeePct(
+  row: Pick<ParsedIssuerRow, "issuer" | "rawPriceValue" | "priceSemantics" | "comparablePricePct">
+): number | null {
+  const value = row.issuer === "CITI"
+    && row.priceSemantics === "UPFRONT"
+    && finite(row.rawPriceValue)
+    ? row.rawPriceValue
+    : finite(row.comparablePricePct)
+      ? 100 - row.comparablePricePct
+      : null;
+  return value === null ? null : Number(value.toFixed(4));
+}
+
 function validatePublicationRow(row: ParsedIssuerRow): string | null {
   if (row.rejectionReason) return "FOLLOW_BOARD_QUOTE_REJECTED";
   if (!finite(row.couponPaPct)) return "FOLLOW_BOARD_COUPON_NOT_AVAILABLE";
@@ -516,7 +529,7 @@ export async function processFollowBoardPublicationEmail(
       productId,
       dealSequence,
       snapshot: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         productCode,
         product: quote.product,
         currency: quote.currency,
@@ -534,6 +547,7 @@ export async function processFollowBoardPublicationEmail(
         barrierType: quote.barrierType,
         kiBarrierPct: quote.kiBarrierPct,
         comparablePricePct: quote.comparablePricePct,
+        salesFeePct: calculateFollowBoardSalesFeePct(quote),
         estimatedYieldLabel: "預估年化配息率，非保證收益"
       }
     };

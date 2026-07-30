@@ -318,6 +318,9 @@ remain manual review. One command links to all products through
 The shared `follow-board.html` client requests a PIN-protected manifest and renders the same full
 quote-card DOM used for PNG output. Its download action opens a dedicated preview tab, where the
 viewer explicitly creates the PNG locally with the vendored html2canvas. Follow-board PNGs are not
-stored in R2. Public
+stored in R2. ADR 0029 displays `手收` below the availability date: non-CITI profiles use
+`100 - comparablePricePct`, while CITI uses its raw Upfront. New snapshots persist the derived
+public-safe percentage; legacy snapshots use the economically equivalent comparable-price
+fallback. Public
 interest rows contain only masked employee numbers; authenticated ADMIN/PS requests can retrieve
 the encrypted full values through the dedicated support endpoint.

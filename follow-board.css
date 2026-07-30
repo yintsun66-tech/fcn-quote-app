@@ -108,6 +108,7 @@ input:focus { outline: 3px solid rgba(0, 138, 99, .18); border-color: var(--gree
 .product-card-frame .download-card { transform-origin: top left; }
 .product-tile-controls { max-width: 720px; margin: 0 auto; }
 .expiry-note { margin: 14px 0 0; color: var(--muted); font-weight: 800; }
+.sales-fee-note { margin: 6px 0 0; color: var(--theme-primary, #075985); font-size: 19px; font-weight: 900; }
 .tile-actions { display: flex; gap: 8px; margin-top: 18px; }
 .tile-actions button { flex: 1; }
 .product-preview-mode .daily-panel,

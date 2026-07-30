@@ -73,6 +73,10 @@ The board displays the same full quote-card DOM used by image generation. 「下
 new preview tab; the viewer explicitly downloads the PNG there. Images are generated in the
 browser and are not saved to R2.
 
+Below each product's final available date, `手收` is displayed as `100 - NotePrice/Cost/Offer
+Price`. CITI is different: its raw Upfront percentage is displayed directly. Existing products
+without the persisted field use the normalized comparable NotePrice to derive the same value.
+
 「我要跟單」 first tells the viewer to contact 高資產業務處同事 or 信託處 through LINE or
 telephone, then keeps the existing intent form available.
 

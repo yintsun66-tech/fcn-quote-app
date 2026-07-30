@@ -108,6 +108,21 @@ function formatExpiryDate(value) {
   }).format(date);
 }
 
+function salesFeePct(product) {
+  const card = product?.card || {};
+  if (card.salesFeePct !== null && card.salesFeePct !== undefined && card.salesFeePct !== "") {
+    const saved = Number(card.salesFeePct);
+    if (Number.isFinite(saved)) return saved;
+  }
+  if (card.comparablePricePct !== null
+    && card.comparablePricePct !== undefined
+    && card.comparablePricePct !== "") {
+    const comparablePrice = Number(card.comparablePricePct);
+    if (Number.isFinite(comparablePrice)) return Number((100 - comparablePrice).toFixed(4));
+  }
+  return Number.NaN;
+}
+
 function formatAmount(value, currency) {
   return `${Number(value).toLocaleString("zh-TW")} ${currency}`;
 }
@@ -123,6 +138,7 @@ function productTile(product) {
     <div class="product-card-frame">${cardMarkup(product)}</div>
     <div class="product-tile-controls">
       <p class="expiry-note">可跟單至：${escapeHtml(formatExpiryDate(product.expiresAt))}（台北時間）</p>
+      <p class="sales-fee-note">手收：${percent(salesFeePct(product))}</p>
       <div class="tile-actions">
         ${imageButton}
         <button type="button" class="secondary" data-follow-code="${escapeHtml(product.productCode)}">我要跟單</button>

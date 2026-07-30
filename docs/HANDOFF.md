@@ -4,11 +4,11 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `061fe3b`, currently served as Worker
-`6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `35b6c2b`, currently served as Worker
+`5abc0baa-9be0-4021-a90f-d067ed074c0c` on 2026-07-31. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## LINE push for follow-board publications (implemented, disabled, not deployed)
+## LINE push for follow-board publications (live)
 
 When a follow-board product is published, the Worker can push it to a private LINE group. The push
 runs **after** the publication batch has committed and never throws, so a LINE outage, a revoked
@@ -23,7 +23,7 @@ identifier. **手收 and 交易日期 travel only in the Flex message text**, in
 `renderQuoteCardHtml` is called with `comparablePricePct: null` so the card cannot render a fee; a
 test asserts 手收 is absent from the rendered HTML and present in the Flex body.
 
-- `LINE_PUSH_ENABLED` is `"0"`. Deploying this pushes nothing.
+- `LINE_PUSH_ENABLED` is `"1"` as of 2026-07-31. The next follow-board publication will push.
 - `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_GROUP_ID` are Secrets (`wrangler secret put`), not vars —
   the group id names a private chat. Neither is ever logged: the `FOLLOW_BOARD_LINE_PUSHED` audit
   records counts and HTTP status only, and a test asserts both strings are absent from it.
@@ -42,18 +42,32 @@ a webhook event. `POST /api/v1/public/line/webhook` exists solely to capture it:
   message text is stored. Always returns 200 once the signature is valid, because LINE retries a
   non-2xx.
 
-Enablement sequence (each step needs explicit authorization; nothing below has been done):
+**Enablement completed on 2026-07-31.** The discovery run is history; the webhook is closed again
+and should stay closed. For the record, the sequence was: set `LINE_CHANNEL_SECRET` and
+`LINE_CHANNEL_ACCESS_TOKEN` as Secrets → deploy with `LINE_WEBHOOK_ENABLED="1"`
+(Worker `30837aa3-e938-415c-a650-08aebe2ed995`) → register the webhook URL in the LINE console →
+add the Official Account to the group → read the id from `audit_events` and store it as
+`LINE_GROUP_ID` → deploy with the webhook off and the push on
+(Worker `5abc0baa-9be0-4021-a90f-d067ed074c0c`).
 
-1. `wrangler secret put LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`.
-2. Set `LINE_WEBHOOK_ENABLED="1"`, deploy, register
-   `https://api.yintsun66.com/api/v1/public/line/webhook` in the LINE console, send one message in
-   the group.
-3. Read the id back from `audit_events` (`action = 'LINE_SOURCE_DISCOVERED'`, read-only query),
-   `wrangler secret put LINE_GROUP_ID`.
-4. Set `LINE_WEBHOOK_ENABLED` back to `"0"` and `LINE_PUSH_ENABLED="1"`, then deploy.
+Two things cost time and are worth recording:
 
-Verified: typecheck clean, **24 test files / 176 tests**, dry-run build binds
-`LINE_PUSH_ENABLED ("0")` and `LINE_WEBHOOK_ENABLED ("0")`. `worker-configuration.d.ts` is
+- A LINE Official Account never confirms a group invitation. If the invite sits at 「邀請中」
+  forever, the cause is that **允許被加入群組、多人聊天室** is off in LINE Official Account Manager
+  (a different site from the Developers Console). LINE reports no error for this.
+- The webhook switch exists in **two** places and both must be on: Developers Console → Messaging
+  API → **Use webhook**, and Official Account Manager → 回應設定 → **Webhook**. The second one
+  defaults to off in chat mode.
+
+Verified in production: `/api/v1/health` 200; the webhook returned 404 without a signature and 401
+with a bad one while enabled, and returns 404 for a signed-looking request now that it is off. One
+`LINE_SOURCE_DISCOVERED` event was recorded with `sourceType = "group"`. The group id was read
+directly into `wrangler secret put` in the operator's own terminal and never entered an agent
+session. **No push has been observed yet — the next real follow-board publication is the first
+end-to-end proof.**
+
+Verified locally: typecheck clean (`src` and `test`), **24 test files / 176 tests**, deploy binds
+`LINE_PUSH_ENABLED ("1")` and `LINE_WEBHOOK_ENABLED ("0")`. `worker-configuration.d.ts` is
 gitignored, so run `npx wrangler types` after pulling or the new var will not typecheck.
 
 ## Legacy follow-board products never expired (fixed and deployed)

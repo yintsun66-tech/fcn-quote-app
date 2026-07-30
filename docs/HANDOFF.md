@@ -8,6 +8,30 @@ Current production source: implementation commit `ffc116f`, currently served as 
 `61e34517-1bed-42c5-90bb-9dfb639ed51b` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Pending local PBZL HTML-entity normalization fix
+
+The first post-deploy publication command reached production at `2026-07-30T07:15:06.238Z` with
+normalized subject `0730 Deal-03 PBZL BMJB跟單`. Publisher authentication and command parsing
+succeeded, but the one complete 25-column BNP table was quarantined as
+`FOLLOW_BOARD_ISSUER_TABLE_NOT_RECOGNIZED`. Its sanitized R2 table proves that the mail gateway
+preserved escaped non-breaking spaces such as `Coupon p.a. (%)&nbsp;` and `&nbsp;85.00`.
+Those tokens prevented both header-signature matching and numeric parsing.
+
+The current working tree contains an uncommitted, unpushed and undeployed fix. HTML table extraction
+and issuer-profile normalization now remove `&nbsp;`, `&amp;nbsp;`, decimal `&#160;` and
+hexadecimal `&#xA0;` whitespace forms before matching or numeric conversion. Parser versions are
+advanced to `inbound-mime-v2` and `issuer-fcn-v5`. Synthetic regression tests reproduce the
+sanitized PBZL table structure without committing raw mail or real identifiers.
+
+Verification: the targeted inbound/profile/follow-board suite passed **3 files / 48 tests**;
+typecheck passed; the complete suite passed **22 files / 160 tests**; and the Wrangler dry-run
+build passed with 18 public assets. There is no migration, dependency, lockfile, binding, Secret,
+frontend or public API change.
+
+The existing PBZL command remains `MANUAL_REVIEW` and is not automatically reprocessed. After
+explicit commit/push/deploy approval, resend the publication command; `PBZL` can be reused because
+no product row was created. Do not mutate the failed command or product tables manually.
+
 ## Follow-board quote selection and multi-product publication (deployed)
 
 Implementation commit `ffc116f` is committed and pushed to

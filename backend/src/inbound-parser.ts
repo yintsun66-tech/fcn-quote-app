@@ -7,7 +7,7 @@ import {
 } from "./follow-board-publication";
 import type { AppEnv, InboundEmailJob, MailBatchCode, QuoteNormalizeJob } from "./types";
 
-export const INBOUND_PARSER_VERSION = "inbound-mime-v1";
+export const INBOUND_PARSER_VERSION = "inbound-mime-v2";
 
 const MAX_HEADERS_SIZE = 128 * 1024;
 const MAX_NESTING_DEPTH = 10;
@@ -259,8 +259,12 @@ export function detectSender(
   };
 }
 
+function decodeHtmlWhitespaceEntities(value: string): string {
+  return value.replace(/&(?:amp;)?(?:nbsp|#0*160|#x0*a0);/giu, " ");
+}
+
 function cleanCell(value: string): string {
-  return bounded(normalizeWhitespace(value), MAX_CELL_CHARACTERS);
+  return bounded(normalizeWhitespace(decodeHtmlWhitespaceEntities(value)), MAX_CELL_CHARACTERS);
 }
 
 function stripExecutableSections(html: string): string {

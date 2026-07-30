@@ -400,6 +400,39 @@ describe("follow board", () => {
     });
   });
 
+  it("recognizes a complete BNP table containing escaped non-breaking spaces", () => {
+    const headers = [
+      "Client Ref", "Product", "Currency", "Guaranteed Periods (m)&nbsp;",
+      "BBG Code 1", "BBG Code 2", "BBG Code 3", "BBG Code 4", "BBG Code 5",
+      "Strike (%)&nbsp;", "KO Type", "KO Barrier (%)", "Coupon p.a. (%)&nbsp;",
+      "Upfront / NotePrice (%)&nbsp;", "Tenor (m)", "Barrier Type",
+      "KI Barrier (%)&nbsp;", "Observation Frequency (m)", "OTC",
+      "Effective Date Offset(Calendar Days)&nbsp;", "Trade Date", "Issue date",
+      "Redemption Valuation Date", "Redemption date", "Remarks"
+    ];
+    const quote = cells(25, {
+      0: "BNP-ENTITY-001", 1: "FCN", 2: "USD", 3: 1,
+      4: "AAA UW", 5: "BBB UN", 6: "CCC UW",
+      9: "&nbsp;85.00", 10: "Daily Memory", 11: "&nbsp;110.00",
+      12: "&nbsp;50.00", 13: "97.19", 14: 3, 15: "EKI",
+      16: "&nbsp;70.00", 17: 1, 18: "Note", 19: 7
+    });
+
+    expect(selectFollowBoardPublicationRows([
+      { index: 0, rows: [headers, quote] }
+    ], 1)).toMatchObject({
+      rows: [{
+        issuer: "BNP",
+        strikePct: 85,
+        koBarrierPct: 110,
+        couponPaPct: 50,
+        comparablePricePct: 97.19,
+        kiBarrierPct: 70
+      }],
+      errorCode: null
+    });
+  });
+
   it("publishes the issuer and terms detected from an external-channel table without using ranking", async () => {
     const product = await testEnv.DB.prepare(
       `SELECT product_code, issuer, parser_profile, source_rfq_id, public_snapshot_json

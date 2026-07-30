@@ -1,6 +1,6 @@
 import type { Issuer } from "./inbound-parser";
 
-export const ISSUER_PROFILE_VERSION = "issuer-fcn-v4";
+export const ISSUER_PROFILE_VERSION = "issuer-fcn-v5";
 
 export type QuoteStatus =
   | "VALID"
@@ -169,10 +169,13 @@ const STANDARD_PROFILES: Partial<Record<Issuer, StandardProfile>> = Object.freez
 const INVALID_VALUES = /^(?:N\/?A|NA|DNW|NO\s*QUOTE|NOT\s+AVAILABLE|PRICE\s+UNAVAILABLE|PLS\s+SEE\s+BELOW|ERROR|-+)$/iu;
 const REJECTION_TEXT = /(?:REJECT|LIMIT|OUT\s+OF\s+RANGE|PLEASE\s+CONTACT\s+SALES|EXCEED|INCORRECT|超過限制|不報價|無法報價)/iu;
 
+function decodeHtmlWhitespaceEntities(value: string): string {
+  return value.replace(/&(?:amp;)?(?:nbsp|#0*160|#x0*a0);/giu, " ");
+}
+
 function signalText(value: string): string {
-  return value
+  return decodeHtmlWhitespaceEntities(value)
     .normalize("NFKC")
-    .replace(/&nbsp;|&#160;/giu, " ")
     .replace(/^\s*\*+\s*/u, "")
     .replace(/\s+/gu, " ")
     .trim();
@@ -185,7 +188,9 @@ function unavailableValue(value: string): boolean {
 
 function text(row: readonly string[], index: number | undefined): string {
   if (index === undefined) return "";
-  return String(row[index] ?? "").replace(/[\u00a0\u2007\u202f]/gu, " ").trim();
+  return decodeHtmlWhitespaceEntities(String(row[index] ?? ""))
+    .replace(/[\u00a0\u2007\u202f]/gu, " ")
+    .trim();
 }
 
 function optionalText(row: readonly string[], index: number | undefined): string | null {
@@ -285,7 +290,7 @@ function comparablePrice(raw: number | null, semantics: PriceSemantics): number 
 }
 
 function normalizedHeader(value: string): string {
-  return value
+  return decodeHtmlWhitespaceEntities(value)
     .normalize("NFKC")
     .toUpperCase()
     .replace(/[^A-Z0-9]+/gu, "");

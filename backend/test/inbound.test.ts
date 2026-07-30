@@ -176,7 +176,7 @@ describe("inbound email ingestion", () => {
       subject_batch_code: "BMJB",
       correlation_source: "TOKEN",
       html_table_count: 1,
-      parser_version: "inbound-mime-v1"
+      parser_version: "inbound-mime-v2"
     });
     expect(row?.requester_marker_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const parsedBytes = objects.get(String(row?.r2_parsed_tables_key));

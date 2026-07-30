@@ -71,4 +71,14 @@ describe("safe HTML table extraction", () => {
     expect(result.tables[0]?.rows).toEqual([["Issuer", "Coupon"], ["BNP", "12.5%"]]);
     expect(JSON.stringify(result)).not.toContain("alert");
   });
+
+  it("normalizes escaped HTML non-breaking spaces in headers and numeric cells", async () => {
+    const result = await extractHtmlTables(
+      "<table><tr><th>Coupon p.a. (%)&amp;nbsp;</th></tr><tr><td>&amp;nbsp;50.00</td></tr></table>"
+    );
+    expect(result.tables[0]?.rows).toEqual([
+      ["Coupon p.a. (%)"],
+      ["50.00"]
+    ]);
+  });
 });

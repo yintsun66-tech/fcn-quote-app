@@ -4,15 +4,15 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `6d2f3b2`, currently served as Worker
-`c58e6ba9-844c-4121-91f7-d63ab639d4e7` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `ffc116f`, currently served as Worker
+`61e34517-1bed-42c5-90bb-9dfb639ed51b` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## Pending local follow-board quote-selection and multi-product publication
+## Follow-board quote selection and multi-product publication (deployed)
 
-The current working tree contains an uncommitted, unpushed and undeployed correction for
-follow-board publication. Production diagnosis of product code `PBZK` proved that the authorized
-publisher mail reached the Worker and normalized successfully, but was quarantined with
+Implementation commit `ffc116f` is committed and pushed to
+`origin/codex/market-analysis-phase2-4`. Production diagnosis of product code `PBZK` proved that
+the authorized publisher mail reached the Worker and normalized successfully, but was quarantined with
 `FOLLOW_BOARD_MULTIPLE_QUOTE_TABLES`: the forwarded thread contained two identical completed
 Barclays quote tables, Barclays disclaimer/layout tables and the original request table.
 
@@ -49,10 +49,16 @@ products can share one source message. The publication regression fixture reprod
 structure of the observed mail: duplicate completed Barclays tables plus a forwarded 20-column
 request table.
 
-The existing `PBZK` command remains `MANUAL_REVIEW`; deploying new code does not retroactively
-reprocess it. After explicit commit/push/deploy approval, send a new publication command with a
-unique product code or add a separately reviewed idempotent ADMIN reprocess operation. Apply
-migration `0014` before deploying `follow-board-publication-v5`. Do not edit D1 rows manually.
+Migration `0014` was applied to remote D1 before Worker deployment. Post-migration verification
+reported no pending migrations, an empty `PRAGMA foreign_key_check`, and the new
+`follow_board_publication_items` table. Worker `61e34517-1bed-42c5-90bb-9dfb639ed51b` serves both
+custom domains. Post-deploy checks returned API health HTTP 200, application follow-board HTTP 200,
+and manifest HTTP 401 without the PIN. No GitHub Pages publication was needed because no public
+asset changed.
+
+The existing `PBZK` command remains `MANUAL_REVIEW`; deployment does not retroactively reprocess
+it. Send a new publication command with a unique product code or separately design and review an
+idempotent ADMIN reprocess operation. Do not edit D1 rows manually.
 
 ## Static follow-board network fallback (committed, pushed and deployed)
 

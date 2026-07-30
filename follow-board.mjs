@@ -6,6 +6,7 @@ const API_ORIGINS = location.hostname === "app.yintsun66.com"
     : ["https://app.yintsun66.com", "https://api.yintsun66.com"];
 const IS_STATIC_SITE = location.hostname === "yintsun66-tech.github.io";
 const PIN_STORAGE_KEY = "fcn-follow-board-pin";
+const previewProductCode = new URLSearchParams(location.search).get("product")?.normalize("NFKC").trim().toUpperCase() || "";
 const THEMES = {
   BNP: ["#008a4b", "#0875a8", "#e7f8ef"],
   BARCLAYS: ["#0077a8", "#008b73", "#e7f6fb"],
@@ -25,7 +26,7 @@ const elements = Object.fromEntries([
   "productGrid", "refreshBoard", "lockBoard", "interestPanel", "interestForm",
   "selectedProductCode", "interestCurrency", "interestStatus", "dailyInterestRows",
   "dailyTotal", "captureHost", "adminPanel", "adminDate", "refreshAdmin", "adminStatus",
-  "adminInterestRows", "officialFollowBoardLink"
+  "adminInterestRows", "officialFollowBoardLink", "boardTitle", "dailyPanel"
 ].map(id => [id, document.getElementById(id)]));
 
 const state = {
@@ -94,30 +95,36 @@ function formatDateTime(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-TW", { hour12: false });
 }
 
+function formatExpiryDate(value) {
+  if (!value) return "由管理者下架";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  date.setMilliseconds(date.getMilliseconds() - 1);
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}
+
 function formatAmount(value, currency) {
   return `${Number(value).toLocaleString("zh-TW")} ${currency}`;
 }
 
 function productTile(product) {
-  const card = product.card;
-  const underlyings = Array.isArray(card.underlyings) ? card.underlyings : [];
   const archiveButton = state.user && ["ADMIN", "PS"].includes(state.user.role)
     ? `<button type="button" class="secondary" data-archive-code="${escapeHtml(product.productCode)}">下架</button>`
     : "";
+  const imageButton = previewProductCode
+    ? `<button type="button" data-download-code="${escapeHtml(product.productCode)}">下載 PNG</button>`
+    : `<button type="button" data-preview-code="${escapeHtml(product.productCode)}">下載商品圖</button>`;
   return `<article class="product-tile" style="${themeStyle(product.issuer)}">
-    <header><span class="product-code">${escapeHtml(product.productCode)}</span><span>${escapeHtml(product.issuer)}</span></header>
-    <div class="product-tile-body">
-      <h3>${escapeHtml(card.product)}｜${escapeHtml(card.currency)}</h3>
-      <ul class="product-underlyings">${underlyings.map(item => `<li>${escapeHtml(ticker(item))}</li>`).join("")}</ul>
-      <div class="product-metrics">
-        <div><span>期間</span><strong>${months(card.tenorMonths)}</strong></div>
-        <div><span>預估年化配息率</span><strong>${percent(product.estimatedYieldPct)}</strong></div>
-        <div><span>交易日期</span><strong>${escapeHtml(product.tradeDate)}</strong></div>
-        <div><span>發行機構</span><strong>${escapeHtml(card.issuerDisplayName || product.issuer)}</strong></div>
-      </div>
-      <p class="yield-note">預估年化配息率，非保證收益</p>
+    <div class="product-card-frame">${cardMarkup(product)}</div>
+    <div class="product-tile-controls">
+      <p class="expiry-note">可跟單至：${escapeHtml(formatExpiryDate(product.expiresAt))}（台北時間）</p>
       <div class="tile-actions">
-        <button type="button" data-download-code="${escapeHtml(product.productCode)}">下載商品圖</button>
+        ${imageButton}
         <button type="button" class="secondary" data-follow-code="${escapeHtml(product.productCode)}">我要跟單</button>
         ${archiveButton}
       </div>
@@ -126,10 +133,14 @@ function productTile(product) {
 }
 
 function renderProducts() {
-  const products = state.manifest?.products || [];
+  const available = state.manifest?.products || [];
+  const products = previewProductCode
+    ? available.filter(product => product.productCode === previewProductCode)
+    : available;
   elements.productGrid.innerHTML = products.length
     ? products.map(productTile).join("")
-    : "<p class=\"empty-row\">目前沒有上架中的跟單商品。</p>";
+    : `<p class="empty-row">${previewProductCode ? "此商品不存在或已到期下架。" : "目前沒有上架中的跟單商品。"}</p>`;
+  requestAnimationFrame(resizeProductPreviews);
 }
 
 function renderDailyInterests() {
@@ -152,11 +163,21 @@ async function loadManifest() {
   elements.boardStatus.textContent = "正在載入跟單商品…";
   const manifest = await publicRequest("/public/follow-board/manifest");
   state.manifest = manifest;
-  elements.boardDate.textContent = `彙整日期：${manifest.date}`;
+  if (previewProductCode) {
+    document.body.classList.add("product-preview-mode");
+    document.title = `${previewProductCode} 商品圖`;
+    elements.boardTitle.textContent = `${previewProductCode} 商品圖`;
+    elements.boardDate.textContent = "圖片預覽";
+    elements.dailyPanel.hidden = true;
+  } else {
+    elements.boardDate.textContent = `彙整日期：${manifest.date}`;
+  }
   elements.adminDate.value = manifest.date;
   renderProducts();
   renderDailyInterests();
-  elements.boardStatus.textContent = `已更新 ${manifest.products.length} 檔商品。`;
+  elements.boardStatus.textContent = previewProductCode
+    ? `顯示商品 ${previewProductCode}。`
+    : `已更新 ${manifest.products.length} 檔商品。`;
 }
 
 async function unlock(pin) {
@@ -214,6 +235,27 @@ function cardMarkup(product) {
       <div class="download-code">商品代碼：${escapeHtml(product.productCode)}</div>
     </footer>
   </article></div>`;
+}
+
+function resizeProductPreviews() {
+  for (const frame of document.querySelectorAll(".product-card-frame")) {
+    const card = frame.firstElementChild;
+    if (!(card instanceof HTMLElement)) continue;
+    card.style.transform = "none";
+    const scale = Math.min(1, frame.clientWidth / 720);
+    card.style.transform = `scale(${scale})`;
+    frame.style.height = `${Math.ceil(card.offsetHeight * scale)}px`;
+  }
+}
+
+function openProductPreview(productCode) {
+  const url = new URL(location.href);
+  url.search = "";
+  url.searchParams.set("product", productCode);
+  url.hash = "";
+  const preview = window.open(url.toString(), "_blank");
+  if (!preview) throw new Error("瀏覽器阻擋新分頁，請允許此網站開啟彈出式視窗。");
+  preview.opener = null;
 }
 
 function withTimeout(promise, milliseconds, message) {
@@ -349,15 +391,29 @@ elements.refreshBoard.addEventListener("click", () => loadManifest().catch(error
 }));
 elements.lockBoard.addEventListener("click", lock);
 elements.productGrid.addEventListener("click", event => {
+  const previewButton = event.target.closest("[data-preview-code]");
   const downloadButton = event.target.closest("[data-download-code]");
   const followButton = event.target.closest("[data-follow-code]");
   const archiveButton = event.target.closest("[data-archive-code]");
-  const code = downloadButton?.dataset.downloadCode || followButton?.dataset.followCode || archiveButton?.dataset.archiveCode;
+  const code = previewButton?.dataset.previewCode
+    || downloadButton?.dataset.downloadCode
+    || followButton?.dataset.followCode
+    || archiveButton?.dataset.archiveCode;
   const product = state.manifest?.products.find(item => item.productCode === code);
+  if (previewButton && product) {
+    try {
+      openProductPreview(product.productCode);
+    } catch (error) {
+      elements.boardStatus.textContent = error.message;
+    }
+  }
   if (downloadButton && product) downloadProductImage(product, downloadButton).catch(error => {
     elements.boardStatus.textContent = error.message;
   });
-  if (followButton && product) selectProduct(product);
+  if (followButton && product) {
+    alert("請透過 LINE 或電話聯繫高資產業務處同事或信託處辦理跟單。");
+    selectProduct(product);
+  }
   if (archiveButton && code) archiveProduct(code).catch(error => {
     elements.boardStatus.textContent = error.message;
   });
@@ -393,6 +449,7 @@ elements.interestForm.addEventListener("submit", async event => {
 });
 
 elements.refreshAdmin.addEventListener("click", loadAdminInterests);
+window.addEventListener("resize", resizeProductPreviews);
 
 if (IS_STATIC_SITE) {
   elements.officialFollowBoardLink.href = OFFICIAL_FOLLOW_BOARD_URL;

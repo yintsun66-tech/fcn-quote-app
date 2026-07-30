@@ -10,7 +10,7 @@ const COMMAND_ID = "fbc_64000000-0000-4000-8000-000000000003";
 
 beforeAll(async () => {
   const migrations = testEnv.TEST_MIGRATIONS;
-  await applyD1Migrations(testEnv.DB, migrations.slice(0, -1));
+  await applyD1Migrations(testEnv.DB, migrations.slice(0, -2));
   const now = new Date().toISOString();
   await testEnv.DB.batch([
     testEnv.DB.prepare(
@@ -49,28 +49,41 @@ beforeAll(async () => {
                '2026-07-30', 'APP', ?, ?)`
     ).bind(PRODUCT_ID, now, now)
   ]);
-  await applyD1Migrations(testEnv.DB, migrations.slice(-1));
+  await applyD1Migrations(testEnv.DB, migrations.slice(-2));
 });
 
-describe("follow-board migration 0014", () => {
-  it("preserves legacy products, commands and interests while allowing one message to own many products", async () => {
+describe("follow-board migrations 0014 and 0015", () => {
+  it("preserves legacy rows, adds expiry metadata and allows one message to own many products", async () => {
     const product = await testEnv.DB.prepare(
-      "SELECT product_code, source_inbound_message_id FROM follow_board_products WHERE id = ?"
-    ).bind(PRODUCT_ID).first<{ product_code: string; source_inbound_message_id: string }>();
-    expect(product).toEqual({ product_code: "PBLG", source_inbound_message_id: INBOUND_ID });
+      "SELECT product_code, source_inbound_message_id, expires_at FROM follow_board_products WHERE id = ?"
+    ).bind(PRODUCT_ID).first<{
+      product_code: string;
+      source_inbound_message_id: string;
+      expires_at: string | null;
+    }>();
+    expect(product).toEqual({
+      product_code: "PBLG",
+      source_inbound_message_id: INBOUND_ID,
+      expires_at: null
+    });
 
     const command = await testEnv.DB.prepare(
-      `SELECT deal_sequence, deal_sequence_end, product_codes_json
+      `SELECT deal_sequence, deal_sequence_end, product_codes_json,
+              declared_issuer, expiry_date_yyyymmdd
          FROM follow_board_publication_commands WHERE id = ?`
     ).bind(COMMAND_ID).first<{
       deal_sequence: number;
       deal_sequence_end: number;
       product_codes_json: string;
+      declared_issuer: string | null;
+      expiry_date_yyyymmdd: string | null;
     }>();
     expect(command).toEqual({
       deal_sequence: 1,
       deal_sequence_end: 1,
-      product_codes_json: '["PBLG"]'
+      product_codes_json: '["PBLG"]',
+      declared_issuer: null,
+      expiry_date_yyyymmdd: null
     });
 
     const interest = await testEnv.DB.prepare(

@@ -31,6 +31,7 @@ interface ProductRow {
   estimated_yield_pct: number;
   public_snapshot_json: string;
   published_at: string;
+  expires_at: string | null;
 }
 
 interface PublicInterestRow {
@@ -209,24 +210,26 @@ function safeSnapshot(value: string): Record<string, unknown> | null {
 export async function getFollowBoardManifest(request: Request, env: AppEnv): Promise<Response> {
   await requireViewPin(request, env);
   const date = taipeiDate();
+  const generatedAt = nowIso();
   const [productsResult, interestsResult] = await Promise.all([
     env.DB.prepare(
       `SELECT id, product_code, issuer, trade_date, estimated_yield_pct,
-              public_snapshot_json, published_at
+              public_snapshot_json, published_at, expires_at
          FROM follow_board_products
-        WHERE status = 'PUBLISHED'
+        WHERE status = 'PUBLISHED' AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY published_at DESC, product_code
         LIMIT ?`
-    ).bind(MAX_PUBLIC_PRODUCTS).all<ProductRow>(),
+    ).bind(generatedAt, MAX_PUBLIC_PRODUCTS).all<ProductRow>(),
     env.DB.prepare(
       `SELECT p.product_code, i.branch_code, i.branch_name, i.employee_number_mask,
-              i.amount_value, i.currency, i.updated_at
+               i.amount_value, i.currency, i.updated_at
          FROM follow_board_interests i
          JOIN follow_board_products p ON p.id = i.product_id
         WHERE i.submission_date = ? AND p.status = 'PUBLISHED'
+          AND (p.expires_at IS NULL OR p.expires_at > ?)
         ORDER BY i.updated_at DESC
         LIMIT ?`
-    ).bind(date, MAX_DAILY_INTEREST_ROWS).all<PublicInterestRow>()
+    ).bind(date, generatedAt, MAX_DAILY_INTEREST_ROWS).all<PublicInterestRow>()
   ]);
   const products = productsResult.results.flatMap(row => {
     const snapshot = safeSnapshot(row.public_snapshot_json);
@@ -236,6 +239,7 @@ export async function getFollowBoardManifest(request: Request, env: AppEnv): Pro
       tradeDate: row.trade_date,
       estimatedYieldPct: row.estimated_yield_pct,
       publishedAt: row.published_at,
+      expiresAt: row.expires_at,
       card: snapshot
     }] : [];
   });
@@ -249,8 +253,8 @@ export async function getFollowBoardManifest(request: Request, env: AppEnv): Pro
     updatedAt: row.updated_at
   }));
   return publicJson(request, {
-    schemaVersion: 1,
-    generatedAt: nowIso(),
+    schemaVersion: 2,
+    generatedAt,
     date,
     products,
     dailyInterests
@@ -280,8 +284,9 @@ export async function submitFollowBoardInterest(request: Request, env: AppEnv): 
 
   const product = await env.DB.prepare(
     `SELECT id, public_snapshot_json FROM follow_board_products
-      WHERE product_code = ? COLLATE NOCASE AND status = 'PUBLISHED'`
-  ).bind(input.productCode).first<{ id: string; public_snapshot_json: string }>();
+      WHERE product_code = ? COLLATE NOCASE AND status = 'PUBLISHED'
+        AND (expires_at IS NULL OR expires_at > ?)`
+  ).bind(input.productCode, nowIso()).first<{ id: string; public_snapshot_json: string }>();
   if (!product) throw new AppError(404, "FOLLOW_BOARD_PRODUCT_NOT_FOUND", "找不到可跟單的商品。");
   const snapshot = safeSnapshot(product.public_snapshot_json);
   const currency = typeof snapshot?.currency === "string" ? snapshot.currency : "";
@@ -466,6 +471,31 @@ export async function archiveFollowBoardProduct(
 export async function cleanupFollowBoardOperationalData(env: AppEnv): Promise<void> {
   const now = nowIso();
   const attemptsBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+  const expiredProducts = await env.DB.prepare(
+    `SELECT id, product_code, expires_at
+       FROM follow_board_products
+      WHERE status = 'PUBLISHED' AND expires_at IS NOT NULL AND expires_at <= ?
+      ORDER BY expires_at
+      LIMIT 100`
+  ).bind(now).all<{ id: string; product_code: string; expires_at: string }>();
+  for (const product of expiredProducts.results) {
+    const archived = await env.DB.prepare(
+      `UPDATE follow_board_products
+          SET status = 'ARCHIVED', archived_at = ?, archived_by_user_id = NULL, updated_at = ?
+        WHERE id = ? AND status = 'PUBLISHED' AND expires_at IS NOT NULL AND expires_at <= ?`
+    ).bind(now, now, product.id, now).run();
+    if (archived.meta.changes === 1) {
+      await insertAudit(
+        env,
+        "FOLLOW_BOARD_PRODUCT_EXPIRED",
+        "FOLLOW_BOARD_PRODUCT",
+        product.id,
+        null,
+        `cron:${now}`,
+        { productCode: product.product_code, expiresAt: product.expires_at }
+      );
+    }
+  }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM follow_board_idempotency_keys WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM follow_board_request_attempts WHERE occurred_at < ?").bind(attemptsBefore)

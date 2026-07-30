@@ -60,5 +60,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0025: Email-published follow board with browser-rendered product images](0025-email-published-follow-board.md)
 - [ADR 0026: Select one unique complete quote for follow-board publication](0026-follow-board-unique-complete-quote.md)
 - [ADR 0027: Atomic multi-product follow-board publication](0027-multi-product-follow-board-publication.md)
+- [ADR 0028: Issuer-declared follow-board commands and automatic expiry](0028-follow-board-expiry-and-issuer-command.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

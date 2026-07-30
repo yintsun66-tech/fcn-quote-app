@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#075985" />
     <title>FCN / DAC 跟單專區</title>
-    <link rel="stylesheet" href="./follow-board.css?v=follow-board-v1" />
+    <link rel="stylesheet" href="./follow-board.css?v=follow-board-v2" />
   </head>
   <body>
     <main class="follow-shell">
@@ -42,7 +42,7 @@
         <section class="board-intro">
           <div>
             <p class="eyebrow">AVAILABLE PRODUCTS</p>
-            <h2>目前可跟單商品</h2>
+            <h2 id="boardTitle">目前可跟單商品</h2>
           </div>
           <div class="board-actions">
             <span id="boardDate"></span>
@@ -81,7 +81,7 @@
           <p id="interestStatus" class="board-status" role="status" aria-live="polite"></p>
         </section>
 
-        <section class="daily-panel">
+        <section id="dailyPanel" class="daily-panel">
           <div class="section-heading">
             <div>
               <p class="eyebrow">DAILY SUMMARY</p>
@@ -127,6 +127,6 @@
     </main>
 
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./follow-board.mjs?v=follow-board-v2"></script>
+    <script type="module" src="./follow-board.mjs?v=follow-board-v3"></script>
   </body>
 </html>

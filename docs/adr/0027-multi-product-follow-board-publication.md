@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-07-30
 
+> ADR 0028 replaces the subject suffix with `ISSUER跟單YYYYMMDD`. The atomic multi-product
+> selection and mapping rules in this ADR remain in force.
+
 ## Context
 
 An approved publisher may publish several completed deals from one issuer email. The observed

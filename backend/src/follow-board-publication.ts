@@ -6,7 +6,7 @@ import {
 } from "./issuer-profiles";
 import type { AppEnv, MailBatchCode } from "./types";
 
-export const FOLLOW_BOARD_PUBLICATION_VERSION = "follow-board-publication-v5";
+export const FOLLOW_BOARD_PUBLICATION_VERSION = "follow-board-publication-v6";
 
 const AUTHORIZED_PUBLISHERS = new Set([
   "i14053@firstbank.com.tw",
@@ -34,7 +34,9 @@ export interface FollowBoardPublicationCommand {
   dealSequenceEnd: number;
   productCode: string;
   productCodes: string[];
+  issuer: ParsedIssuerRow["issuer"];
   batchCode: MailBatchCode;
+  expiryDateYyyymmdd: string;
 }
 
 export interface FollowBoardCorrelation {
@@ -79,17 +81,42 @@ function validMmdd(value: string): boolean {
   return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
+function validYyyymmdd(value: string): boolean {
+  if (!/^\d{8}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(4, 6));
+  const day = Number(value.slice(6, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return year >= 2000
+    && date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function expiryAtFromSubject(value: string): string | null {
+  if (!validYyyymmdd(value)) return null;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(4, 6));
+  const day = Number(value.slice(6, 8));
+  return new Date(Date.UTC(year, month - 1, day + 1) - 8 * 60 * 60 * 1_000).toISOString();
+}
+
 export function parseFollowBoardPublicationSubject(subject: string): FollowBoardPublicationCommand | null {
   const withoutCorrelation = subject.normalize("NFKC").replace(
     /\s*\[RFQ:[A-Za-z0-9_-]{10,128}\]\s*\[BATCH:(?:BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\]\s*$/iu,
     ""
   ).trim();
-  const match = /^(\d{4})\s+deal-?(\d{1,2})(?:~(\d{1,2}))?\s+([A-Z0-9]{4,12}(?:\s*,\s*[A-Z0-9]{4,12})*)\s*,?\s+(BMJB|NOMURA|UBS|DBS|SG|CITI|GS|CA)\s*跟單$/iu
+  const match = /^(\d{4})\s+deal-?(\d{1,2})(?:~(\d{1,2}))?\s+([A-Z0-9]{4,12}(?:\s*,\s*[A-Z0-9]{4,12})*)\s*,?\s+(BNP|MS|JPM|BARCLAYS|NOMURA|UBS|DBS|SG|CITI|GS|CA)\s*跟單\s*(\d{8})$/iu
     .exec(withoutCorrelation);
-  if (!match?.[1] || !match[2] || !match[4] || !match[5] || !validMmdd(match[1])) return null;
+  if (!match?.[1] || !match[2] || !match[4] || !match[5] || !match[6]
+    || !validMmdd(match[1]) || !validYyyymmdd(match[6])) {
+    return null;
+  }
   const dealSequence = Number(match[2]);
   const dealSequenceEnd = match[3] ? Number(match[3]) : dealSequence;
   const productCodes = match[4].split(",").map(code => code.trim().toUpperCase());
+  const issuer = match[5].toUpperCase() as ParsedIssuerRow["issuer"];
+  const batchCode = ISSUER_BATCH[issuer];
   const expectedCount = dealSequenceEnd - dealSequence + 1;
   if (!Number.isInteger(dealSequence)
     || !Number.isInteger(dealSequenceEnd)
@@ -97,7 +124,8 @@ export function parseFollowBoardPublicationSubject(subject: string): FollowBoard
     || dealSequenceEnd > 20
     || expectedCount < 1
     || productCodes.length !== expectedCount
-    || new Set(productCodes).size !== productCodes.length) {
+    || new Set(productCodes).size !== productCodes.length
+    || !batchCode) {
     return null;
   }
   return {
@@ -106,7 +134,9 @@ export function parseFollowBoardPublicationSubject(subject: string): FollowBoard
     dealSequenceEnd,
     productCode: productCodes[0] ?? "",
     productCodes,
-    batchCode: match[5].toUpperCase() as MailBatchCode
+    issuer,
+    batchCode,
+    expiryDateYyyymmdd: match[6]
   };
 }
 
@@ -302,20 +332,22 @@ async function completeFailure(
   await env.DB.batch([
     env.DB.prepare(
       `INSERT OR IGNORE INTO follow_board_publication_commands
-        (id, inbound_message_id, product_id, sender_email, product_code, batch_code,
-         deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
-         status, error_code, processed_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, inbound_message_id, product_id, sender_email, product_code, batch_code, declared_issuer,
+          deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
+          expiry_date_yyyymmdd, status, error_code, processed_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       newId("fbc"),
       input.inboundMessageId,
       publisher,
       input.command.productCode,
       input.command.batchCode,
+      input.command.issuer,
       input.command.dealSequence,
       input.command.dealSequenceEnd,
       JSON.stringify(input.command.productCodes),
       input.command.subjectDateMmdd,
+      input.command.expiryDateYyyymmdd,
       failure.commandStatus,
       failure.errorCode,
       processedAt
@@ -363,6 +395,8 @@ async function completeFailure(
         errorCode: failure.errorCode,
         productCodes: input.command.productCodes,
         batchCode: input.command.batchCode,
+        declaredIssuer: input.command.issuer,
+        expiryDateYyyymmdd: input.command.expiryDateYyyymmdd,
         dealSequenceStart: input.command.dealSequence,
         dealSequenceEnd: input.command.dealSequenceEnd
       }),
@@ -425,6 +459,16 @@ export async function processFollowBoardPublicationEmail(
     });
     return;
   }
+  const publishedAt = nowIso();
+  const expiresAt = expiryAtFromSubject(input.command.expiryDateYyyymmdd);
+  if (!expiresAt || Date.parse(expiresAt) <= Date.parse(publishedAt)) {
+    await completeFailure(env, input, publisher, {
+      inboundStatus: "MANUAL_REVIEW",
+      commandStatus: "MANUAL_REVIEW",
+      errorCode: "FOLLOW_BOARD_EXPIRY_NOT_FUTURE"
+    });
+    return;
+  }
   const duplicatePlaceholders = input.command.productCodes.map(() => "?").join(", ");
   const duplicates = await env.DB.prepare(
     `SELECT product_code
@@ -451,16 +495,15 @@ export async function processFollowBoardPublicationEmail(
     });
     return;
   }
-  if (selection.rows.some(quote => ISSUER_BATCH[quote.issuer] !== input.command.batchCode)) {
+  if (selection.rows.some(quote => quote.issuer !== input.command.issuer)) {
     await completeFailure(env, input, publisher, {
       inboundStatus: "MANUAL_REVIEW",
       commandStatus: "MANUAL_REVIEW",
-      errorCode: "FOLLOW_BOARD_TABLE_BATCH_MISMATCH"
+      errorCode: "FOLLOW_BOARD_TABLE_ISSUER_MISMATCH"
     });
     return;
   }
 
-  const publishedAt = nowIso();
   const tradeDate = tradeDateFromSubject(input.command.subjectDateMmdd, publishedAt);
   const commandId = newId("fbc");
   const publications = selection.rows.map((quote, index) => {
@@ -473,13 +516,14 @@ export async function processFollowBoardPublicationEmail(
       productId,
       dealSequence,
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         productCode,
         product: quote.product,
         currency: quote.currency,
         issuer: quote.issuer,
         issuerDisplayName: quote.issuerDisplayName,
         tradeDate,
+        expiresAt,
         tenorMonths: quote.tenorMonths,
         guaranteedPeriodsMonths: quote.guaranteedPeriodsMonths,
         underlyings: quote.underlyings.slice(0, 6),
@@ -509,11 +553,11 @@ export async function processFollowBoardPublicationEmail(
         (id, product_code, status, source_rfq_id, source_outbound_batch_id,
          source_inbound_message_id, source_reference_hash, parser_profile,
          source_table_index, source_row_index, batch_code, deal_sequence,
-         subject_date_mmdd, issuer, trade_date, estimated_yield_pct,
-         public_snapshot_json, published_by_email, published_at, archived_at,
-         archived_by_user_id, created_at, updated_at)
-       VALUES (?, ?, 'PUBLISHED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-               NULL, NULL, ?, ?)`
+          subject_date_mmdd, issuer, trade_date, estimated_yield_pct,
+          public_snapshot_json, published_by_email, published_at, expires_at, archived_at,
+          archived_by_user_id, created_at, updated_at)
+        VALUES (?, ?, 'PUBLISHED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, NULL, NULL, ?, ?)`
     ).bind(
       publication.productId,
       publication.productCode,
@@ -533,6 +577,7 @@ export async function processFollowBoardPublicationEmail(
       JSON.stringify(publication.snapshot),
       publisher,
       publishedAt,
+      expiresAt,
       publishedAt,
       publishedAt
     )
@@ -564,6 +609,8 @@ export async function processFollowBoardPublicationEmail(
       JSON.stringify({
         productCode: publication.productCode,
         batchCode: input.command.batchCode,
+        declaredIssuer: input.command.issuer,
+        expiresAt,
         dealSequence: publication.dealSequence,
         itemOrdinal: index + 1,
         itemCount: publications.length,
@@ -580,10 +627,10 @@ export async function processFollowBoardPublicationEmail(
     ...productStatements,
     env.DB.prepare(
       `INSERT INTO follow_board_publication_commands
-        (id, inbound_message_id, product_id, sender_email, product_code, batch_code,
-         deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
-         status, error_code, processed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', NULL, ?)`
+        (id, inbound_message_id, product_id, sender_email, product_code, batch_code, declared_issuer,
+          deal_sequence, deal_sequence_end, product_codes_json, subject_date_mmdd,
+          expiry_date_yyyymmdd, status, error_code, processed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', NULL, ?)`
     ).bind(
       commandId,
       input.inboundMessageId,
@@ -591,10 +638,12 @@ export async function processFollowBoardPublicationEmail(
       publisher,
       input.command.productCode,
       input.command.batchCode,
+      input.command.issuer,
       input.command.dealSequence,
       input.command.dealSequenceEnd,
       JSON.stringify(input.command.productCodes),
       input.command.subjectDateMmdd,
+      input.command.expiryDateYyyymmdd,
       publishedAt
     ),
     ...itemStatements,

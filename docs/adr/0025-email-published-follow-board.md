@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-07-30
 
+> The original `BATCH跟單` subject example is superseded by ADR 0028. The security, publication,
+> PIN, privacy and non-destructive archive boundaries in this ADR remain in force.
+
 ## Context
 
 The public GitHub Pages compatibility site and the authenticated Cloudflare application need one

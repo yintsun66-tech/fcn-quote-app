@@ -288,8 +288,15 @@ a new version and may admit only finite, matched, non-rejected late values.
 
 Migration `0013` and ADR 0025 add an email-published follow-board shared by the application and
 GitHub Pages compatibility site. Approved First Bank publishers reply to the original inquiry
-thread or include an opaque token with a strict `MMDD deal-N PRODUCTCODE BATCH跟單` subject. The
-Email Worker stores the raw MIME as usual; the parse consumer recognizes the command, validates
+thread or include an opaque token. ADR 0028 and migration `0015` replace the old batch suffix with
+a strict `MMDD deal-N PRODUCTCODE ISSUER跟單YYYYMMDD` subject. `ISSUER` must be one of the eleven
+canonical issuers and must exactly match the issuer independently recognized from the quote table.
+The declared issuer determines the compatibility batch used for correlation; it never selects an
+RFQ ranking or overrides table evidence. The final date is the last available date in
+`Asia/Taipei`: the product is hidden at 00:00 the following day and is then non-destructively
+archived by the scheduled cleanup.
+
+The Email Worker stores the raw MIME as usual; the parse consumer recognizes the command, validates
 aligned sender authentication and unique reply/token evidence, extracts the HTML tables, and
 identifies the issuer from distinctive headers such as `Client Ref`, `MS ID`, `Nomura ID`,
 `ISSUER PROD REF`, `Memory Autocall`, or `System Remark`. It parses rows with the existing issuer
@@ -298,17 +305,19 @@ collapsing identical forwarded copies. `deal-N` remains audit metadata and does 
 BATCH is only a consistency check and never selects a ranked quote. Multiple issuer signatures,
 different complete quotes or missing complete terms are quarantined for manual review.
 
-ADR 0027 and migration `0014` additionally support
-`MMDD deal-START~END CODE1, CODE2, ... BATCH跟單`. The range validates only the expected item
+ADR 0027 and migration `0014` additionally support multiple products; under ADR 0028 the form is
+`MMDD deal-START~END CODE1, CODE2, ... ISSUER跟單YYYYMMDD`. The range validates only the expected item
 count. Product codes map in list order to the same number of unique complete rows in their first
 source order. The observed no-hyphen/trailing-comma form
-`MMDD dealSTART~END CODE1, CODE2, ..., BATCH跟單` is also accepted. When the forwarded thread
+`MMDD dealSTART~END CODE1, CODE2, ..., ISSUER跟單YYYYMMDD` is also accepted. When the forwarded thread
 contains a front publication table plus a larger historical issuer table, the parser selects an
 unambiguous table-local candidate with the exact expected count; different same-sized candidates
 remain manual review. One command links to all products through
 `follow_board_publication_items`, and the entire D1 batch succeeds or fails atomically.
 
-The shared `follow-board.html` client requests a PIN-protected manifest, renders product cards and
-creates PNGs locally with the vendored html2canvas. Follow-board PNGs are not stored in R2. Public
+The shared `follow-board.html` client requests a PIN-protected manifest and renders the same full
+quote-card DOM used for PNG output. Its download action opens a dedicated preview tab, where the
+viewer explicitly creates the PNG locally with the vendored html2canvas. Follow-board PNGs are not
+stored in R2. Public
 interest rows contain only masked employee numbers; authenticated ADMIN/PS requests can retrieve
 the encrypted full values through the dedicated support endpoint.

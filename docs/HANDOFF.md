@@ -4,11 +4,11 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `335a561`, deployed as Worker
-`2e32a971-b1e4-482b-b3e4-300b1bb89c50` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `4ede8e4`, deployed as Worker
+`354cff3f-7c5b-4f3a-818e-788f9c5111a8` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## Follow-board implementation (branch implementation; production deployment pending)
+## Follow-board implementation (committed, migrated and deployed)
 
 Branch `codex/market-analysis-phase2-4` adds ADR 0025 and D1 migration `0013` for a shared no-registration
 follow-board. Approved First Bank publishers (`i14053`, `i97293`, `i11147`) reply to the original
@@ -28,12 +28,12 @@ the branch and masked employee number. ADMIN/PS can view complete rows and archi
 the application follow-board page.
 
 Local evidence so far: TypeScript typecheck passed and the full suite passed at **21 test files /
-153 tests**. The Cloudflare dry-run build passed with 18 public assets. No migration, Secret,
-static sync or deployment has been performed yet.
-Before deployment, set the four-digit `FOLLOW_BOARD_VIEW_PIN` with hidden Wrangler input, apply
-migration `0013`, run the full validation/build again, then deploy Worker before syncing the three
-new public assets to the separate GitHub Pages repository. Preserve user-owned untracked
-`.claude/` and `output/`.
+153 tests**. The Cloudflare dry-run build passed with 18 public assets. Implementation commit
+`4ede8e4` is deployed as Worker `354cff3f-7c5b-4f3a-818e-788f9c5111a8`; the four-digit
+`FOLLOW_BOARD_VIEW_PIN` Secret exists and migration `0013_follow_board.sql` is applied to remote
+D1. Remote verification returned HTTP 200 for the page and health endpoint, HTTP 401 without a
+PIN, and HTTP 204 with the exact GitHub Pages CORS origin. The static assets are published from
+`yintsun66-tech/fcnV2` commit `fdfff4a`. Preserve user-owned untracked `.claude/` and `output/`.
 
 ## Zimbra manual-mail fallback (committed, pushed and deployed)
 
@@ -821,13 +821,14 @@ or issuer replies are healthy. Verify each boundary separately.
 - Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
   (`feat: publish FCN V2 static snapshot`).
 - Current static program commit:
-  `fcd2996d537599d9090fa1a3be932ba5b2bf6e39`.
+  `fdfff4a`.
 - Current static repository HEAD:
-  `fcd2996d537599d9090fa1a3be932ba5b2bf6e39`.
+  `fdfff4a`.
 - Snapshot source: the allowlisted public assets prepared from
-  `codex/market-analysis-phase2-4` at implementation baseline `335a561`.
+  `codex/market-analysis-phase2-4` at implementation baseline `4ede8e4`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
-  `mail-compose.mjs`, `market-analysis.mjs`, `market-resources.mjs`, `guide.html`,
+  `mail-compose.mjs`, `market-analysis.mjs`, `market-resources.mjs`, `follow-board.html`,
+  `follow-board.css`, `follow-board.mjs`, `guide.html`,
   `version-status.html`, `交易所查詢0715.csv`, `vendor/html2canvas-1.4.1.min.js`,
   `backend/shared/email-formats.js`, and a static-only `README.md`.
 - The updated `app.js` returned HTTP 200 after the Pages build. A rendered browser check confirmed

@@ -62,9 +62,9 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `335a561`；實際最新分支 HEAD
+- 正式功能程式基線為 `4ede8e4`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `2e32a971-b1e4-482b-b3e4-300b1bb89c50`（2026-07-30
+- 最新正式 Worker 版本為 `354cff3f-7c5b-4f3a-818e-788f9c5111a8`（2026-07-30
   部署）。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；
@@ -77,7 +77,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 正式結果自動顯示經濟排名 1–4；第五列由使用者從前四名以外的有效發行機構選擇，
   並可產圖。晚到報價保留原始狀態，僅能由詢價本人或 ADMIN 建立新的不可變排名版本。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
-  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0012`。
+  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0013`。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
   家族在野村、DBS、SG、GS、CA 使用 `DRA(T+7)`，BMJB、UBS、CITI 使用
   `DAC(T+7)`；規則詳見 ADR 0014。
@@ -86,12 +86,12 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 首頁「美股／日股熱門榜」（ADR 0024）在靜態版與 Cloudflare 版皆可使用；不需 API Key、
   不佔 Alpha Vantage 額度。五種排行以官網連結提供、美日皆可用；美股另內嵌即時熱門榜，
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
-- 目前驗證基線為 20 個測試檔、137 項測試；JavaScript 語法、TypeScript typecheck、
+- 目前驗證基線為 21 個測試檔、153 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
-  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `fcd2996`。它只包含公開前端，
+  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `fdfff4a`。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。

@@ -32,16 +32,16 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `335a561` is documented by this handoff and
-  deployed as Worker `2e32a971-b1e4-482b-b3e4-300b1bb89c50` on 2026-07-30. Resolve the current
+- Production implementation commit `4ede8e4` is documented by this handoff and
+  deployed as Worker `354cff3f-7c5b-4f3a-818e-788f9c5111a8` on 2026-07-30. Resolve the current
   branch HEAD from Git rather than copying a historical handoff hash. The current verification
-  baseline is 20 test files / 137 tests. A deployment record is evidence of Worker/static-asset
+  baseline is 21 test files / 153 tests. A deployment record is evidence of Worker/static-asset
   publication, not evidence that Alpha Vantage returned usable data or that real bank mail was
   delivered.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
-  program commit `fcd2996` mirrors the approved public asset set with ZAR, market hot lists and
-  the Zimbra manual-mail fallback. It contains no Cloudflare
+  program commit `fdfff4a` mirrors the approved public asset set with ZAR, market hot lists,
+  the Zimbra manual-mail fallback and the PIN-gated follow-board page. It contains no Cloudflare
   backend or data. Future static syncs must copy only the allowlisted files from
   `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
   whole backend directory.

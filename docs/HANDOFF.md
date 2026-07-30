@@ -4,7 +4,7 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `35b6c2b`, currently served as Worker
+Current production source: implementation commit `ccbb7dd`, currently served as Worker
 `5abc0baa-9be0-4021-a90f-d067ed074c0c` on 2026-07-31. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 

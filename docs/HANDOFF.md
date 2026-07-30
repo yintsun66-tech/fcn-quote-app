@@ -4,11 +4,11 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `4ede8e4`, currently served as Worker
-`a0361916-5522-4090-9135-91f6f86aae33` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `6d2f3b2`, currently served as Worker
+`c58e6ba9-844c-4121-91f7-d63ab639d4e7` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
-## Static follow-board network fallback (local, not committed/deployed)
+## Static follow-board network fallback (committed, pushed and deployed)
 
 A user confirmed that the same follow-board page loads from `app.yintsun66.com` while Edge reports
 `Failed to fetch` from GitHub Pages. Remote D1 showed no corresponding PIN-validation attempt, and
@@ -16,8 +16,13 @@ direct edge checks confirmed the Worker returns the expected CORS headers, so th
 before the static browser request reaches the Worker. The local patch makes the static client try
 both `app.yintsun66.com` and `api.yintsun66.com`; if both cross-origin requests are blocked, it
 shows a precise message and a direct link to the working official follow-board. The PIN is never
-placed in a URL. `follow-board-v2` is used to invalidate the previous module cache. This patch
-still requires validation, commit, Cloudflare deployment and static repository sync.
+placed in a URL. `follow-board-v2` invalidates the previous module cache. Implementation commit
+`6d2f3b2` and status commit `59d5069` are pushed. The feature deployment is Worker
+`23c74ccd-6acb-4077-9c38-1fb766c39b6d`; the later status-only deployment is Worker
+`c58e6ba9-844c-4121-91f7-d63ab639d4e7`. GitHub Pages program commit `0b81740` and current
+status-document HEAD `06bbb1e` are live. Remote verification confirmed both sites serve
+`follow-board-v2`, the alternate API preflight returns HTTP 204 for the exact GitHub Pages origin,
+and the static DOM exposes the official-page fallback link.
 
 ## Follow-board implementation (committed, migrated and deployed)
 
@@ -834,11 +839,11 @@ or issuer replies are healthy. Verify each boundary separately.
 - Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
   (`feat: publish FCN V2 static snapshot`).
 - Current static program commit:
-  `fdfff4a`.
+  `0b81740`.
 - Current static repository HEAD:
-  `b7fac5e`.
+  `06bbb1e`.
 - Snapshot source: the allowlisted public assets prepared from
-  `codex/market-analysis-phase2-4` at implementation baseline `4ede8e4`.
+  `codex/market-analysis-phase2-4` at implementation baseline `6d2f3b2`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
   `mail-compose.mjs`, `market-analysis.mjs`, `market-resources.mjs`, `follow-board.html`,
   `follow-board.css`, `follow-board.mjs`, `guide.html`,

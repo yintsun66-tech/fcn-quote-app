@@ -32,7 +32,8 @@
     "RETENTION_IMAGE_DAYS": "10",
     "RETENTION_RESULT_DAYS": "30",
     // Off until the LINE channel token and group id are set as Secrets and the push is approved.
-    "LINE_PUSH_ENABLED": "0"
+    "LINE_PUSH_ENABLED": "0",
+    "FOLLOW_BOARD_PUBLIC_ORIGIN": "https://api.yintsun66.com"
   },
   "secrets": {
     "required": [

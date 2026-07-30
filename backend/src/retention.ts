@@ -15,7 +15,9 @@ const MAX_RFQS_PER_RUN = 50;
 // Raw inbound MIME, the sanitized parse output derived from it, and the outbound mail archive are
 // all "mail" for retention purposes. Generated quote images are their own class.
 const MAIL_PREFIXES = ["raw-email/", "parsed-email/"] as const;
-const IMAGE_PREFIXES = ["quote-images/"] as const;
+// `follow-board-images/` holds the publicly fetchable LINE cards, so expiring them on the image
+// window also bounds how long that public URL stays live.
+const IMAGE_PREFIXES = ["quote-images/", "follow-board-images/"] as const;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);

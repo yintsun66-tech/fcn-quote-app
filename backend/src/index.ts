@@ -30,6 +30,7 @@ import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import { cleanupExpiredMarketData, getMarketContext } from "./market-context";
 import { applyRetention } from "./retention";
+import { getFollowBoardImage } from "./line-push";
 import {
   archiveFollowBoardProduct,
   cleanupFollowBoardOperationalData,
@@ -87,6 +88,12 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   }
   if (method === "POST" && path === "/api/v1/public/follow-board/interests") {
     return submitFollowBoardInterest(request, env);
+  }
+  // Unauthenticated by necessity: LINE fetches the image itself and sends no credentials. The
+  // unguessable keyed token is the access control, and the image carries no 手收.
+  const followBoardImageMatch = /^\/api\/v1\/public\/follow-board\/images\/([A-Za-z0-9_-]{32,128})\.png$/.exec(path);
+  if (method === "GET" && followBoardImageMatch?.[1]) {
+    return getFollowBoardImage(env, followBoardImageMatch[1]);
   }
   if (method === "OPTIONS") return emptyResponse(204, { allow: "GET, POST, OPTIONS" });
   if (method === "GET" && path === "/api/v1/health") return jsonResponse({ status: "ok" });

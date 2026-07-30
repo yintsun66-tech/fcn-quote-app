@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildFollowBoardFlexMessage, pushFollowBoardProducts } from "../src/line-push";
+import { buildFollowBoardFlexMessage, getFollowBoardImage, pushFollowBoardProducts } from "../src/line-push";
 import type { AppEnv } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
@@ -103,6 +103,81 @@ describe("LINE follow-board push", () => {
     // expires_at is 00:00 Taipei the following day, so the last usable day is 2026-07-30.
     const rendered = JSON.stringify(buildFollowBoardFlexMessage([PRODUCT]));
     expect(rendered).toContain("2026-07-30");
+  });
+
+  it("keeps 手收 out of the public image and serves it only as private LINE text", async () => {
+    const stored: Record<string, ArrayBuffer> = {};
+    let renderedHtml = "";
+    const imageEnv = {
+      ...lineEnv(),
+      FOLLOW_BOARD_PUBLIC_ORIGIN: "https://api.yintsun66.com",
+      BROWSER: {
+        async quickAction(_action: string, options: { html: string }) {
+          renderedHtml = options.html;
+          return { ok: true, async arrayBuffer() { return new Uint8Array([137, 80, 78, 71]).buffer; } };
+        }
+      },
+      RAW_MAIL_BUCKET: {
+        async put(key: string, bytes: ArrayBuffer) { stored[key] = bytes; },
+        async get(key: string) {
+          return stored[key] ? { body: stored[key] } : null;
+        }
+      }
+    } as unknown as AppEnv;
+
+    let body: Record<string, any> = {};
+    const spy = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await pushFollowBoardProducts(imageEnv, [PRODUCT], spy);
+    expect(result.sent).toBe(true);
+
+    // The rendered card must carry product conditions but never the sales fee. The card shortens a
+    // Bloomberg code to its ticker, so "TSM UN" renders as "TSM".
+    expect(renderedHtml).toContain("TSM");
+    expect(renderedHtml).toContain("15.46");
+    expect(renderedHtml).not.toContain("手收");
+
+    // An image message plus the Flex text, in that order.
+    expect(body.messages[0].type).toBe("image");
+    expect(body.messages[0].originalContentUrl).toMatch(
+      /^https:\/\/api\.yintsun66\.com\/api\/v1\/public\/follow-board\/images\/[A-Za-z0-9_-]{32,128}\.png$/
+    );
+    // 手收 travels only inside the private group message.
+    expect(JSON.stringify(body.messages[1])).toContain("手收");
+
+    // The public URL must not leak the product code or any identifier.
+    expect(body.messages[0].originalContentUrl).not.toContain("PBZL");
+
+    const token = String(body.messages[0].originalContentUrl).split("/").pop()!.replace(".png", "");
+    const served = await getFollowBoardImage(imageEnv, token);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    // A malformed or unknown token reveals nothing.
+    expect((await getFollowBoardImage(imageEnv, "../../etc/passwd")).status).toBe(404);
+    expect((await getFollowBoardImage(imageEnv, "short")).status).toBe(404);
+    expect((await getFollowBoardImage(imageEnv, "a".repeat(64))).status).toBe(404);
+  });
+
+  it("still sends the trade date and 手收 when image rendering fails", async () => {
+    const brokenEnv = {
+      ...lineEnv(),
+      FOLLOW_BOARD_PUBLIC_ORIGIN: "https://api.yintsun66.com",
+      BROWSER: { async quickAction() { throw new Error("browser rendering down"); } },
+      RAW_MAIL_BUCKET: { async put() { /* unreachable */ } }
+    } as unknown as AppEnv;
+    let body: Record<string, any> = {};
+    const spy = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await pushFollowBoardProducts(brokenEnv, [PRODUCT], spy);
+    expect(result.sent).toBe(true);
+    expect(body.messages).toHaveLength(1);
+    expect(JSON.stringify(body.messages[0])).toContain("手收");
   });
 
   it("renders one bubble per product as a carousel", () => {

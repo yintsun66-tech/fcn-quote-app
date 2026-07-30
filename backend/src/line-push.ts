@@ -1,5 +1,25 @@
+import { keyedHash } from "./crypto";
 import { insertAudit, nowIso } from "./db";
+import { QUOTE_CARD_WIDTH_PX, renderQuoteCardHtml } from "./quote-card";
 import type { AppEnv } from "./types";
+
+// Follow-board card images pushed to LINE. LINE fetches an image itself and sends no credentials,
+// so the object must be reachable without authentication. Access control is therefore the
+// unguessable key: an HMAC of the product code under EMPLOYEE_LOOKUP_KEY. Deriving it removes the
+// need for a migration to store a token, and it cannot be enumerated without the secret.
+//
+// The image intentionally carries product conditions only. `renderQuoteCardHtml` contains no 手收
+// (that line is added by the follow-board frontend under ADR 0029), so the sales fee never reaches
+// a public URL — it is sent as text inside the private LINE group instead.
+export const FOLLOW_BOARD_IMAGE_PREFIX = "follow-board-images/v1/";
+
+export async function followBoardImageToken(env: AppEnv, productCode: string): Promise<string> {
+  return keyedHash(env.EMPLOYEE_LOOKUP_KEY, `follow-board-image:${productCode.toUpperCase()}`);
+}
+
+export function followBoardImageKey(token: string): string {
+  return `${FOLLOW_BOARD_IMAGE_PREFIX}${token}.png`;
+}
 
 // LINE Messaging API push endpoint. Bound exactly so a misconfigured variable can never redirect
 // product data to an arbitrary host.
@@ -118,6 +138,80 @@ export function buildFollowBoardFlexMessage(products: readonly FollowBoardPushPr
   };
 }
 
+/**
+ * Renders one product-conditions card server-side and stores it for LINE to fetch.
+ *
+ * Returns null on any failure so the caller can still push the text message: an image is a
+ * convenience, and losing it must not cost the operator the trade date and sales fee.
+ */
+export async function renderFollowBoardImage(
+  env: AppEnv,
+  product: FollowBoardPushProduct
+): Promise<string | null> {
+  const publicBase = String(env.FOLLOW_BOARD_PUBLIC_ORIGIN ?? "").trim().replace(/\/+$/, "");
+  if (!publicBase) return null;
+  try {
+    const html = renderQuoteCardHtml(product.issuerDisplayName, [{
+      sequence: 1,
+      tradeCode: product.productCode,
+      product: product.product ?? "FCN",
+      currency: product.currency ?? "",
+      issuer: product.issuerDisplayName,
+      issuerDisplayName: product.issuerDisplayName,
+      tradeDate: product.tradeDate,
+      tenorMonths: product.tenorMonths,
+      guaranteedPeriodsMonths: product.guaranteedPeriodsMonths,
+      underlyings: product.underlyings,
+      couponPaPct: product.couponPaPct,
+      strikePct: product.strikePct,
+      koBarrierPct: product.koBarrierPct,
+      koType: product.koType,
+      barrierType: product.barrierType,
+      kiBarrierPct: product.kiBarrierPct,
+      // The card renders no 手收; the comparable price is not a sales fee and is required for the
+      // DAC floating-income note only.
+      comparablePricePct: null
+    }], "");
+    const response = await env.BROWSER.quickAction("screenshot", {
+      html,
+      viewport: { width: QUOTE_CARD_WIDTH_PX, height: 1280, deviceScaleFactor: 1.5 },
+      screenshotOptions: { type: "png", fullPage: true },
+      gotoOptions: { waitUntil: "networkidle0" }
+    });
+    if (!response.ok) return null;
+    const bytes = await response.arrayBuffer();
+    const token = await followBoardImageToken(env, product.productCode);
+    await env.RAW_MAIL_BUCKET.put(followBoardImageKey(token), bytes, {
+      httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=86400" }
+    });
+    return `${publicBase}/api/v1/public/follow-board/images/${token}.png`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serves a follow-board card image to LINE. Deliberately unauthenticated — LINE fetches the image
+ * with no credentials — so the unguessable keyed token is the access control. Only a well-formed
+ * token is accepted, and nothing about the product is revealed on a miss.
+ */
+export async function getFollowBoardImage(env: AppEnv, token: string): Promise<Response> {
+  // keyedHash returns base64url, so the token alphabet is A-Z a-z 0-9 _ - and never a path
+  // separator or dot. Anything else is rejected before it can reach the bucket.
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
+    return new Response("Not found", { status: 404 });
+  }
+  const object = await env.RAW_MAIL_BUCKET.get(followBoardImageKey(token));
+  if (!object) return new Response("Not found", { status: 404 });
+  return new Response(object.body, {
+    headers: {
+      "content-type": "image/png",
+      "cache-control": "public, max-age=86400",
+      "x-content-type-options": "nosniff"
+    }
+  });
+}
+
 function configured(env: AppEnv): { token: string; groupId: string } | null {
   const token = String(env.LINE_CHANNEL_ACCESS_TOKEN ?? "").trim();
   const groupId = String(env.LINE_GROUP_ID ?? "").trim();
@@ -140,7 +234,15 @@ export async function pushFollowBoardProducts(
   const credentials = configured(env);
   if (!credentials) return { sent: false, status: null, reason: "NOT_CONFIGURED" };
 
-  const messages = [buildFollowBoardFlexMessage(products)].slice(0, MAX_MESSAGES_PER_PUSH);
+  // Product-conditions images first, then one Flex message carrying the trade date and 手收.
+  // Keeping the sales fee out of the image is deliberate: the image sits behind a public URL for
+  // LINE to fetch, while the text stays inside the private group.
+  const images: unknown[] = [];
+  for (const product of products.slice(0, MAX_MESSAGES_PER_PUSH - 1)) {
+    const url = await renderFollowBoardImage(env, product);
+    if (url) images.push({ type: "image", originalContentUrl: url, previewImageUrl: url });
+  }
+  const messages = [...images, buildFollowBoardFlexMessage(products)].slice(0, MAX_MESSAGES_PER_PUSH);
   let status: number | null = null;
   let reason: string | undefined;
   try {

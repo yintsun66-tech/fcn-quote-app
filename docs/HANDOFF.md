@@ -8,6 +8,34 @@ Current production source: implementation commit `061fe3b`, currently served as 
 `6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Scheduled retention implemented, disabled by default (ADR 0030)
+
+Retention was documented since the first backend build but **never implemented** — nothing deleted
+an R2 object, so the private bucket only grew. `retention.ts` now applies the approved windows on
+the existing two-minute tick: **raw mail 10 days, generated images 10 days, structured results 30
+days**.
+
+- **`RETENTION_ENABLED` is `"0"`. Deploying this deletes nothing.** Turning it on is a separate,
+  explicitly authorized change; deletion is irreversible with no undo and no backup.
+- The operator confirmed this data is an operational convenience tool, not the bank's official
+  financial record, which is why a 30-day results window is acceptable.
+- Two production defects were caught by the new tests before release:
+  1. `inbound_messages.r2_raw_mime_key` is `NOT NULL`. The first implementation cleared it, which
+     would have thrown on **every** scheduled run. Only the nullable pointers are cleared now.
+  2. `follow_board_products` holds three `ON DELETE RESTRICT` references and `source_rfq_id` is
+     nullable, so excluding by that column alone would still let a cascade hit a RESTRICT and abort
+     the run. The query now excludes all three paths (rfq, inbound message, outbound batch).
+- Verified: typecheck clean, **23 files / 167 tests**, dry-run build shows all four variables bound
+  with `RETENTION_ENABLED ("0")`.
+- **Not done:** no production deletion has occurred, and none will until the flag is enabled. Run
+  `applyRetention(env, true)` (dry run) first to see the counts before enabling.
+
+## Alpha Vantage abandoned
+
+The operator has dropped Alpha Vantage; a replacement quote API will be chosen later. Treat
+previous-close autofill as an inactive feature rather than an outstanding bug. The Secret name,
+migration `0012` and the daily budget guard remain in place and harmless.
+
 ## Documentation reconciliation (2026-07-30)
 
 On 2026-07-30, the current code, Git history, deployed Worker evidence, remote D1 state, ADRs,

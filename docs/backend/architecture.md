@@ -27,7 +27,7 @@ The existing root-level static site remains unchanged during the backend build. 
 | CITI price normalization | Preserve raw Upfront and calculate `notePriceEquivalent = 100 - upfrontPct` |
 | Equal quotes | Preserve equal economic rank; use earliest valid receipt as the deterministic image winner |
 | MS OBU handling | Display warning only until an explicit OBU attribute and enforcement rule exist |
-| Retention starting point | Raw mail 30 days, generated images 90 days, structured results 365 days. **This is an approved target, not implemented behavior.** No code deletes an R2 object; scheduled cleanup covers only `public_data_cache`, `market_context_rate_limits`, `market_provider_daily_usage` and the follow-board idempotency/attempt tables. Artifact `expires_at` blocks *reads* (410) without removing bytes |
+| Retention | Raw mail 10 days, generated images 10 days, structured results 30 days (ADR 0030). Implemented in `retention.ts` on the scheduled tick and **off by default** (`RETENTION_ENABLED="0"`); enabling it is a separate, explicitly authorized action. This data is an operational convenience tool, not the bank's official financial record |
 | Test fixtures | Anonymous fixtures are allowed in a private repository |
 | Correlation token | Allowed, but never use `##` |
 | Generated subject prefixes | Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes |

@@ -29,6 +29,7 @@ import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "
 import { getTradeAnalysisInput } from "./analysis";
 import { scheduledWorkflowRecovery } from "./coordinator";
 import { cleanupExpiredMarketData, getMarketContext } from "./market-context";
+import { applyRetention } from "./retention";
 import {
   archiveFollowBoardProduct,
   cleanupFollowBoardOperationalData,
@@ -228,6 +229,13 @@ export default {
       await cleanupFollowBoardOperationalData(env);
     } catch (error) {
       console.error("follow_board_cleanup_failed", {
+        errorType: error instanceof Error ? error.name : "unknown"
+      });
+    }
+    try {
+      await applyRetention(env);
+    } catch (error) {
+      console.error("retention_failed", {
         errorType: error instanceof Error ? error.name : "unknown"
       });
     }

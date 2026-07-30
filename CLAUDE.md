@@ -33,7 +33,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
 - Production implementation commit `4ede8e4` is documented by this handoff and
-  deployed as Worker `354cff3f-7c5b-4f3a-818e-788f9c5111a8` on 2026-07-30. Resolve the current
+  currently served by Worker `a0361916-5522-4090-9135-91f6f86aae33` on 2026-07-30. Resolve the current
   branch HEAD from Git rather than copying a historical handoff hash. The current verification
   baseline is 21 test files / 153 tests. A deployment record is evidence of Worker/static-asset
   publication, not evidence that Alpha Vantage returned usable data or that real bank mail was

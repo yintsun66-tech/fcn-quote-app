@@ -4,8 +4,8 @@ Updated: 2026-07-30 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-Current production source: implementation commit `4ede8e4`, deployed as Worker
-`354cff3f-7c5b-4f3a-818e-788f9c5111a8` on 2026-07-30. Current branch HEAD may include later
+Current production source: implementation commit `4ede8e4`, currently served as Worker
+`a0361916-5522-4090-9135-91f6f86aae33` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
 ## Follow-board implementation (committed, migrated and deployed)
@@ -29,11 +29,13 @@ the application follow-board page.
 
 Local evidence so far: TypeScript typecheck passed and the full suite passed at **21 test files /
 153 tests**. The Cloudflare dry-run build passed with 18 public assets. Implementation commit
-`4ede8e4` is deployed as Worker `354cff3f-7c5b-4f3a-818e-788f9c5111a8`; the four-digit
+`4ede8e4` was first deployed as Worker `354cff3f-7c5b-4f3a-818e-788f9c5111a8`; the later
+status-page-only deployment is Worker `a0361916-5522-4090-9135-91f6f86aae33`. The four-digit
 `FOLLOW_BOARD_VIEW_PIN` Secret exists and migration `0013_follow_board.sql` is applied to remote
 D1. Remote verification returned HTTP 200 for the page and health endpoint, HTTP 401 without a
 PIN, and HTTP 204 with the exact GitHub Pages CORS origin. The static assets are published from
-`yintsun66-tech/fcnV2` commit `fdfff4a`. Preserve user-owned untracked `.claude/` and `output/`.
+`yintsun66-tech/fcnV2` program commit `fdfff4a`; its status-document HEAD is `b7fac5e`. Preserve
+user-owned untracked `.claude/` and `output/`.
 
 ## Zimbra manual-mail fallback (committed, pushed and deployed)
 
@@ -823,7 +825,7 @@ or issuer replies are healthy. Verify each boundary separately.
 - Current static program commit:
   `fdfff4a`.
 - Current static repository HEAD:
-  `fdfff4a`.
+  `b7fac5e`.
 - Snapshot source: the allowlisted public assets prepared from
   `codex/market-analysis-phase2-4` at implementation baseline `4ede8e4`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,

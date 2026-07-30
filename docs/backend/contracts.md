@@ -603,3 +603,38 @@ Publication email contract:
 
 - requires effective role `ADMIN` or `PS`, a same-origin session and CSRF; and
 - archives rather than deletes the product.
+
+`GET /api/v1/public/follow-board/images/:token.png`
+
+- unauthenticated by necessity: LINE fetches the image itself and sends no credentials;
+- `:token` is `keyedHash(EMPLOYEE_LOOKUP_KEY, "follow-board-image:<PRODUCT CODE>")`, base64url, and
+  is the only access control — it reveals neither the product code nor any identifier;
+- serves the product-conditions card only. **The card carries no 手收**: it is rendered with
+  `comparablePricePct: null` so the fee cannot appear even if the template changes; and
+- returns 404 for a malformed or unknown token, and for every object expired by ADR 0030's 10-day
+  image window, which also bounds how long the URL stays live.
+
+`POST /api/v1/public/line/webhook`
+
+- **disabled**: returns 404 unless `LINE_WEBHOOK_ENABLED="1"` and `LINE_CHANNEL_SECRET` is set;
+- exists only to capture the LINE group id, which LINE delivers in no other way. Discovery was
+  completed on 2026-07-31 and the endpoint was closed again;
+- requires a valid `x-line-signature` (`base64(HMAC-SHA256(channel secret, raw body))` — standard
+  base64, not base64url) verified by constant-time compare, so only LINE can write to the audit
+  trail. A bad signature returns 401 without disclosing which part was wrong; and
+- records `LINE_SOURCE_DISCOVERED` with the source type and chat id only — no member id, display
+  name or message text — and always returns 200 on a valid signature, because LINE retries non-2xx.
+
+## LINE push contract
+
+When `LINE_PUSH_ENABLED="1"`, a completed follow-board publication is pushed to one private LINE
+group through `POST https://api.line.me/v2/bot/message/push`.
+
+- Runs **after** the publication batch has committed and never throws. A LINE outage, a revoked
+  token or a rate limit cannot fail or roll back a publication.
+- Two outputs per publication, split on purpose. The image sits behind a public URL, so 手收 must
+  not be in it; **手收 and 交易日期 travel only in the Flex message text**, inside the private group.
+- `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_GROUP_ID` are Secrets, not vars — the group id names a
+  private chat. The `FOLLOW_BOARD_LINE_PUSHED` audit event records message counts and HTTP status
+  only; neither value is ever logged.
+- No RFQ id, correlation token, requester or employee data may travel to LINE.

@@ -76,10 +76,18 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `061fe3b`；實際最新分支 HEAD
+- 正式功能程式基線為 `ccbb7dd`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `6429a8bf-a735-47b4-a5ba-5fa3684ec282`（2026-07-30
+- 最新正式 Worker 版本為 `5abc0baa-9be0-4021-a90f-d067ed074c0c`（2026-07-31
   部署）。
+- 跟單商品發布後會推播到一個私密 LINE 群組（`LINE_PUSH_ENABLED="1"`，2026-07-31
+  啟用）。推播在發布交易 commit **之後**才執行且不會拋出例外，LINE 中斷或憑證失效
+  都不會導致發布失敗或回滾。輸出刻意拆成兩則：商品條件圖走公開 URL，因此**手收
+  絕不入圖**；**手收與交易日期只出現在群組訊息本文**。`LINE_CHANNEL_ACCESS_TOKEN`
+  與 `LINE_GROUP_ID` 是 Secret 而非 var，稽核只記筆數與 HTTP 狀態碼。
+  尚未有任何一次真實推播被觀察到 —— 下一次真實發布才是端到端驗證。
+- `POST /api/v1/public/line/webhook` 僅用於取得 LINE group id（LINE 不以其他方式
+  提供），取得後已關閉：`LINE_WEBHOOK_ENABLED="0"` 時一律回 404。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；
   本機產圖失敗時會自動退回伺服器產圖。`AUTO_RANK_ONE_IMAGE="1"` 可恢復舊的

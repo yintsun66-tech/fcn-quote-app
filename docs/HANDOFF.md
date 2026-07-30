@@ -70,6 +70,23 @@ Verified locally: typecheck clean (`src` and `test`), **24 test files / 176 test
 `LINE_PUSH_ENABLED ("1")` and `LINE_WEBHOOK_ENABLED ("0")`. `worker-configuration.d.ts` is
 gitignored, so run `npx wrangler types` after pulling or the new var will not typecheck.
 
+Git state: pushed to `origin/codex/market-analysis-phase2-4` (`f08561c..957b028`), local and remote
+in sync. The outgoing diff was scanned for a real group id or long token before pushing and was
+clean — `.dev.vars.example` holds blank placeholders and the tests use a fabricated channel secret.
+
+**Outstanding, in priority order:**
+
+1. **Turn off "Use webhook"** in LINE Developers Console → Messaging API. The endpoint returns 404
+   now, so LINE will keep retrying and accumulating delivery errors until this is switched off.
+   Push is outbound only and does not need a webhook.
+2. **The push itself is still unverified end to end.** What is proven is configuration, endpoint
+   behaviour and 176 passing tests — not that a message reached the group. The next real
+   follow-board publication is the first proof. If nothing arrives, read the HTTP status from the
+   `FOLLOW_BOARD_LINE_PUSHED` audit event; a `4xx` on the group id means `LINE_GROUP_ID` is wrong,
+   a `401` means the access token is.
+3. `FRED_API_KEY` is still configured as a Secret but ADR 0023 removed FRED from the runtime path,
+   so nothing reads it. Harmless; delete it during any future secret cleanup.
+
 ## Legacy follow-board products never expired (fixed and deployed)
 
 Products stayed on the public board past their intended removal date. Diagnosis from production:
@@ -1375,9 +1392,13 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: **22 files / 163 tests passed**.
+- Full test suite: **24 files / 176 tests passed**.
 - Cloudflare Worker dry-run build: passed with 18 public assets.
-- Current production health/static readback for Worker
+- Current production readback for Worker `5abc0baa-9be0-4021-a90f-d067ed074c0c`: health returned
+  HTTP 200, and `POST /api/v1/public/line/webhook` returned 404 with the webhook disabled. While it
+  was briefly enabled (Worker `30837aa3-e938-415c-a650-08aebe2ed995`) the same endpoint returned
+  404 without a signature and 401 with an invalid one.
+- Earlier production health/static readback for Worker
   `6429a8bf-a735-47b4-a5ba-5fa3684ec282`: health and application/follow-board assets returned
   HTTP 200; a public manifest request without the PIN returned HTTP 401.
 - Historical mobile-image production readback for Worker

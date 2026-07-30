@@ -13,7 +13,7 @@ import {
   processFollowBoardPublicationEmail,
   selectFollowBoardPublicationRows
 } from "../src/follow-board-publication";
-import { cleanupFollowBoardOperationalData } from "../src/follow-board";
+import { cleanupFollowBoardOperationalData, legacyExpiryAt } from "../src/follow-board";
 import worker from "../src/index";
 import type { AppEnv } from "../src/types";
 
@@ -959,5 +959,35 @@ describe("follow board", () => {
         ORDER BY created_at DESC LIMIT 1`
     ).first<{ action: string }>();
     expect(audit?.action).toBe("FOLLOW_BOARD_PRODUCT_EXPIRED");
+  });
+
+  it("expires legacy products published before removal dates existed", async () => {
+    // Reproduces the production case: PBZL was published with the old `BMJB跟單` subject, which
+    // carried no removal date, so expires_at stayed NULL and the product never left the board.
+    expect(legacyExpiryAt("0730", "2026-07-30T08:11:00.000Z")).toBe("2026-07-30T16:00:00.000Z");
+    expect(legacyExpiryAt("0728", "2026-07-30T08:14:00.000Z")).toBe("2026-07-28T16:00:00.000Z");
+    // A December deal published in the same December must not roll into the next year.
+    expect(legacyExpiryAt("1231", "2026-12-31T02:00:00.000Z")).toBe("2026-12-31T16:00:00.000Z");
+    expect(legacyExpiryAt("bad", "2026-07-30T08:11:00.000Z")).toBeNull();
+
+    const now = new Date().toISOString();
+    await testEnv.DB.prepare(
+      `INSERT INTO follow_board_products
+        (id, product_code, status, source_inbound_message_id, source_reference_hash, parser_profile,
+         source_table_index, source_row_index, batch_code, deal_sequence, subject_date_mmdd, issuer,
+         trade_date, estimated_yield_pct, public_snapshot_json, published_by_email,
+         published_at, created_at, updated_at, expires_at)
+       VALUES ('fbp_legacy_null', 'PBLG', 'PUBLISHED', ?, 'ref_legacy', 'BNP_FCN_V1',
+               0, 0, 'BMJB', 1, '0730', 'BNP', '2026-07-30', 15.46, '{}',
+               'i14053@firstbank.com.tw', '2026-07-30T08:11:00.000Z', ?, ?, NULL)`
+    ).bind(COMMAND_INBOUND_ID, now, now).run();
+
+    await cleanupFollowBoardOperationalData(testEnv);
+
+    const product = await testEnv.DB.prepare(
+      "SELECT status, expires_at FROM follow_board_products WHERE product_code = 'PBLG'"
+    ).first<{ status: string; expires_at: string | null }>();
+    expect(product?.expires_at).toBe("2026-07-30T16:00:00.000Z");
+    expect(product?.status).toBe("ARCHIVED");
   });
 });

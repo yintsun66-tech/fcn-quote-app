@@ -468,9 +468,52 @@ export async function archiveFollowBoardProduct(
   return jsonResponse({ productCode: normalized, status: "ARCHIVED", archivedAt: timestamp });
 }
 
+/**
+ * Reconstructs an expiry for a product published before ADR 0028 added the removal date.
+ *
+ * Those subjects used the old `BATCH跟單` form with no date at all, so `expires_at` is NULL and the
+ * product would otherwise stay on the public board forever. The stored `subject_date_mmdd` is the
+ * deal date, and ADR 0028's rule is that a product stays available through its stated calendar
+ * date, so the deal date is the faithful fallback: expiry is 00:00 Asia/Taipei the following day.
+ *
+ * The year is taken from `published_at` and rolled back when the deal date sits in the next
+ * calendar year, which happens for a product published in late December.
+ */
+export function legacyExpiryAt(subjectDateMmdd: string, publishedAt: string): string | null {
+  if (!/^\d{4}$/.test(subjectDateMmdd)) return null;
+  const month = Number(subjectDateMmdd.slice(0, 2));
+  const day = Number(subjectDateMmdd.slice(2));
+  const published = new Date(publishedAt);
+  if (!Number.isFinite(published.getTime())) return null;
+  let year = Number(taipeiDate(published).slice(0, 4));
+  const candidate = new Date(Date.UTC(year, month - 1, day + 1) - 8 * 60 * 60 * 1_000);
+  if (!Number.isFinite(candidate.getTime())) return null;
+  // A deal date more than a month ahead of publication means the year rolled over.
+  if (candidate.getTime() - published.getTime() > 31 * 24 * 60 * 60 * 1_000) year -= 1;
+  const expiry = new Date(Date.UTC(year, month - 1, day + 1) - 8 * 60 * 60 * 1_000);
+  return Number.isFinite(expiry.getTime()) ? expiry.toISOString() : null;
+}
+
 export async function cleanupFollowBoardOperationalData(env: AppEnv): Promise<void> {
   const now = nowIso();
   const attemptsBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+
+  // Backfill legacy products first so they flow through the normal expiry path below instead of
+  // living on the board indefinitely. Only NULL expiries are touched; a stored expiry is never
+  // rewritten.
+  const legacy = await env.DB.prepare(
+    `SELECT id, subject_date_mmdd, published_at
+       FROM follow_board_products
+      WHERE status = 'PUBLISHED' AND expires_at IS NULL
+      LIMIT 100`
+  ).all<{ id: string; subject_date_mmdd: string; published_at: string }>();
+  for (const row of legacy.results) {
+    const expiry = legacyExpiryAt(row.subject_date_mmdd, row.published_at);
+    if (!expiry) continue;
+    await env.DB.prepare(
+      "UPDATE follow_board_products SET expires_at = ?, updated_at = ? WHERE id = ? AND expires_at IS NULL"
+    ).bind(expiry, now, row.id).run();
+  }
   const expiredProducts = await env.DB.prepare(
     `SELECT id, product_code, expires_at
        FROM follow_board_products

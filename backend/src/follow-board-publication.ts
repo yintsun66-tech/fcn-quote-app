@@ -1,5 +1,6 @@
 import type { Address, Email } from "postal-mime";
 import { newId, nowIso } from "./db";
+import { pushFollowBoardProducts } from "./line-push";
 import {
   detectIssuerTableProfiles,
   type ParsedIssuerRow
@@ -702,4 +703,32 @@ export async function processFollowBoardPublicationEmail(
         WHERE id = ?`
     ).bind(publishedAt, publishedAt, input.parseJobId)
   ]);
+
+  // Notification runs only after the publication batch has committed, and never throws, so a LINE
+  // outage, revoked token or rate limit cannot fail or roll back a publication that already
+  // succeeded. Only the public snapshot fields are sent.
+  try {
+    await pushFollowBoardProducts(env, publications.map(item => ({
+      productCode: item.snapshot.productCode,
+      issuerDisplayName: item.snapshot.issuerDisplayName,
+      product: item.snapshot.product,
+      currency: item.snapshot.currency,
+      tradeDate: item.snapshot.tradeDate,
+      expiresAt: item.snapshot.expiresAt,
+      couponPaPct: item.snapshot.couponPaPct,
+      salesFeePct: item.snapshot.salesFeePct,
+      tenorMonths: item.snapshot.tenorMonths,
+      guaranteedPeriodsMonths: item.snapshot.guaranteedPeriodsMonths,
+      underlyings: item.snapshot.underlyings,
+      strikePct: item.snapshot.strikePct,
+      koBarrierPct: item.snapshot.koBarrierPct,
+      koType: item.snapshot.koType,
+      barrierType: item.snapshot.barrierType,
+      kiBarrierPct: item.snapshot.kiBarrierPct
+    })));
+  } catch (error) {
+    console.error("follow_board_line_push_failed", {
+      errorType: error instanceof Error ? error.name : "unknown"
+    });
+  }
 }

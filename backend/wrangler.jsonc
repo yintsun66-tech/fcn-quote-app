@@ -30,7 +30,9 @@
     "RETENTION_ENABLED": "0",
     "RETENTION_RAW_MAIL_DAYS": "10",
     "RETENTION_IMAGE_DAYS": "10",
-    "RETENTION_RESULT_DAYS": "30"
+    "RETENTION_RESULT_DAYS": "30",
+    // Off until the LINE channel token and group id are set as Secrets and the push is approved.
+    "LINE_PUSH_ENABLED": "0"
   },
   "secrets": {
     "required": [

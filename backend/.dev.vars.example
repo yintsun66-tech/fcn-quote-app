@@ -12,3 +12,9 @@ ALPHA_VANTAGE_API_KEY=
 
 # PIN gating the follow-board manifest and interest endpoints (ADR 0025).
 FOLLOW_BOARD_VIEW_PIN=
+
+# Optional. LINE Messaging API push for follow-board publications (LINE_PUSH_ENABLED must be "1").
+# Leave blank to disable; the push is skipped with reason NOT_CONFIGURED and publication is
+# unaffected. The group id identifies a private chat, so treat it as a Secret, not a var.
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_GROUP_ID=

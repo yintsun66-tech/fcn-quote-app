@@ -3,6 +3,9 @@ export interface AppEnv extends Env {
   EMPLOYEE_LOOKUP_KEY: string;
   ALPHA_VANTAGE_API_KEY: string;
   FOLLOW_BOARD_VIEW_PIN: string;
+  // Optional: the follow-board LINE push stays inert when either is absent.
+  LINE_CHANNEL_ACCESS_TOKEN?: string;
+  LINE_GROUP_ID?: string;
 }
 
 export type UserStatus = "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED" | "DISABLED";

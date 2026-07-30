@@ -8,6 +8,37 @@ Current production source: implementation commit `061fe3b`, currently served as 
 `6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
 
+## Documentation reconciliation (2026-07-30)
+
+On 2026-07-30, the current code, Git history, deployed Worker evidence, remote D1 state, ADRs,
+and runbooks were compared against the handoff documents. These six files were aligned to the
+current implementation: `CLAUDE.md`, `README.md`, `docs/HANDOFF.md`,
+`docs/backend/market-analysis-roadmap.md`, `docs/runbooks/market-context-operations.md`, and
+`version-status.html`.
+
+Current evidence:
+
+- backend implementation baseline: `061fe3b`
+- documentation branch HEAD before this local documentation update: `9b39359`
+- production Worker version: `6429a8bf-a735-47b4-a5ba-5fa3684ec282`
+- remote migrations: `0001` through `0015`
+- backend verification baseline: 22 test files / 163 tests
+- static GitHub Pages baseline: `d787aeb`
+- read-only production D1 inspection found fresh SEC instrument and filing cache rows for three
+  symbols
+- the same inspection found no successful Alpha Vantage cache rows; the provider usage ledger
+  recorded 10 requests on 2026-07-29
+- the old `/api/v1/market/ideas` and automated movers feed are intentionally absent; current idea
+  discovery uses five TradingView ranking links for both US and Japan, with embedded hotlists only
+  for the US market
+
+This reconciliation is documentation-only. It does not change application code, D1 data,
+migrations, bindings, secrets, or deployed resources.
+
+The chronological entries later in this file are retained as historical deployment records. If a
+historical section conflicts with this current summary, the current code, ADRs, current runbooks,
+Git history, and the summary above are authoritative.
+
 ## Follow-board sales-fee display (deployed)
 
 ADR 0029 adds a `手收` line directly below each product's final available date. For non-CITI
@@ -934,7 +965,11 @@ Commit `481c220` is pushed and deployed as Worker
 
 - Application: `https://app.yintsun66.com`
 - API: `https://api.yintsun66.com`
-- Latest verified Cloudflare Worker version:
+- Current verified Cloudflare Worker version:
+  `6429a8bf-a735-47b4-a5ba-5fa3684ec282`, deployed from implementation commit `061fe3b` on
+  2026-07-30. Health, application assets, follow-board assets and the unauthenticated manifest
+  guard were verified after deployment.
+- Earlier mobile-image Cloudflare Worker version:
   `b18cba05-bd46-49b5-818e-71d36d9b9d39` (mobile quote-image render-hang fix, on top of
   client-side rasterization, the self-hosted rasterizer, on-demand images and all earlier
   behavior, deployed 2026-07-28). Post-deploy verification: `GET /api/v1/health` returned
@@ -950,10 +985,10 @@ Commit `481c220` is pushed and deployed as Worker
   `cc633dcb-...` from `0bbe159`;
   `364a345e-...` from `fd7a380`; `25d32525-...` from `0913f16`;
   `2de5b070-...` from `23c084e`.
-- D1 database: `fcn-quote`; migrations applied to remote D1 now run through
-  `0010_ps_privilege.sql`. Migration 0010 (additive `users.is_privileged_support` column) was
-  applied to remote on 2026-07-25 and verified (`pragma_table_info('users')` shows the column);
-  `wrangler d1 migrations list fcn-quote --remote` reports no pending migrations.
+- D1 database: `fcn-quote`; migrations applied to remote D1 run through
+  `0015_follow_board_expiry.sql`. The additive follow-board migrations `0013` through `0015`
+  support product publication, multi-product command audit, declared issuer and automatic expiry.
+  The latest deployment evidence reported no pending remote migration and no foreign-key errors.
 - Private R2 bucket: `fcn-quote-private`
 - Outbound sender and inbound Email Worker address: `rfq@yintsun66.com`
 - Fixed outbound recipient: `i14053@firstbank.com.tw`
@@ -972,19 +1007,19 @@ or issuer replies are healthy. Verify each boundary separately.
 - Initial static program commit: `2d13926712667d6717126429b18c4ec75cd15750`
   (`feat: publish FCN V2 static snapshot`).
 - Current static program commit:
-  `0b81740`.
+  `d787aeb`.
 - Current static repository HEAD:
-  `06bbb1e`.
+  `d787aeb`.
 - Snapshot source: the allowlisted public assets prepared from
-  `codex/market-analysis-phase2-4` at implementation baseline `6d2f3b2`.
+  `codex/market-analysis-phase2-4` at implementation baseline `061fe3b`.
 - Published files are limited to `index.html`, `styles.css`, `app.js`, `backend-client.js`,
   `mail-compose.mjs`, `market-analysis.mjs`, `market-resources.mjs`, `follow-board.html`,
   `follow-board.css`, `follow-board.mjs`, `guide.html`,
   `version-status.html`, `交易所查詢0715.csv`, `vendor/html2canvas-1.4.1.min.js`,
   `backend/shared/email-formats.js`, and a static-only `README.md`.
-- The updated `app.js` returned HTTP 200 after the Pages build. A rendered browser check confirmed
-  the static currency selector includes `ZAR`, keeps `USD` selected, and does not activate
-  `backendAuth`.
+- The current static assets returned HTTP 200 after the Pages build. They include the `ZAR`
+  currency option, the v4 follow-board module, automatic-expiry/full-card product display and the
+  sales-fee line. Static mode keeps `USD` selected and does not activate `backendAuth`.
 - GitHub Pages is not a backend migration. It has no authentication, D1, Queue, Email Worker, R2,
   ranking, automatic mail, or private artifact service. Never copy secrets, raw mail, D1/R2
   content, personal data, migrations, Worker source, or `.dev.vars` into `fcnV2`.
@@ -1131,9 +1166,13 @@ The Cloudflare backend currently implements:
 - seven-minute provisional-result reminder, a fifteen-minute reply window followed by a
   sixty-second mail-transport grace, and an owner-authorized early-finalize action outside grace;
 - immutable late replies and owner/ADMIN versioned recalculation;
-- deterministic rank-one image generation plus owner-requested images for exact ranks 1–4 or a
-  server-validated custom fifth quote;
-- portrait, issuer-themed quote cards stored in private R2;
+- on-demand browser image generation for exact ranks 1–4 or a server-validated custom fifth
+  quote, with a separately authorized server-rendered/private-R2 fallback;
+- portrait, issuer-themed quote cards whose normal browser-generated downloads are not persisted
+  to R2;
+- a PIN-gated public follow-board shared by the application and static site, with issuer-derived
+  full quote cards, product-code publication, automatic expiry, sales-fee display and owner data
+  minimization;
 - ADMIN registration review, outbound archive, and RFQ timing diagnostics;
 - owner-scoped recoverable RFQ workspace.
 
@@ -1217,9 +1256,12 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: **16 files / 103 tests passed**.
-- Cloudflare Worker dry-run build: passed.
-- Production health/static readback for Worker
+- Full test suite: **22 files / 163 tests passed**.
+- Cloudflare Worker dry-run build: passed with 18 public assets.
+- Current production health/static readback for Worker
+  `6429a8bf-a735-47b4-a5ba-5fa3684ec282`: health and application/follow-board assets returned
+  HTTP 200; a public manifest request without the PIN returned HTTP 401.
+- Historical mobile-image production readback for Worker
   `b18cba05-bd46-49b5-818e-71d36d9b9d39`: HTTP 200; the live `backend-client.js` contains
   `withRenderTimeout`, `CARD_SAFE_CANVAS_PIXELS`, `showCardImage` and 「長按圖片」; the live
   stylesheet contains `backend-card-preview`. Earlier deployment checks verified the
@@ -1445,13 +1487,14 @@ that the verified API/static deployment failed.
 
 ## Safe next steps
 
-**Highest-value item right now: validate the Alpha Vantage credential without changing
-application logic.** The Secret name, migration and Worker are deployed, but ORCL, TSM and
-market-movers all returned an `Information` envelope and no normalized payload. Confirm that the
-hidden Secret value is an activated Alpha Vantage key rather than a MarketData.app token, replace
-only that Secret if needed, wait for the ten-minute failed-refresh backoff, then retry one existing
-analysis symbol and the movers panel. Do not log the key, expose the upstream body, clear D1 rows
-manually or create a real RFQ for this check.
+**Highest-value item right now: validate one Alpha Vantage symbol request without changing
+application logic.** Read-only production D1 evidence on 2026-07-30 shows fresh SEC cache rows,
+no successful Alpha Vantage cache rows, and ten Alpha Vantage requests recorded on 2026-07-29.
+Confirm that the hidden Secret is an activated Alpha Vantage key, replace only that Secret if
+needed, wait for the failed-refresh backoff, and retry one existing analysis symbol. The removed
+`/api/v1/market/ideas` endpoint and movers panel must not be recreated for this check. Do not log
+the key, expose the upstream body, clear D1 rows manually, aggressively retry the free provider,
+or create a real RFQ.
 
 **Second: validate quote-image download on a real phone/tablet.** ADR 0017 moved rasterization
 into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile WebKit. The

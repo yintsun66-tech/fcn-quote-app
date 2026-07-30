@@ -3,10 +3,13 @@
 This runbook applies only after explicit migration/Secret/deployment authorization. It must not be
 used to change RFQ, ranking, mail-routing or ownership data.
 
-Current production baseline (2026-07-29): migration `0012` and the Secret name are present, and
-Worker `0c63296c-f61f-4a11-a358-30db6e783ac6` is deployed. The first three Alpha Vantage requests
-returned an `Information` envelope and no normalized payload. Verify the key's source and
-activation through the hidden Secret workflow before changing application logic or clearing cache.
+Current production baseline (2026-07-30): market migration `0012` and the Secret name are present;
+all repository migrations through `0015` are applied, and Worker
+`6429a8bf-a735-47b4-a5ba-5fa3684ec282` is deployed. A read-only aggregate check found three fresh
+SEC instrument/filing pairs, no Alpha Vantage cache row, and ten provider attempts on 2026-07-29.
+Previous-close data is therefore still operationally unavailable. Verify one current symbol and,
+if needed, the key's activation/entitlement through the hidden Secret workflow before changing
+application logic or clearing cache.
 
 **ADR 0024 scope change.** Alpha Vantage now serves only the per-symbol previous close that fills
 「輸入標的參考現價」. Market hot lists moved to the homepage as a TradingView widget and no longer
@@ -25,9 +28,9 @@ daily-series requests only, which materially reduces pressure on the free-tier l
    allows `ALPHA_VANTAGE` rows and adds a daily provider-usage counter. It does not modify existing
    financial records.
 
-## First deployment order
+## Secret rotation or redeployment order
 
-1. Securely create the Worker Secret:
+1. Only when replacing the key, securely update the Worker Secret:
 
    ```powershell
    Set-Location backend
@@ -35,19 +38,21 @@ daily-series requests only, which materially reduces pressure on the free-tier l
    ```
 
    Type the value only into Wrangler's hidden prompt.
-2. Apply the migration:
+2. Check migration status. Apply only a reviewed pending migration; do not rerun or edit `0012`:
 
    ```powershell
    pnpm exec wrangler d1 migrations apply fcn-quote --remote
    ```
 
-3. Deploy the Worker only after the two previous steps succeed.
+3. Deploy the Worker after any required Secret/migration action succeeds.
 4. Verify the public health endpoint and static asset version.
 5. Sign in as a normal test user and open one existing FCN analysis page. Confirm an empty
    reference-spot field receives the previous trading day's close. Do not create or send a real RFQ
    merely to test this feature.
-6. On the homepage, open 「美股／日股熱門榜」, tick consent, and confirm both 美股 and 日股 render
-   populated rows. Confirm no frame is created before consent is ticked.
+6. On the homepage, open 「美股／日股熱門榜」. Confirm all five ranking links exist for both
+   markets; after consent, 美股 may render the embedded live hotlists rows. 日股 must remain
+   link-only with an explicit explanation. Confirm no frame is created before consent is ticked,
+   and never use `JP`, `JPX` or `TYO` as a widget exchange.
 7. Sign in as ADMIN and verify the RFQ time-axis dialog shows the separate public-cache health
    panel without source payloads or Secrets.
 
@@ -55,9 +60,13 @@ daily-series requests only, which materially reduces pressure on the free-tier l
 
 - User context response returns `FRESH`, or `STALE` during a bounded upstream outage.
 - `UNAVAILABLE` affects only the public reference panel.
+- Current observed state is SEC `FRESH` and Alpha Vantage unavailable; manual reference-spot input
+  remains the required fallback until a normalized Alpha Vantage row is observed.
 - ADMIN health groups cache rows by source/status and reports expired/stale/rate-limit row counts.
 - ADMIN health reports today's Alpha Vantage attempted-request count. The configured safety cap is
   24 per UTC day.
+- `GET /api/v1/market/ideas` is intentionally absent. Homepage hot lists must not consume Alpha
+  Vantage quota or create D1 market-mover cache rows.
 - The scheduled cleanup runs after RFQ recovery. A cleanup exception is logged as
   `market_context_cleanup_failed` and must not interrupt RFQ recovery.
 

@@ -60,8 +60,9 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 已改用 SEC 與 Alpha Vantage：登入使用者可查看 SEC 公司／最近申報文件，空白的分析
 現價欄位會自動帶入前一交易日美股收盤價。資料由 Worker 正規化、所有使用者共用 D1
 短期快取，且明確標示時間與過期狀態；它不會寫回詢價條件、正式排名或報價圖。Secret
-名稱、migration `0012` 與新版 Worker 已部署，但第一次正式請求只收到 Alpha Vantage
-`Information` 回應，尚未取得可用市場資料；接手者應先確認 Key 來源與啟用狀態。
+名稱、migration `0012` 與新版 Worker 已部署。2026-07-30 的只讀檢查確認 SEC 有三組
+最新公司／申報快取，但 Alpha Vantage 尚無成功快取；2026-07-29 累計十次請求均未留下
+可用資料。接手者應以單一既有分析標的驗證 Key 啟用／額度，不得恢復已移除的 movers API。
 依 ADR 0024，市場熱門榜已改放在**首頁**，並比照 TradingView 自身的層級：上層為市場
 （美股 → NASDAQ, NYSE, NYSE ARCA, OTC；日股 → TSE, NAG, FSE, SAPSE），下層為五種排行
 （波動最大、大型股、現金最多、成交最活躍、營收最高）。五種排行以連結開啟 TradingView
@@ -99,7 +100,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 首頁「美股／日股熱門榜」（ADR 0024）在靜態版與 Cloudflare 版皆可使用；不需 API Key、
   不佔 Alpha Vantage 額度。五種排行以官網連結提供、美日皆可用；美股另內嵌即時熱門榜，
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
-- 目前驗證基線為 21 個測試檔、153 項測試；JavaScript 語法、TypeScript typecheck、
+- 目前驗證基線為 22 個測試檔、163 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。

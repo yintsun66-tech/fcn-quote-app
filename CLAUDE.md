@@ -64,16 +64,18 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
   onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded
   SHA-256; `.gitattributes` keeps `vendor/**` byte-exact on checkout.
-- ADR 0023 replaces the FRED runtime path with SEC plus Alpha Vantage end-of-day data. Migration
-  `0012` and the `ALPHA_VANTAGE_API_KEY` Secret name exist in production, but the first ORCL, TSM
-  and market-movers requests returned an Alpha Vantage `Information` envelope and produced no
-  normalized payload. Treat the public market panel as non-blocking and verify that the Secret is
-  an activated Alpha Vantage key before changing parser, cache, RFQ or ranking code. Never log,
-  retrieve or commit the Secret value.
+- ADR 0023 replaces the FRED runtime path with SEC plus Alpha Vantage end-of-day data; ADR 0024
+  then removes Alpha Vantage movers/rankings and keeps only per-symbol `TIME_SERIES_DAILY`.
+  Migration `0012` and the `ALPHA_VANTAGE_API_KEY` Secret name exist in production. A read-only
+  check on 2026-07-30 found three fresh SEC instrument/filing pairs, no Alpha Vantage cache row,
+  and ten historical Alpha Vantage attempts on 2026-07-29. Treat previous-close data as
+  unavailable until one current symbol produces a normalized payload. `GET /api/v1/market/ideas`
+  no longer exists; do not restore movers or change parser/cache/RFQ/ranking code to work around
+  provider entitlement. Never log, retrieve or commit the Secret value.
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.
-- ADR 0025 through ADR 0028 define the follow-board boundary. Publication commands are accepted
+- ADR 0025 through ADR 0029 define the follow-board boundary. Publication commands are accepted
   only from the three approved First Bank mailboxes with aligned authentication and unique
   reply/token evidence. The issuer and quote terms come only from one issuer table profile. Prefer
   an unambiguous table-local candidate with the exact product-code count; use message-wide unique
@@ -81,6 +83,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   and must never select a row, RFQ batch or ranking. Multi-product publication is atomic. ADR
   0028 requires an exact declared issuer/table issuer match and a future Taiwan removal date;
   expired products are hidden immediately and archived without deletion.
+  ADR 0029 displays `手收`: non-CITI uses `100 - comparablePricePct`, while CITI uses raw Upfront.
   Public snapshots must never expose RFQ/correlation/user data. Full follow-interest employee
   numbers stay encrypted and are ADMIN/PS-only; public rows remain masked. Follow-board PNGs are
   browser-rendered and are not written to R2.
@@ -98,7 +101,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   the current ADMIN. ADMIN/PS accounts are protected by SQL `WHERE` guards. The ADMIN-only
   `POST /admin/accounts/lookup` must never log the queried 行編, and `register()` stays silent to
   the applicant on duplicates (anti-enumeration). Remote D1 migrations are applied through
-  `0012`; migration `0010` remains the role/account-management boundary.
+  `0015`; migration `0010` remains the role/account-management boundary.
 
 ## Handback checklist
 

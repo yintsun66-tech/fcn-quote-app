@@ -1,17 +1,19 @@
 # FCN market analysis roadmap — Phases 2 to 4
 
-Status: Deployed; Alpha Vantage provider response validation pending
+Status: Phases 2–3 deployed; Phase 4 partially implemented; Alpha Vantage payload validation pending
 Baseline: Phase 1 in `codex/market-analysis-phase1`; Phase 2 work in `codex/market-analysis-phase2-4`
-Updated: 2026-07-29 (Asia/Taipei)
+Updated: 2026-07-30 (Asia/Taipei)
 
 > **ADR 0024 amendment.** Market-idea/hot-list content is no longer an Alpha Vantage feature. It is
-> a TradingView screener widget on the **homepage** (`index.html`), covering `us` and `japan`
-> across `volume_leaders`, `top_gainers`, `top_losers` and `most_capitalized`, behind the same
-> explicit consent rule as the Phase 2 chart. Alpha Vantage is now used **only** for the per-symbol
-> previous close that fills 「輸入標的參考現價」. `GET /api/v1/market/ideas`, the
+> on the **homepage** (`index.html`). Five TradingView ranking links are available for both US and
+> Japan markets; only the US market additionally supports the embedded hotlists widget with its
+> built-in active/gainers/losers tabs. Japan is deliberately link-only because every tested Japan
+> widget configuration either failed or silently returned US stocks. The embedded frame remains
+> behind explicit consent. Alpha Vantage is now used **only** for the per-symbol previous close
+> and daily statistics that fill 「輸入標的參考現價」. `GET /api/v1/market/ideas`, the
 > `TOP_GAINERS_LOSERS` fetch, the cached-universe rankings and the composite heat score are
-> removed. Where Phase 3 text below describes market-movers or heat rankings, ADR 0024 supersedes
-> it; the SEC and previous-close portions stand.
+> removed. The sections below describe the resulting current implementation rather than the
+> superseded proposal.
 
 ## Purpose and non-negotiable rules
 
@@ -112,30 +114,29 @@ Primary references:
 
 ### Goal
 
-Add issuer-independent company filings, the previous completed US-equity daily close and
-end-of-day market-idea lists through a controlled Worker cache. These are reference values, not
-tradeable quotes.
+Add issuer-independent company filings plus the previous completed US-equity daily close and
+daily statistics through a controlled Worker cache. These are reference values, not tradeable
+quotes. Market ideas are supplied separately by the homepage TradingView links/widget.
 
 ### Approved release boundary
 
 The user approved migrations `0011` and `0012`, the Alpha Vantage Secret/configuration boundary,
-cache retention, monitoring, cleanup, a 50-user concurrent test and the following fields:
+cache retention, monitoring, cleanup, a 50-user concurrent test and the following currently
+implemented fields:
 
 - SEC company identity: CIK, legal name, exchange and ticker;
 - SEC recent filings: latest five 10-K, 10-Q and 8-K filings with filing date and official link;
 - Alpha Vantage: latest completed daily OHLCV, prior close, daily change, 20-day historical
   volatility, relative volume and 20-day high/low range;
-- Alpha Vantage: end-of-day gainers, losers and most-active lists;
-- cached-underlying rankings for historical volatility, relative volume, absolute daily movement
-  and the documented composite heat score;
 - no Yahoo Finance or Google Trends values in the Worker response until approved official access
   exists.
 
 The Alpha Vantage key is obtained separately and is not stored in the repository. The production
-Secret name exists and was entered through Cloudflare Secret management. The first production
-requests returned an `Information` envelope rather than usable data, so the key's source,
-activation and entitlement still require verification before this integration is called
-operational.
+Secret name exists and was entered through Cloudflare Secret management. A read-only production
+check on 2026-07-30 found three fresh SEC instrument/filing pairs, no Alpha Vantage cache row and
+ten provider attempts recorded on 2026-07-29. The key's activation, entitlement and successful
+`TIME_SERIES_DAILY` normalization still require one current-symbol verification before this
+integration is called operational.
 
 ### Implemented data model
 
@@ -194,9 +195,11 @@ UI actually displays; use private R2 for an approved raw/large cache if later re
 - returns normalized source records with `source`, `sourceAsOf`, `fetchedAt`, `expiresAt`,
   `isStale` and safe error codes;
 - never returns API keys, raw upstream errors or unrestricted upstream payloads.
-- `GET /api/v1/market/ideas`
-- returns the daily market movers and rankings derived from currently cached equities;
-- labels the cached-equity universe size and never changes an RFQ.
+
+Removed interface:
+
+- `GET /api/v1/market/ideas` no longer exists and must not be restored without a new approved
+  data/licensing decision.
 
 ADMIN-only cache health:
 
@@ -219,7 +222,7 @@ Implemented TTL:
 
 - instrument mapping: 30 days;
 - SEC filing index and normalized company identity: 24 hours;
-- Alpha Vantage daily equity and market movers: 24 hours.
+- Alpha Vantage daily equity: 24 hours.
 - stale fallback: no more than 7 days and always labelled stale.
 
 ### Security and operating controls
@@ -236,11 +239,11 @@ Implemented TTL:
 ### Verification
 
 - Synthetic tests cover fresh-cache reuse, stale fallback, upstream failure, strict symbol
-  normalization, SEC filing filtering, Alpha Vantage response normalization and daily-budget
+  normalization, SEC filing filtering, Alpha Vantage daily-series normalization and daily-budget
   exhaustion, ADMIN authorization, cleanup, same-key miss coalescing and 50 simultaneous users.
 - The complete repository suite, typecheck and dry-run build remain mandatory before handoff.
-- Production D1 query/write and upstream latency evidence remain unverified until explicit
-  migration/Secret/deployment authorization.
+- Migration/Secret/deployment are complete. SEC has current production cache evidence; successful
+  Alpha Vantage payload and upstream latency evidence remain unverified.
 
 Primary references:
 
@@ -263,7 +266,7 @@ and D1 size 6,815,744 bytes. Cloudflare reported 8,228 read queries, 3,416 write
 377,492 rows read and 10,862 rows written during the preceding 24 hours. This is a point-in-time
 capacity baseline, not a user-activity audit.
 
-This sample must be re-measured before Phase 4 implementation. Its rough density (about 33 KB per
+This sample must be re-measured before completing Phase 4. Its rough density (about 33 KB per
 trade across the whole application) implies that 10,000 trades could add roughly 330 MB before
 indexes/retention variation. Therefore a 500 MB free D1 database is not a safe long-term 365-day
 store at that volume. Existing email, quote and audit records are a larger capacity driver than
@@ -313,10 +316,14 @@ The implemented runtime kill switch is `MARKET_CONTEXT_ENABLED`. Phase 2 Trading
 explicit opt-in and can be removed by rolling back the static asset deployment; it has no Worker
 polling or automatic load.
 
-## Recommended implementation order
+## Remaining implementation order
 
-1. Phase 2 frontend-only opt-in panel and privacy/CSP review.
-2. Re-measure D1 and traffic; approve Phase 3 schema/Secret/API contract.
-3. Phase 3 migration, Worker cache and synthetic tests.
-4. Phase 4 load test and observability before broad rollout.
+1. Validate one existing analysis symbol against Alpha Vantage without creating or sending a real
+   RFQ. If it still returns an `Information` envelope, verify provider activation/entitlement;
+   never expose the Secret or retry aggressively.
+2. Re-measure current D1 size, query/write volume and market-cache growth; the 2026-07-28 sample is
+   historical.
+3. Run the production-like mixed RFQ/result/analysis/public-context load test in an explicitly
+   approved environment and confirm owner isolation, cache coalescing and failure containment.
+4. Exercise the ADMIN health panel and `MARKET_CONTEXT_ENABLED=0` incident procedure.
 5. Only after measured demand, decide whether a paid D1 plan or archive boundary is necessary.

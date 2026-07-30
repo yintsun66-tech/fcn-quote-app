@@ -33,6 +33,8 @@
     "RETENTION_RESULT_DAYS": "30",
     // Off until the LINE channel token and group id are set as Secrets and the push is approved.
     "LINE_PUSH_ENABLED": "0",
+    // Temporary group-id discovery. Turn on only long enough to capture the id, then turn it off.
+    "LINE_WEBHOOK_ENABLED": "0",
     "FOLLOW_BOARD_PUBLIC_ORIGIN": "https://api.yintsun66.com"
   },
   "secrets": {

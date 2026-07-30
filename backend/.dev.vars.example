@@ -18,3 +18,8 @@ FOLLOW_BOARD_VIEW_PIN=
 # unaffected. The group id identifies a private chat, so treat it as a Secret, not a var.
 LINE_CHANNEL_ACCESS_TOKEN=
 LINE_GROUP_ID=
+
+# Optional, and only needed once. LINE never shows a group id in its console; it delivers it inside
+# a webhook event. Set this to the channel secret, flip LINE_WEBHOOK_ENABLED to "1" long enough to
+# capture the id from the LINE_SOURCE_DISCOVERED audit event, then turn the webhook off again.
+LINE_CHANNEL_SECRET=

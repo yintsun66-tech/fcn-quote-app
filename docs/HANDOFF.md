@@ -1,12 +1,60 @@
 # Project handoff
 
-Updated: 2026-07-30 (Asia/Taipei)
+Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
 Current production source: implementation commit `061fe3b`, currently served as Worker
 `6429a8bf-a735-47b4-a5ba-5fa3684ec282` on 2026-07-30. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.
+
+## LINE push for follow-board publications (implemented, disabled, not deployed)
+
+When a follow-board product is published, the Worker can push it to a private LINE group. The push
+runs **after** the publication batch has committed and never throws, so a LINE outage, a revoked
+token or a rate limit cannot fail or roll back a publication.
+
+**Two outputs per publication, deliberately split.** LINE fetches an image itself and sends no
+credentials, so any image URL must be publicly reachable. 手收 therefore must not appear in the
+image. The product-conditions card is rendered server-side (max 5 trades/day, so Browser Rendering
+capacity is not a concern) and stored under `follow-board-images/v1/`, addressed by a keyed token
+(`keyedHash(EMPLOYEE_LOOKUP_KEY, ...)`, base64url) that leaks neither the product code nor any
+identifier. **手收 and 交易日期 travel only in the Flex message text**, inside the private group.
+`renderQuoteCardHtml` is called with `comparablePricePct: null` so the card cannot render a fee; a
+test asserts 手收 is absent from the rendered HTML and present in the Flex body.
+
+- `LINE_PUSH_ENABLED` is `"0"`. Deploying this pushes nothing.
+- `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_GROUP_ID` are Secrets (`wrangler secret put`), not vars —
+  the group id names a private chat. Neither is ever logged: the `FOLLOW_BOARD_LINE_PUSHED` audit
+  records counts and HTTP status only, and a test asserts both strings are absent from it.
+- Image objects expire on the 10-day image window (ADR 0030), which also bounds how long the public
+  URL stays live.
+
+**Group-id discovery webhook.** LINE never shows a group id in its console; it only appears inside
+a webhook event. `POST /api/v1/public/line/webhook` exists solely to capture it:
+
+- 404s unless `LINE_WEBHOOK_ENABLED="1"` **and** `LINE_CHANNEL_SECRET` is set, so it is not a
+  standing open endpoint. Both default to off.
+- Every request must carry a valid `x-line-signature` (`base64(HMAC-SHA256(channelSecret, rawBody))`
+  — standard base64, not base64url) verified by constant-time compare, so only LINE can write to the
+  audit trail. A bad signature returns 401 without revealing which part was wrong.
+- Records `LINE_SOURCE_DISCOVERED` with `{ sourceType, id }` only. No member id, display name or
+  message text is stored. Always returns 200 once the signature is valid, because LINE retries a
+  non-2xx.
+
+Enablement sequence (each step needs explicit authorization; nothing below has been done):
+
+1. `wrangler secret put LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`.
+2. Set `LINE_WEBHOOK_ENABLED="1"`, deploy, register
+   `https://api.yintsun66.com/api/v1/public/line/webhook` in the LINE console, send one message in
+   the group.
+3. Read the id back from `audit_events` (`action = 'LINE_SOURCE_DISCOVERED'`, read-only query),
+   `wrangler secret put LINE_GROUP_ID`.
+4. Set `LINE_WEBHOOK_ENABLED` back to `"0"` and `LINE_PUSH_ENABLED="1"`, then deploy.
+
+Verified: typecheck clean, **24 test files / 176 tests**, dry-run build binds
+`LINE_PUSH_ENABLED ("0")` and `LINE_WEBHOOK_ENABLED ("0")`. `worker-configuration.d.ts` is
+gitignored, so run `npx wrangler types` after pulling or the new var will not typecheck.
 
 ## Legacy follow-board products never expired (fixed and deployed)
 

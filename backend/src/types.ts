@@ -6,6 +6,7 @@ export interface AppEnv extends Env {
   // Optional: the follow-board LINE push stays inert when either is absent.
   LINE_CHANNEL_ACCESS_TOKEN?: string;
   LINE_GROUP_ID?: string;
+  LINE_CHANNEL_SECRET?: string;
 }
 
 export type UserStatus = "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED" | "DISABLED";

@@ -212,6 +212,73 @@ export async function getFollowBoardImage(env: AppEnv, token: string): Promise<R
   });
 }
 
+/**
+ * Verifies a LINE webhook signature: base64(HMAC-SHA256(channelSecret, rawBody)).
+ *
+ * LINE uses standard base64 here, not the base64url that `keyedHash` produces, so the encoding is
+ * done locally. Comparison is length-checked and constant-time to avoid leaking the expected value.
+ */
+async function verifyLineSignature(secret: string, rawBody: string, signature: string): Promise<boolean> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody)));
+  let binary = "";
+  for (const byte of mac) binary += String.fromCharCode(byte);
+  const expected = btoa(binary);
+  if (expected.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    mismatch |= expected.charCodeAt(index) ^ signature.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+/**
+ * Temporary discovery endpoint for the LINE group id, which is only ever delivered inside a webhook
+ * event — the LINE console does not display it.
+ *
+ * Off unless `LINE_WEBHOOK_ENABLED="1"` and `LINE_CHANNEL_SECRET` is set, so it is not a standing
+ * open endpoint. Every request must carry a valid signature, so only LINE can write to the audit
+ * trail. Disable it again once the group id has been captured.
+ */
+export async function handleLineWebhook(request: Request, env: AppEnv): Promise<Response> {
+  if (String(env.LINE_WEBHOOK_ENABLED) !== "1") return new Response("Not found", { status: 404 });
+  const secret = String(env.LINE_CHANNEL_SECRET ?? "").trim();
+  const signature = request.headers.get("x-line-signature") ?? "";
+  if (!secret || !signature) return new Response("Not found", { status: 404 });
+
+  const rawBody = await request.text();
+  if (!(await verifyLineSignature(secret, rawBody, signature))) {
+    // Never reveal whether the secret or the signature was wrong.
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  let sources: Array<{ type?: string; groupId?: string; roomId?: string }> = [];
+  try {
+    const parsed = JSON.parse(rawBody) as { events?: Array<{ source?: Record<string, unknown> }> };
+    sources = (parsed.events ?? []).map(event => (event.source ?? {}) as typeof sources[number]);
+  } catch {
+    sources = [];
+  }
+  for (const source of sources) {
+    const id = source.groupId ?? source.roomId;
+    if (!id) continue;
+    // The id is configuration, not personal data: it names a chat, never a member. No user id,
+    // display name or message text is recorded.
+    await insertAudit(env, "LINE_SOURCE_DISCOVERED", "SYSTEM", null, null, `line-webhook:${nowIso()}`, {
+      sourceType: source.type ?? "unknown",
+      id
+    });
+  }
+  // LINE retries on a non-2xx, so always acknowledge once the signature is valid.
+  return new Response("OK", { status: 200 });
+}
+
 function configured(env: AppEnv): { token: string; groupId: string } | null {
   const token = String(env.LINE_CHANNEL_ACCESS_TOKEN ?? "").trim();
   const groupId = String(env.LINE_GROUP_ID ?? "").trim();

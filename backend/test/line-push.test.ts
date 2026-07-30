@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildFollowBoardFlexMessage, getFollowBoardImage, pushFollowBoardProducts } from "../src/line-push";
+import { buildFollowBoardFlexMessage, getFollowBoardImage, handleLineWebhook, pushFollowBoardProducts } from "../src/line-push";
 import type { AppEnv } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
@@ -178,6 +178,44 @@ describe("LINE follow-board push", () => {
     expect(result.sent).toBe(true);
     expect(body.messages).toHaveLength(1);
     expect(JSON.stringify(body.messages[0])).toContain("手收");
+  });
+
+  it("only accepts a correctly signed webhook and records the group id", async () => {
+    const secret = "channel-secret-for-tests";
+    const body = JSON.stringify({
+      events: [{ type: "join", source: { type: "group", groupId: "Cabcdef1234567890" } }]
+    });
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
+    let binary = "";
+    for (const byte of mac) binary += String.fromCharCode(byte);
+    const signature = btoa(binary);
+
+    const call = (env: AppEnv, headers: Record<string, string>) =>
+      handleLineWebhook(new Request("https://api.yintsun66.com/api/v1/public/line/webhook", {
+        method: "POST", headers, body
+      }), env);
+
+    const enabled = { ...testEnv, LINE_WEBHOOK_ENABLED: "1", LINE_CHANNEL_SECRET: secret } as unknown as AppEnv;
+
+    // Disabled by default, so it is not a standing open endpoint.
+    expect((await call({ ...testEnv, LINE_WEBHOOK_ENABLED: "0" } as unknown as AppEnv,
+      { "x-line-signature": signature })).status).toBe(404);
+    // A wrong or missing signature is rejected, and the reason is never disclosed.
+    expect((await call(enabled, { "x-line-signature": "AAAA" })).status).toBe(401);
+    expect((await call(enabled, {})).status).toBe(404);
+    // A valid signature is acknowledged so LINE stops retrying.
+    expect((await call(enabled, { "x-line-signature": signature })).status).toBe(200);
+
+    const audit = await testEnv.DB.prepare(
+      `SELECT safe_metadata_json FROM audit_events
+        WHERE action = 'LINE_SOURCE_DISCOVERED' ORDER BY created_at DESC LIMIT 1`
+    ).first<{ safe_metadata_json: string }>();
+    expect(audit?.safe_metadata_json).toContain("Cabcdef1234567890");
+    // The chat id is configuration; no member identity or message text is stored.
+    expect(audit?.safe_metadata_json).not.toContain(secret);
   });
 
   it("renders one bubble per product as a carousel", () => {

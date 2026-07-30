@@ -1,4 +1,14 @@
-# Copy this file to .dev.vars and replace both values with independent,
-# base64url-encoded 32-byte keys. Never commit .dev.vars.
+# Copy this file to .dev.vars and fill every value. Never commit .dev.vars.
+# These four names must stay in sync with `secrets.required` in wrangler.jsonc.
+
+# Independent, base64url-encoded 32-byte keys. Do not reuse the same value for both.
 EMPLOYEE_DATA_KEY=
 EMPLOYEE_LOOKUP_KEY=
+
+# Alpha Vantage API key. Used only for the per-symbol previous close that fills
+# 「輸入標的參考現價」 (ADR 0024). Local development may leave this blank: the market panel then
+# reports the provider as unavailable and no other feature is affected.
+ALPHA_VANTAGE_API_KEY=
+
+# PIN gating the follow-board manifest and interest endpoints (ADR 0025).
+FOLLOW_BOARD_VIEW_PIN=

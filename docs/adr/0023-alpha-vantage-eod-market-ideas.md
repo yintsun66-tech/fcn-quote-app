@@ -1,7 +1,11 @@
 # ADR 0023: Alpha Vantage end-of-day prices and market ideas
 
-Status: Accepted
+Status: Accepted; market-idea portion superseded by ADR 0024
 Date: 2026-07-29
+
+The previous-close and SEC portions of this ADR remain in force. The market-idea portion — the
+Alpha Vantage `TOP_GAINERS_LOSERS` feed, the cached-universe rankings, the composite heat score and
+`GET /api/v1/market/ideas` — was removed by ADR 0024 and must not be reinstated.
 
 ## Context
 

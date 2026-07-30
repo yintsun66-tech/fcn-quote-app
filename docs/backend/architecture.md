@@ -1,15 +1,16 @@
 # FCN Quote Backend Architecture
 
-Status: Current production baseline (2026-07-25)
+Status: Current production baseline (2026-07-30)
 Target domain: `yintsun66.com`  
-Current backend branch: `feature/subject-branch-correlation`
+Current backend branch: `codex/market-analysis-phase2-4`
 
 ## Scope
 
 This document defines the implemented Cloudflare backend boundary for the existing static FCN/DAC
-quote application. Migrations 0001–0009, the API/Email Worker, five Queues, one RFQ Durable Object
+quote application. Migrations 0001–0015, the API/Email Worker, five Queues, one RFQ Durable Object
 class, private R2 storage, Browser Rendering and the application-domain frontend are implemented
-on `feature/subject-branch-correlation`.
+on `codex/market-analysis-phase2-4`. `feature/subject-branch-correlation` is the previous stable
+ancestor; neither branch is automatically equivalent to `main`.
 
 The existing root-level static site remains unchanged during the backend build. Its current form validation, eight issuer email layouts, BBG lookup behavior, responsive layout, browser draft storage, and client-side quote image behavior remain compatibility constraints until a later phase explicitly replaces them.
 
@@ -26,11 +27,11 @@ The existing root-level static site remains unchanged during the backend build. 
 | CITI price normalization | Preserve raw Upfront and calculate `notePriceEquivalent = 100 - upfrontPct` |
 | Equal quotes | Preserve equal economic rank; use earliest valid receipt as the deterministic image winner |
 | MS OBU handling | Display warning only until an explicit OBU attribute and enforcement rule exist |
-| Retention starting point | Raw mail 30 days, generated images 90 days, structured results 365 days |
+| Retention starting point | Raw mail 30 days, generated images 90 days, structured results 365 days. **This is an approved target, not implemented behavior.** No code deletes an R2 object; scheduled cleanup covers only `public_data_cache`, `market_context_rate_limits`, `market_provider_daily_usage` and the follow-board idempotency/attempt tables. Artifact `expires_at` blocks *reads* (410) without removing bytes |
 | Test fixtures | Anonymous fixtures are allowed in a private repository |
 | Correlation token | Allowed, but never use `##` |
 | Generated subject prefixes | Do not generate `Re:`, `RE:`, `Fw:`, `FW:`, `Fwd:` or equivalent prefixes |
-| Quote images | Rank 1 is queued automatically; ranks 1–4 and a server-validated custom fifth issuer may be requested (ADR 0015) |
+| Quote images | **On demand only.** Automatic rank-one rendering is disabled (`AUTO_RANK_ONE_IMAGE="0"`, ADR 0016). Ranks 1–4 and a server-validated custom fifth issuer are rendered when requested (ADR 0015), rasterized in the requesting browser (ADR 0017) with Browser Rendering as the fallback. Do not re-enable automatic rendering without re-measuring Browser Rendering capacity |
 
 Mail systems may add reply or forwarding prefixes to inbound messages. The inbound parser must normalize such prefixes for matching while retaining the raw subject. The application itself must never add them to an outbound subject.
 

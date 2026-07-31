@@ -6,7 +6,8 @@ import {
   getFollowBoardImage,
   handleLineWebhook,
   pushFollowBoardProducts,
-  renderFollowBoardImage
+  renderFollowBoardImage,
+  safeProviderMessage
 } from "../src/line-push";
 import type { AppEnv } from "../src/types";
 
@@ -103,6 +104,85 @@ describe("LINE follow-board push", () => {
       expect(audit.safe_metadata_json).not.toContain("test-token-must-never-be-logged");
       expect(audit.safe_metadata_json).not.toContain("Cgroup123");
     }
+  });
+
+  // Production returned 429 on the first real publication (PBZJ, 2026-07-31) and the audit recorded
+  // only the status, which cannot distinguish a monthly cap from a rate limit. These pin the fix.
+  it("records LINE's own explanation of a failure, with any identifier redacted", async () => {
+    const bodies = [
+      // The real shape: LINE's JSON error object.
+      { body: JSON.stringify({ message: "You have reached your monthly limit." }), expected: "You have reached your monthly limit." },
+      // An identifier echoed back must not survive into the audit row.
+      { body: JSON.stringify({ message: "Invalid to: C0123456789abcdef0123456789abcdef" }), expected: "Invalid to: [id]" },
+      // Anything that is not LINE's shape is dropped rather than stored verbatim.
+      { body: "<html>gateway error</html>", expected: undefined },
+      { body: "", expected: undefined }
+    ];
+    for (const item of bodies) {
+      expect(safeProviderMessage(item.body)).toBe(item.expected);
+    }
+    // Long messages are truncated rather than stored whole.
+    const long = JSON.stringify({ message: "x".repeat(500) });
+    expect(safeProviderMessage(long)!.length).toBe(200);
+  });
+
+  it("retries a 429 once with the same retry key, and audits the reason", async () => {
+    const keys: string[] = [];
+    let calls = 0;
+    let slept = 0;
+    const flaky = (async (_url: string, init: RequestInit) => {
+      calls += 1;
+      keys.push(String((init.headers as Record<string, string>)["x-line-retry-key"]));
+      if (calls === 1) {
+        return new Response(JSON.stringify({ message: "Rate limit exceeded" }), {
+          status: 429, headers: { "retry-after": "1" }
+        });
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await pushFollowBoardProducts(lineEnv(), [PRODUCT], flaky, async ms => { slept = ms; });
+    expect(result).toMatchObject({ sent: true, status: 200 });
+    expect(calls).toBe(2);
+    // The same key both times: that is what lets LINE de-duplicate rather than deliver twice.
+    expect(keys[0]).toBe(keys[1]);
+    // Retry-After is honoured.
+    expect(slept).toBe(1_000);
+
+    const audit = await testEnv.DB.prepare(
+      `SELECT safe_metadata_json FROM audit_events
+        WHERE action = 'FOLLOW_BOARD_LINE_PUSHED' ORDER BY created_at DESC LIMIT 1`
+    ).first<{ safe_metadata_json: string }>();
+    expect(audit?.safe_metadata_json).toContain('"attempts":2');
+    expect(audit?.safe_metadata_json).toContain('"ok":true');
+  });
+
+  it("stops after the retry and records why, without retrying a rejection", async () => {
+    let capped = 0;
+    const capping = (async () => {
+      capped += 1;
+      return new Response(JSON.stringify({ message: "You have reached your monthly limit." }), { status: 429 });
+    }) as unknown as typeof fetch;
+    expect(await pushFollowBoardProducts(lineEnv(), [PRODUCT], capping, async () => {}))
+      .toMatchObject({ sent: false, status: 429, reason: "HTTP_429" });
+    expect(capped).toBe(2);
+
+    const audit = await testEnv.DB.prepare(
+      `SELECT safe_metadata_json FROM audit_events
+        WHERE action = 'FOLLOW_BOARD_LINE_PUSHED' ORDER BY created_at DESC LIMIT 1`
+    ).first<{ safe_metadata_json: string }>();
+    expect(audit?.safe_metadata_json).toContain("monthly limit");
+    expect(audit?.safe_metadata_json).toContain('"attempts":2');
+
+    // A 4xx that is not 429 is the caller's fault and will fail identically, so it is not retried.
+    let rejected = 0;
+    const rejecting = (async () => {
+      rejected += 1;
+      return new Response(JSON.stringify({ message: "The request body has 1 error(s)" }), { status: 400 });
+    }) as unknown as typeof fetch;
+    expect(await pushFollowBoardProducts(lineEnv(), [PRODUCT], rejecting, async () => {}))
+      .toMatchObject({ sent: false, status: 400, reason: "HTTP_400" });
+    expect(rejected).toBe(1);
   });
 
   it("aborts a stalled push and records it as a timeout, not a generic failure", async () => {

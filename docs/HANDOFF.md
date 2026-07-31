@@ -4,6 +4,45 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## First real LINE push was rejected 429 — diagnosis and instrumentation
+
+A real follow-board publication finally happened, so the LINE path ran for the first time. It did
+**not** deliver, and the audit trail shows exactly where it stopped:
+
+```
+06:03:21.917Z  FOLLOW_BOARD_PRODUCT_PUBLISHED  PBZJ / DBS / expires 2026-07-31
+06:03:25.746Z  FOLLOW_BOARD_LINE_PUSHED        {"productCount":1,"status":429,"reason":"HTTP_429"}
+```
+
+**The integration works.** The publication committed, the hook fired 3.8 seconds later, and LINE
+answered with a definitive status. That rules out the whole first tier of suspects: the flag was on,
+the Worker reached the push, the credentials were accepted (a bad token or group id is 401/400, not
+429), and nothing timed out. The publication ran on `5abc0baa`, before that day's performance
+deployment, so none of the deadline work is implicated.
+
+The operator then confirmed with LINE's quota API that the monthly message allowance was **not**
+exhausted — so the obvious explanation for a 429 is wrong, and the remaining causes cannot be told
+apart from a status code alone. **That is a gap in our own instrumentation, not in LINE.** The audit
+recorded the status and deliberately discarded the response body, and LINE's `message` field is the
+only thing that distinguishes a monthly cap from a rate limit.
+
+Two changes followed:
+
+- **`safeProviderMessage` records LINE's explanation.** Only the `message` string from LINE's JSON
+  error object, truncated to 200 characters. A body that is not that shape is dropped rather than
+  stored verbatim, and any LINE identifier inside the message is redacted to `[id]` first — the
+  group id must never reach an audit row, however it arrives. A test pins each of those cases.
+- **A 429 or 5xx is retried once**, honouring `Retry-After` up to a five-second cap. The retry
+  reuses **the same `x-line-retry-key`**, which is what that header is for: if an attempt reached
+  LINE but the response was lost, the retry is de-duplicated instead of delivering twice. A fresh
+  key per attempt would have defeated it. Non-429 4xx responses are not retried — they will fail
+  identically. Before this, a failed push simply lost the message: the publication had already
+  committed and nothing tried again.
+
+The audit now also records `attempts`. Verified: 27 test files / **194 tests**, typecheck clean,
+dry-run build clean. **Not yet deployed**, and the underlying cause of the 429 is **still unknown** —
+the next 429 will name itself, or a read-only `GET /v2/bot/info` check may show it sooner.
+
 ## Current state at a glance
 
 This document is long and append-only: each section records what was true on its own date. **This
@@ -15,7 +54,7 @@ not be edited to match later reality.
 | Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
 | Deployed Worker | code from `ca46deee-da1c-4aab-91e6-17a772181bfd`; a later asset-only republish serves it. **Resolve the live id from `wrangler deployments list`, never from this table** |
 | Remote D1 | migrations applied through `0016` |
-| Verification | 27 test files / 191 tests; typecheck (source + test) and dry-run build clean |
+| Verification | 27 test files / 194 tests; typecheck (source + test) and dry-run build clean |
 | GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
 | `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
 | `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |
@@ -30,10 +69,9 @@ working tree, so `main` and the live Worker can diverge at any time.
 Distinguish these from bugs. Each is code that passes tests and has been deployed, but has not yet
 run for real:
 
-- **The LINE follow-board push.** No follow-board publication has happened since it was enabled, so
-  no message has been observed reaching the group. The next real publication is the first proof; if
-  nothing arrives, read the HTTP status from the `FOLLOW_BOARD_LINE_PUSHED` audit event — a 4xx
-  points at `LINE_GROUP_ID`, a 401 at the access token.
+- **Delivery to the LINE group.** The push path itself is now proven to run — one real publication
+  reached LINE — but **no message has ever been delivered**: LINE answered 429 and the cause is
+  still unidentified. See the 429 section above.
 - **Both Browser Rendering deadlines and the follow-board render budget.** No render job has run
   since they were added.
 - **The snapshot digest.** No real browser has polled `/snapshot` since the rewrite; it has unit
@@ -1863,7 +1901,7 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: **27 files / 191 tests passed**.
+- Full test suite: **27 files / 194 tests passed**.
 - Cloudflare Worker dry-run build: passed with 18 public assets.
 - Current production readback (code deployed as `ca46deee-da1c-4aab-91e6-17a772181bfd`):
   `/api/v1/health` 200 on both `api.` and `app.`; an unauthenticated `/snapshot` 401; the public

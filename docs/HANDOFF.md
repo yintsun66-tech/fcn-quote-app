@@ -4,6 +4,44 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## Current state at a glance
+
+This document is long and append-only: each section records what was true on its own date. **This
+block is the only one that claims to describe the present.** Everything below it is history and must
+not be edited to match later reality.
+
+| | |
+|---|---|
+| Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
+| Deployed Worker | code from `ca46deee-da1c-4aab-91e6-17a772181bfd`; a later asset-only republish serves it. **Resolve the live id from `wrangler deployments list`, never from this table** |
+| Remote D1 | migrations applied through `0016` |
+| Verification | 27 test files / 191 tests; typecheck (source + test) and dry-run build clean |
+| GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
+| `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
+| `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |
+| `LINE_WEBHOOK_ENABLED` | `"0"` — discovery is done; keep it off |
+| `AUTO_RANK_ONE_IMAGE` | `"0"` — quote images are on demand (ADR 0016) |
+
+`main` is **not** a deployment trigger. Cloudflare is published by running `wrangler deploy` from a
+working tree, so `main` and the live Worker can diverge at any time.
+
+### What is implemented but never proven in production
+
+Distinguish these from bugs. Each is code that passes tests and has been deployed, but has not yet
+run for real:
+
+- **The LINE follow-board push.** No follow-board publication has happened since it was enabled, so
+  no message has been observed reaching the group. The next real publication is the first proof; if
+  nothing arrives, read the HTTP status from the `FOLLOW_BOARD_LINE_PUSHED` audit event — a 4xx
+  points at `LINE_GROUP_ID`, a 401 at the access token.
+- **Both Browser Rendering deadlines and the follow-board render budget.** No render job has run
+  since they were added.
+- **The snapshot digest.** No real browser has polled `/snapshot` since the rewrite; it has unit
+  coverage only.
+- **Scheduled retention.** Implemented and deployed but disabled, so it has deleted nothing. Run
+  `applyRetention(env, true)` for a dry-run count before anyone considers enabling it.
+- **Quote-image download on a real phone or tablet.** Still never done on a device.
+
 ## Branch merged into `main` (2026-07-31)
 
 `codex/market-analysis-phase2-4` was merged into `main` as `748f5d9` and pushed
@@ -542,7 +580,8 @@ expiry job treat NULL as "never expires", so such a product stays public permane
   `2026-07-30T16:00:00Z`, and all are `ARCHIVED`. No expired product remains on the board.
 - `PBZC` keeps a NULL expiry because it was already archived manually before this fix; the backfill
   only touches `status = 'PUBLISHED'` rows and does not rewrite archived history.
-- Verification baseline is now **23 test files / 168 tests**.
+- Verification baseline **at that time** was 23 test files / 168 tests. See "Current state at a
+  glance" for the present figure; this section is history and is not updated.
 
 ## Scheduled retention implemented, disabled by default (ADR 0030)
 
@@ -1824,12 +1863,16 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: **24 files / 176 tests passed**.
+- Full test suite: **27 files / 191 tests passed**.
 - Cloudflare Worker dry-run build: passed with 18 public assets.
-- Current production readback for Worker `5abc0baa-9be0-4021-a90f-d067ed074c0c`: health returned
-  HTTP 200, and `POST /api/v1/public/line/webhook` returned 404 with the webhook disabled. While it
-  was briefly enabled (Worker `30837aa3-e938-415c-a650-08aebe2ed995`) the same endpoint returned
-  404 without a signature and 401 with an invalid one.
+- Current production readback (code deployed as `ca46deee-da1c-4aab-91e6-17a772181bfd`):
+  `/api/v1/health` 200 on both `api.` and `app.`; an unauthenticated `/snapshot` 401; the public
+  follow-board manifest without a PIN 401; the LINE webhook 404 while disabled. Five minutes of
+  live tail covering three consecutive cron ticks: 28 events, all `outcome: "ok"`, zero exceptions.
+- Earlier readback for Worker `5abc0baa-9be0-4021-a90f-d067ed074c0c`: health 200, and
+  `POST /api/v1/public/line/webhook` 404 with the webhook disabled. While it was briefly enabled
+  (Worker `30837aa3-e938-415c-a650-08aebe2ed995`) the same endpoint returned 404 without a
+  signature and 401 with an invalid one.
 - Earlier production health/static readback for Worker
   `6429a8bf-a735-47b4-a5ba-5fa3684ec282`: health and application/follow-board assets returned
   HTTP 200; a public manifest request without the PIN returned HTTP 401.
@@ -2059,14 +2102,17 @@ that the verified API/static deployment failed.
 
 ## Safe next steps
 
-**Highest-value item right now: validate one Alpha Vantage symbol request without changing
-application logic.** Read-only production D1 evidence on 2026-07-30 shows fresh SEC cache rows,
-no successful Alpha Vantage cache rows, and ten Alpha Vantage requests recorded on 2026-07-29.
-Confirm that the hidden Secret is an activated Alpha Vantage key, replace only that Secret if
-needed, wait for the failed-refresh backoff, and retry one existing analysis symbol. The removed
-`/api/v1/market/ideas` endpoint and movers panel must not be recreated for this check. Do not log
-the key, expose the upstream body, clear D1 rows manually, aggressively retry the free provider,
-or create a real RFQ.
+**Alpha Vantage is no longer a next step.** Earlier revisions of this section made validating an
+Alpha Vantage symbol the highest-value item. The operator has since dropped the provider (see
+"Alpha Vantage abandoned"), so previous-close autofill is an **inactive feature, not an outstanding
+bug**. Do not spend a session chasing it. A replacement quote API will be chosen later.
+
+**Highest-value item right now: let one real follow-board publication happen and watch it.** It is
+the single event that proves several unproven paths at once — the LINE push, the server-side card
+render, the 90-second render budget and the 15-second push abort. Nothing needs to be built for it;
+it just needs to occur. If no message reaches the group, read the HTTP status from the
+`FOLLOW_BOARD_LINE_PUSHED` audit event before changing any code: a 4xx points at `LINE_GROUP_ID`, a
+401 at the access token, and `TIMEOUT` at the push abort rather than at credentials.
 
 **Second: validate quote-image download on a real phone/tablet.** ADR 0017 moved rasterization
 into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile WebKit. The

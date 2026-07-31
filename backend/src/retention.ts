@@ -107,27 +107,34 @@ export async function applyRetention(env: AppEnv, dryRun = false): Promise<Reten
   const resultCutoff = cutoffIso(settings.resultDays);
   const effectiveDryRun = dryRun || !settings.enabled;
 
-  report.mailObjects = await expireObjects(env, MAIL_PREFIXES, mailCutoff, effectiveDryRun);
-  report.imageObjects = await expireObjects(env, IMAGE_PREFIXES, imageCutoff, effectiveDryRun);
+  // The two prefix groups share no keys and each is independently bounded, so they are swept
+  // together rather than one after the other.
+  const [mailObjects, imageObjects] = await Promise.all([
+    expireObjects(env, MAIL_PREFIXES, mailCutoff, effectiveDryRun),
+    expireObjects(env, IMAGE_PREFIXES, imageCutoff, effectiveDryRun)
+  ]);
+  report.mailObjects = mailObjects;
+  report.imageObjects = imageObjects;
 
   // Clear D1 pointers to objects that no longer exist, so a download attempt fails closed with the
   // existing "not ready" contract instead of a confusing missing-object error.
   if (!effectiveDryRun) {
-    const artifacts = await env.DB.prepare(
-      `UPDATE generated_artifacts SET r2_object_key = NULL
-        WHERE r2_object_key IS NOT NULL AND created_at < ?`
-    ).bind(imageCutoff).run();
-    report.artifactKeysCleared = Number(artifacts.meta.changes ?? 0);
-
     // `inbound_messages.r2_raw_mime_key` is NOT NULL, so it must be left in place — clearing it
     // would abort every scheduled run. Only the nullable parsed-tables pointer is cleared. The raw
     // key becomes a dangling reference by design; nothing reads it after parsing, which completes
     // minutes after receipt and therefore long before this retention window.
-    const inbound = await env.DB.prepare(
-      `UPDATE inbound_messages SET r2_parsed_tables_key = NULL
-        WHERE r2_parsed_tables_key IS NOT NULL AND received_at < ?`
-    ).bind(mailCutoff).run();
-    report.inboundKeysCleared = Number(inbound.meta.changes ?? 0);
+    const [artifacts, inbound] = await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE generated_artifacts SET r2_object_key = NULL
+          WHERE r2_object_key IS NOT NULL AND created_at < ?`
+      ).bind(imageCutoff),
+      env.DB.prepare(
+        `UPDATE inbound_messages SET r2_parsed_tables_key = NULL
+          WHERE r2_parsed_tables_key IS NOT NULL AND received_at < ?`
+      ).bind(mailCutoff)
+    ]);
+    report.artifactKeysCleared = Number(artifacts?.meta.changes ?? 0);
+    report.inboundKeysCleared = Number(inbound?.meta.changes ?? 0);
   }
 
   // Structured results. follow_board_products holds three ON DELETE RESTRICT references, and an
@@ -142,16 +149,17 @@ export async function applyRetention(env: AppEnv, dryRun = false): Promise<Reten
           OR f.source_outbound_batch_id IN (SELECT b.id FROM outbound_email_batches b WHERE b.rfq_id = r.id)
     )`;
 
-  const candidates = await env.DB.prepare(
-    `SELECT r.id FROM rfqs r
-      WHERE r.created_at < ? AND NOT ${heldClause}
-      ORDER BY r.created_at
-      LIMIT ?`
-  ).bind(resultCutoff, MAX_RFQS_PER_RUN).all<{ id: string }>();
-
-  const held = await env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM rfqs r WHERE r.created_at < ? AND ${heldClause}`
-  ).bind(resultCutoff).first<{ count: number }>();
+  const [candidates, held] = await Promise.all([
+    env.DB.prepare(
+      `SELECT r.id FROM rfqs r
+        WHERE r.created_at < ? AND NOT ${heldClause}
+        ORDER BY r.created_at
+        LIMIT ?`
+    ).bind(resultCutoff, MAX_RFQS_PER_RUN).all<{ id: string }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM rfqs r WHERE r.created_at < ? AND ${heldClause}`
+    ).bind(resultCutoff).first<{ count: number }>()
+  ]);
   report.rfqsHeldByFollowBoard = Number(held?.count ?? 0);
 
   if (!effectiveDryRun && candidates.results.length) {

@@ -30,6 +30,52 @@ interface ProvisionalQuoteRow extends QuoteRankRow {
   rejection_reason: string | null;
 }
 
+type ProvisionalQuoteState = { quote_count: number; latest_quote_at: string | null } | null;
+
+// A finalized ranking version is immutable: a recalculation always writes a new version rather than
+// rewriting the previous one, and this payload contains no artifact state. Keying on the RFQ, its
+// version, its workflow status and its finalization time means a stale entry can never be served —
+// any change to those produces a different key. Entries are only written for runs that exclude late
+// replies (see the write site). Bounded so an isolate cannot grow without limit.
+const FINALIZED_RESULTS_CACHE_LIMIT = 32;
+const finalizedResultsCache = new Map<string, Record<string, unknown>>();
+
+function finalizedResultsKey(rfqId: string, rfq: OwnedWorkflow): string | null {
+  if (rfq.current_ranking_version <= 0) return null;
+  if (!["COMPLETED", "NO_VALID_QUOTE"].includes(rfq.workflow_status)) return null;
+  return `${rfqId}:${rfq.current_ranking_version}:${rfq.workflow_status}:${rfq.finalized_at ?? ""}`;
+}
+
+function rememberFinalizedResults(key: string, payload: Record<string, unknown>): void {
+  finalizedResultsCache.delete(key);
+  finalizedResultsCache.set(key, payload);
+  while (finalizedResultsCache.size > FINALIZED_RESULTS_CACHE_LIMIT) {
+    const oldest = finalizedResultsCache.keys().next();
+    if (oldest.done) break;
+    finalizedResultsCache.delete(oldest.value);
+  }
+}
+
+function groupByTrade<T>(rows: T[], tradeId: (row: T) => unknown): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = String(tradeId(row));
+    const bucket = grouped.get(key);
+    if (bucket) bucket.push(row);
+    else grouped.set(key, [row]);
+  }
+  return grouped;
+}
+
+function countBy<T>(rows: T[], key: (row: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const value = key(row);
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  return counts;
+}
+
 async function ownedWorkflow(env: AppEnv, userId: string, rfqId: string): Promise<OwnedWorkflow> {
   const row = await env.DB.prepare(
     `SELECT id, workflow_status, created_at, sent_at, deadline_at, finalized_at,
@@ -40,35 +86,57 @@ async function ownedWorkflow(env: AppEnv, userId: string, rfqId: string): Promis
   return row;
 }
 
+function isProvisionalWorkflow(rfq: OwnedWorkflow): boolean {
+  return rfq.current_ranking_version === 0
+    && ["WAITING", "PARTIAL", "FINALIZING"].includes(rfq.workflow_status);
+}
+
+// `includeProvisionalQuoteState` lets the snapshot poller pull the provisional quote counter in the
+// same round trip instead of issuing it afterwards; it is unused by the plain status endpoint.
 async function loadRfqStatus(
   env: AppEnv,
   session: SessionContext,
-  rfqId: string
-): Promise<{ rfq: OwnedWorkflow; payload: Record<string, unknown> }> {
+  rfqId: string,
+  options: { includeProvisionalQuoteState?: boolean } = {}
+): Promise<{
+  rfq: OwnedWorkflow;
+  payload: Record<string, unknown>;
+  provisionalQuoteState: ProvisionalQuoteState;
+}> {
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
-  const issuers = await env.DB.prepare(
-    `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
-      WHERE rfq_id = ? ORDER BY issuer`
-  ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>();
-  const lateReplies = await env.DB.prepare(
-    `SELECT COUNT(*) AS total,
-            SUM(CASE
-              WHEN run.trigger = 'RECALCULATION'
-               AND run.completed_at >= COALESCE(message.normalized_at, message.received_at)
-              THEN 0 ELSE 1 END) AS unranked
-       FROM inbound_messages message
-       JOIN rfqs rfq ON rfq.id = message.rfq_id
-       LEFT JOIN ranking_runs run
-         ON run.rfq_id = rfq.id AND run.version = rfq.current_ranking_version
-      WHERE message.rfq_id = ? AND message.status = 'LATE_REPLY'`
-  ).bind(rfqId).first<{ total: number; unranked: number | null }>();
-  const artifacts = rfq.current_ranking_version > 0 ? await env.DB.prepare(
-    `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
-      WHERE rfq_id = ? AND ranking_run_id = (
-        SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
-      ) ORDER BY trade_code, created_at`
-  ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
-  return { rfq, payload: {
+  // The browser polls this every four seconds. None of these reads depend on each other once the
+  // owning RFQ row is known, so they are issued together instead of one after another.
+  const [issuers, lateReplies, artifacts, provisionalQuoteState] = await Promise.all([
+    env.DB.prepare(
+      `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
+        WHERE rfq_id = ? ORDER BY issuer`
+    ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE
+                WHEN run.trigger = 'RECALCULATION'
+                 AND run.completed_at >= COALESCE(message.normalized_at, message.received_at)
+                THEN 0 ELSE 1 END) AS unranked
+         FROM inbound_messages message
+         JOIN rfqs rfq ON rfq.id = message.rfq_id
+         LEFT JOIN ranking_runs run
+           ON run.rfq_id = rfq.id AND run.version = rfq.current_ranking_version
+        WHERE message.rfq_id = ? AND message.status = 'LATE_REPLY'`
+    ).bind(rfqId).first<{ total: number; unranked: number | null }>(),
+    rfq.current_ranking_version > 0 ? env.DB.prepare(
+      `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
+        WHERE rfq_id = ? AND ranking_run_id = (
+          SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
+        ) ORDER BY trade_code, created_at`
+    ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
+      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    options.includeProvisionalQuoteState && isProvisionalWorkflow(rfq) ? env.DB.prepare(
+      `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
+         FROM issuer_quotes WHERE rfq_id = ?`
+    ).bind(rfqId).first<{ quote_count: number; latest_quote_at: string | null }>()
+      : Promise.resolve(null)
+  ]);
+  return { rfq, provisionalQuoteState, payload: {
     rfq: {
       id: rfq.id, workflowStatus: rfq.workflow_status, createdAt: rfq.created_at,
       sentAt: rfq.sent_at, softDeadlineAt: rfqSoftDeadlineAt(env, rfq.sent_at),
@@ -101,18 +169,13 @@ export async function getRfqSnapshot(
   if (since && !/^[A-Za-z0-9_-]{43}$/u.test(since)) {
     throw new AppError(400, "INVALID_SNAPSHOT_VERSION", "詢價快照版本格式無效。 ");
   }
-  const loadedStatus = await loadRfqStatus(env, session, rfqId);
+  const loadedStatus = await loadRfqStatus(env, session, rfqId, { includeProvisionalQuoteState: true });
   const status = loadedStatus.payload as {
     rfq: { workflowStatus: string; rankingVersion: number };
     issuers: unknown[];
     artifacts: unknown[];
   };
-  const isProvisional = status.rfq.rankingVersion === 0
-    && ["WAITING", "PARTIAL", "FINALIZING"].includes(status.rfq.workflowStatus);
-  const quoteState = isProvisional ? await env.DB.prepare(
-    `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
-       FROM issuer_quotes WHERE rfq_id = ?`
-  ).bind(rfqId).first<{ quote_count: number; latest_quote_at: string | null }>() : null;
+  const quoteState = loadedStatus.provisionalQuoteState;
   const version = await sha256Text(stableStringify({
     status,
     provisionalQuoteCount: Number(quoteState?.quote_count ?? 0),
@@ -123,14 +186,17 @@ export async function getRfqSnapshot(
   const hasResults = ["WAITING", "PARTIAL", "FINALIZING", "COMPLETED", "NO_VALID_QUOTE"].includes(
     status.rfq.workflowStatus
   );
-  const results = hasResults
-    ? await loadRfqResultsPayload(env, session, rfqId, loadedStatus.rfq)
-    : null;
-  const artifacts = status.rfq.rankingVersion > 0
-    && ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus)
-    ? (await loadRfqArtifactsPayload(env, session, rfqId, loadedStatus.rfq)).artifacts
-    : [];
-  return jsonResponse({ changed: true, version, status, results, artifacts });
+  const wantsArtifacts = status.rfq.rankingVersion > 0
+    && ["COMPLETED", "NO_VALID_QUOTE"].includes(status.rfq.workflowStatus);
+  // Both payloads read from the already-authorized RFQ row, so the changed branch also goes out as
+  // one wave rather than a results round trip followed by an artifacts round trip.
+  const [results, artifactsPayload] = await Promise.all([
+    hasResults ? loadRfqResultsPayload(env, session, rfqId, loadedStatus.rfq) : Promise.resolve(null),
+    wantsArtifacts
+      ? loadRfqArtifactsPayload(env, session, rfqId, loadedStatus.rfq)
+      : Promise.resolve({ artifacts: [] as Record<string, unknown>[] })
+  ]);
+  return jsonResponse({ changed: true, version, status, results, artifacts: artifactsPayload.artifacts });
 }
 
 async function loadRfqResultsPayload(
@@ -140,64 +206,75 @@ async function loadRfqResultsPayload(
   loadedRfq?: OwnedWorkflow
 ): Promise<Record<string, unknown>> {
   const rfq = loadedRfq ?? await ownedWorkflow(env, session.user.id, rfqId);
-  const trades = await env.DB.prepare(
-    `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
-       FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
-  ).bind(rfqId).all<Record<string, unknown>>();
-  const isProvisional = rfq.current_ranking_version === 0 && ["WAITING", "PARTIAL", "FINALIZING"].includes(rfq.workflow_status);
-  const currentRun = rfq.current_ranking_version > 0 ? await env.DB.prepare(
-    "SELECT trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
-  ).bind(rfqId, rfq.current_ranking_version).first<{ trigger: string }>() : null;
+  // Ownership is verified above, before anything is read from the cache.
+  const cacheKey = finalizedResultsKey(rfqId, rfq);
+  const cached = cacheKey ? finalizedResultsCache.get(cacheKey) : undefined;
+  if (cached) return cached;
+  const isProvisional = isProvisionalWorkflow(rfq);
+  // Every one of these reads is keyed only by the RFQ and its current ranking version, so they are
+  // issued together; sequencing them was the largest single cost of the polling path.
+  const [trades, currentRun, results, exclusions, candidateQuotes] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
+         FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
+    ).bind(rfqId).all<Record<string, unknown>>(),
+    rfq.current_ranking_version > 0 ? env.DB.prepare(
+      "SELECT trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
+    ).bind(rfqId, rfq.current_ranking_version).first<{ trigger: string }>() : Promise.resolve(null),
+    rfq.current_ranking_version > 0 ? env.DB.prepare(
+      `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
+              r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
+              q.id AS quote_id, q.issuer, q.issuer_display_name, q.received_at,
+              q.normalization_warnings_json, q.rejection_reason, q.issuer_comment
+         FROM ranking_results r JOIN issuer_quotes q ON q.id = r.quote_id
+         JOIN ranking_runs run ON run.id = r.ranking_run_id
+        WHERE r.rfq_id = ? AND run.version = ?
+        ORDER BY r.trade_id, r.economic_rank, r.display_order`
+    ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
+      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    rfq.current_ranking_version > 0 ? env.DB.prepare(
+      `SELECT e.trade_id, e.issuer, e.reason_code FROM ranking_exclusions e
+         JOIN ranking_runs run ON run.id = e.ranking_run_id
+        WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
+    ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
+      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+    isProvisional || rfq.current_ranking_version > 0 ? env.DB.prepare(
+      `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
+               strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
+               ki_barrier_pct, normalization_warnings_json, rejection_reason
+          FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
+    ).bind(rfqId).all<ProvisionalQuoteRow>() : Promise.resolve({ results: [] as ProvisionalQuoteRow[] })
+  ]);
   const rankOptions = {
     includeLateReplies: currentRun?.trigger === "RECALCULATION",
     maxEconomicRank: Number.MAX_SAFE_INTEGER
   };
-  const results = rfq.current_ranking_version > 0 ? await env.DB.prepare(
-    `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
-            r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
-            q.id AS quote_id, q.issuer, q.issuer_display_name, q.received_at,
-            q.normalization_warnings_json, q.rejection_reason, q.issuer_comment
-       FROM ranking_results r JOIN issuer_quotes q ON q.id = r.quote_id
-       JOIN ranking_runs run ON run.id = r.ranking_run_id
-      WHERE r.rfq_id = ? AND run.version = ?
-      ORDER BY r.trade_id, r.economic_rank, r.display_order`
-  ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
-  const exclusions = rfq.current_ranking_version > 0 ? await env.DB.prepare(
-    `SELECT e.trade_id, e.issuer, e.reason_code FROM ranking_exclusions e
-       JOIN ranking_runs run ON run.id = e.ranking_run_id
-      WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
-  ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>() : { results: [] as Record<string, unknown>[] };
-  const candidateQuotes = isProvisional || rfq.current_ranking_version > 0 ? await env.DB.prepare(
-    `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
-             strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
-             ki_barrier_pct, normalization_warnings_json, rejection_reason
-        FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
-  ).bind(rfqId).all<ProvisionalQuoteRow>() : { results: [] as ProvisionalQuoteRow[] };
-  const provisionalByTrade = new Map<string, ReturnType<typeof rankValidQuotes>>();
-  const provisionalValidCounts = new Map<string, number>();
-  const provisionalLastUpdated = new Map<string, string | null>();
-  if (isProvisional) {
-    for (const trade of trades.results) {
-      const tradeId = String(trade.id);
-      const targetField = String(trade.target_field) as TargetField;
-      const tradeQuotes = candidateQuotes.results.filter(quote => quote.trade_id === tradeId);
-      const ranked = rankValidQuotes(tradeQuotes, targetField, rankOptions);
-      provisionalByTrade.set(tradeId, ranked);
-      provisionalValidCounts.set(tradeId, new Set(ranked.map(result => result.quote.issuer)).size);
-      provisionalLastUpdated.set(tradeId, tradeQuotes.at(-1)?.received_at ?? null);
-    }
+  // Group each result set by trade once. The previous shape re-scanned every candidate quote,
+  // ranking row and exclusion row for each trade, and the tie check re-scanned the ranking rows
+  // once more per ranking row, so a multi-trade RFQ paid a quadratic cost on every poll.
+  const quotesByTrade = groupByTrade(candidateQuotes.results, quote => quote.trade_id);
+  const resultsByTrade = groupByTrade(results.results, row => row.trade_id);
+  const exclusionsByTrade = groupByTrade(exclusions.results, row => row.trade_id);
+  const rankedByTrade = new Map<string, ReturnType<typeof rankValidQuotes>>();
+  for (const trade of trades.results) {
+    const tradeId = String(trade.id);
+    rankedByTrade.set(tradeId, rankValidQuotes(
+      quotesByTrade.get(tradeId) ?? [],
+      String(trade.target_field) as TargetField,
+      rankOptions
+    ));
   }
   const tradePayloads = trades.results.map(trade => {
     const tradeId = String(trade.id);
     const targetField = String(trade.target_field) as TargetField;
-    const allRankedQuotes = isProvisional
-      ? provisionalByTrade.get(tradeId) ?? []
-      : rankValidQuotes(
-        candidateQuotes.results.filter(quote => quote.trade_id === tradeId),
-        targetField,
-        rankOptions
-      );
+    const allRankedQuotes = rankedByTrade.get(tradeId) ?? [];
+    const tradeQuotes = quotesByTrade.get(tradeId) ?? [];
+    const tradeResults = resultsByTrade.get(tradeId) ?? [];
     const provisionalRankings = allRankedQuotes.filter(result => result.economicRank <= 4);
+    // Tie membership is counted over exactly the same population as before: the displayed
+    // provisional rankings, or every persisted ranking row of the trade.
+    const provisionalTieCounts = countBy(provisionalRankings, result => result.tieGroup);
+    const persistedTieCounts = countBy(tradeResults, row => String(row.tie_group));
     const rankings = isProvisional
       ? provisionalRankings.map(result => {
         const quote = result.quote as ProvisionalQuoteRow;
@@ -210,17 +287,17 @@ async function loadRfqResultsPayload(
           value: result.value,
           direction: rankingDirection(targetField),
           isImageWinner: false,
-          tie: provisionalRankings.filter(candidate => candidate.tieGroup === result.tieGroup).length > 1,
+          tie: (provisionalTieCounts.get(result.tieGroup) ?? 0) > 1,
           receivedAt: quote.received_at,
           warnings: JSON.parse(quote.normalization_warnings_json || "[]") as unknown
         };
       })
-      : results.results.filter(result => result.trade_id === trade.id && Number(result.economic_rank) <= 4).map(result => ({
+      : tradeResults.filter(result => Number(result.economic_rank) <= 4).map(result => ({
         quoteId: result.quote_id, rank: result.economic_rank, displayOrder: result.display_order,
         issuer: result.issuer, issuerDisplayName: result.issuer_display_name,
         value: result.normalized_value, direction: result.direction,
         isImageWinner: result.is_image_winner === 1,
-        tie: results.results.filter(candidate => candidate.trade_id === trade.id && candidate.tie_group === result.tie_group).length > 1,
+        tie: (persistedTieCounts.get(String(result.tie_group)) ?? 0) > 1,
         receivedAt: result.received_at, warnings: JSON.parse(String(result.normalization_warnings_json ?? "[]")) as unknown
       }));
     const alternateQuotes = customFifthCandidates(allRankedQuotes).map(result => {
@@ -239,18 +316,18 @@ async function loadRfqResultsPayload(
       id: trade.id, sequence: trade.sequence, tradeCode: trade.trade_code, product: trade.product,
       currency: trade.currency, targetField: trade.target_field,
       underlyings: JSON.parse(String(trade.underlyings_json ?? "[]")) as unknown,
-      validQuoteCount: isProvisional ? provisionalValidCounts.get(tradeId) ?? 0 : validIssuerCount,
-      lastUpdatedAt: isProvisional ? provisionalLastUpdated.get(tradeId) ?? null : rfq.finalized_at,
+      validQuoteCount: validIssuerCount,
+      lastUpdatedAt: isProvisional ? tradeQuotes.at(-1)?.received_at ?? null : rfq.finalized_at,
       rankings,
       alternateQuotes,
       exclusions: isProvisional
-        ? candidateQuotes.results
-          .filter(quote => quote.trade_id === tradeId && quote.status !== "VALID")
+        ? tradeQuotes
+          .filter(quote => quote.status !== "VALID")
           .map(quote => ({ issuer: quote.issuer, reason: quote.status }))
-        : exclusions.results.filter(exclusion => exclusion.trade_id === trade.id).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
+        : (exclusionsByTrade.get(tradeId) ?? []).map(exclusion => ({ issuer: exclusion.issuer, reason: exclusion.reason_code }))
     };
   });
-  return {
+  const payload = {
     rfq: {
       id: rfq.id,
       workflowStatus: rfq.workflow_status,
@@ -265,6 +342,10 @@ async function loadRfqResultsPayload(
     },
     trades: tradePayloads
   };
+  // A RECALCULATION run admits late replies, and a further late reply can still change the
+  // alternate-quote list without advancing the version, so those payloads are never cached.
+  if (cacheKey && currentRun?.trigger !== "RECALCULATION") rememberFinalizedResults(cacheKey, payload);
+  return payload;
 }
 
 export async function getRfqResults(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {

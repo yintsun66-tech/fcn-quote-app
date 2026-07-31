@@ -1,7 +1,11 @@
 import { keyedHash } from "./crypto";
 import { insertAudit, nowIso } from "./db";
+import { withTimeout } from "./http";
 import { QUOTE_CARD_WIDTH_PX, renderQuoteCardHtml } from "./quote-card";
 import type { AppEnv } from "./types";
+
+const FOLLOW_BOARD_RENDER_TIMEOUT_MS = 60 * 1000;
+const LINE_PUSH_TIMEOUT_MS = 15 * 1000;
 
 // Follow-board card images pushed to LINE. LINE fetches an image itself and sends no credentials,
 // so the object must be reachable without authentication. Access control is therefore the
@@ -172,14 +176,16 @@ export async function renderFollowBoardImage(
       // DAC floating-income note only.
       comparablePricePct: null
     }], "");
-    const response = await env.BROWSER.quickAction("screenshot", {
+    // This runs after a publication has already committed, so a stalled render must not hold the
+    // invocation open; the catch below then pushes the text message without an image.
+    const response = await withTimeout(env.BROWSER.quickAction("screenshot", {
       html,
       viewport: { width: QUOTE_CARD_WIDTH_PX, height: 1280, deviceScaleFactor: 1.5 },
       screenshotOptions: { type: "png", fullPage: true },
       gotoOptions: { waitUntil: "networkidle0" }
-    });
+    }), FOLLOW_BOARD_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
     if (!response.ok) return null;
-    const bytes = await response.arrayBuffer();
+    const bytes = await withTimeout(response.arrayBuffer(), FOLLOW_BOARD_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
     const token = await followBoardImageToken(env, product.productCode);
     await env.RAW_MAIL_BUCKET.put(followBoardImageKey(token), bytes, {
       httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=86400" }
@@ -313,7 +319,7 @@ export async function pushFollowBoardProducts(
   let status: number | null = null;
   let reason: string | undefined;
   try {
-    const response = await fetcher(LINE_PUSH_ENDPOINT, {
+    const response = await withTimeout(fetcher(LINE_PUSH_ENDPOINT, {
       method: "POST",
       headers: {
         // The token is only ever placed in this header — never logged, audited or echoed.
@@ -323,11 +329,11 @@ export async function pushFollowBoardProducts(
         "x-line-retry-key": crypto.randomUUID()
       },
       body: JSON.stringify({ to: credentials.groupId, messages })
-    });
+    }), LINE_PUSH_TIMEOUT_MS, "LINE_PUSH_TIMEOUT");
     status = response.status;
     if (!response.ok) reason = `HTTP_${response.status}`;
-  } catch {
-    reason = "REQUEST_FAILED";
+  } catch (error) {
+    reason = error instanceof Error && error.message === "LINE_PUSH_TIMEOUT" ? "TIMEOUT" : "REQUEST_FAILED";
   }
 
   // Counts and a safe status only: no token, group id, quote value or RFQ identifier.

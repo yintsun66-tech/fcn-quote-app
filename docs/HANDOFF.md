@@ -4,6 +4,107 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+## Performance work P0–P3 (local only; not committed, migrated or deployed)
+
+A performance review produced a P0/P1/P2 list. Everything on it is implemented except one item that
+was deliberately stopped (see the last bullet). **Nothing here is committed, pushed, migrated to
+remote D1 or deployed.** Migration `0016` exists locally only; remote D1 is still at `0015`.
+
+**P0**
+
+1. `app.js` `downloadQuoteImage()` had no timeout on either the double `requestAnimationFrame` wait
+   or the `html2canvas` call, so 下載報價圖 could sit on 「產圖中…」 forever — the same defect that
+   was already fixed in `backend-client.js` and `follow-board.mjs`. Both awaits are now raced
+   against a timeout (5 s layout, 20 s draw) that surfaces a message and restores the button.
+2. `GET /api/v1/rfqs/:id/snapshot` — polled every four seconds — issued about eleven **sequential**
+   D1 queries. After the ownership check nothing depends on anything else, so the reads now go out
+   in waves: one for the RFQ row, one wave of four (issuers, late replies, artifacts, provisional
+   quote counter), and, only when the snapshot actually changed, one wave for the results and
+   artifact payloads. Same SQL, same payload; three round-trip steps instead of eleven.
+3. Migration `0016_query_performance_indexes.sql` adds four indexes: `audit_events(action,
+   created_at DESC)` for the duplicate-registration summary, `rfqs(user_id, created_at DESC, id
+   DESC)` for the owner RFQ list and its cursor, `outbound_email_batches(queued_at DESC, id DESC)`
+   for the ADMIN outbound list, and `ranking_exclusions(rfq_id, ranking_run_id, trade_id)` for
+   results loading. Indexes only — no table, column, constraint or row changes. The older
+   `idx_rfqs_user_created` is now subsumed by the new RFQ index but is deliberately **not** dropped;
+   dropping a production index was not in scope. `test/query-plan.test.ts` asserts both that the
+   indexes exist and that `EXPLAIN QUERY PLAN` uses them instead of scanning or sorting.
+4. Every keystroke in the quote table ran a full draft save (up to ~380 `querySelector` calls) plus
+   a full preview re-render. Those are now debounced by 250 ms, with an immediate flush when a field
+   loses focus and an explicit cancel in `clearSavedDraft` so a pending save cannot resurrect a
+   draft the user just cleared.
+
+**P1**
+
+- `loadRfqResultsPayload` re-scanned the candidate quotes, ranking rows and exclusion rows once per
+  trade, and the tie check re-scanned the ranking rows once more per ranking row — quadratic on a
+  multi-trade RFQ, on every poll. Each set is now grouped by trade once. A finalized payload is also
+  memoised in-isolate (bounded to 32 entries) keyed by RFQ, ranking version, workflow status and
+  finalization time. **A `RECALCULATION` run is never memoised**: it admits late replies, and a
+  further late reply can change the alternate-quote list without advancing the version.
+- `backend-client.js` imported `./market-resources.mjs` while `app.js` imported
+  `./market-resources.mjs?v=market-hotlist-v3`. Different URLs mean the browser downloaded and
+  instantiated the module twice, and a version bump only busted one copy. Both now use the versioned
+  specifier.
+- The 74 KB `交易所查詢0715.csv` was fetched on every page load. It is now fetched on first focus of
+  a BBG Code field, and normalisation on blur awaits that load — which also removes the pre-existing
+  race where a fast typist could blur before the startup fetch finished.
+- The analysis page fetched market context for up to five underlyings sequentially; they now run
+  together. `marketContextRequest` already de-duplicates a repeated ticker, so no extra upstream
+  request is issued, and five concurrent calls sit well inside the 30-per-minute limiter.
+
+**P2/P3**
+
+- `scheduledWorkflowRecovery` sent up to 150 queue messages one at a time; it now reads both job
+  tables together and uses `sendBatch` per queue (both limits are inside the 100-message cap).
+  `test/scheduled-recovery.test.ts` pins this.
+- `cleanupFollowBoardOperationalData` looped row-by-row for the legacy expiry backfill and the
+  expiry archive pass. Both are batched, and the audit rows are written only for products whose
+  guarded `UPDATE` actually changed — the guard SQL is unchanged, so nothing is archived or audited
+  twice.
+- `applyRetention` sweeps the two R2 prefix groups together, batches the two pointer-clearing
+  updates, and reads the delete candidates and the held count together.
+- Browser Rendering had no application-layer timeout in either caller. `withTimeout` in `http.ts`
+  now bounds the quote-card render and the follow-board LINE card at 60 s (well inside the
+  three-minute job lease, so a timed-out job requeues cleanly as `BROWSER_RENDER_TIMEOUT`), and the
+  LINE push itself at 15 s (recorded as reason `TIMEOUT`). The four sequential follow-board card
+  renders were left sequential on purpose: Browser Rendering concurrency is the documented
+  constraint.
+
+**Stopped and awaiting a decision — caching the public follow-board manifest.** The plan is right
+that `GET /api/v1/public/follow-board/manifest` has no caching at all, but every workable cache
+conflicts with a documented invariant. ADR 0028 requires expired products to be **hidden
+immediately**, ADMIN 下架 is expected to take effect at once, and `follow-board.mjs` reloads the
+manifest right after a user submits 我要跟單 so they can see their own row — a cross-isolate TTL
+would break at least one of those. A zero-staleness variant still has to query D1 to learn whether
+it is stale, so it saves only JSON parsing. Worth noting too: the board is loaded on demand, not
+polled, so the hot-path premise is weaker than the plan assumed. If a bounded cache is still wanted,
+the safe shape is: cache the product list only, re-apply the `expiresAt > now` filter in memory on
+every request (so expiry stays exact), invalidate on publish/archive, and cap the TTL at ~10 s —
+accepting that a manual 下架 can lag by that much in another isolate. That trade needs an explicit
+decision.
+
+Verification of this work: `node --check` on `app.js`, `backend-client.js`, `market-resources.mjs`,
+`market-analysis.mjs` and `follow-board.mjs`; `wrangler types`; source and test typechecks clean;
+**27 test files / 186 tests** (was 24 / 176); `prepare-assets` plus the Wrangler dry-run build,
+which reported 18 public assets and every existing binding, including `RETENTION_ENABLED ("0")` and
+`LINE_PUSH_ENABLED ("1")`.
+
+Two test files needed adjusting because a migration was appended.
+`test/follow-board-migration.test.ts` split the migration list by position (`slice(-2)`); it now
+finds the `0014_` boundary by name so the legacy rows are still seeded against the pre-0014 schema.
+`test/ranking-integration.test.ts` gained a finalized read before the recalculation, so a stale
+memoised payload would fail the existing version-2 assertion.
+
+The asset cache token for `index.html` moved to `?v=perf-p0-v1` for `app.js` and
+`backend-client.js`, per the recorded rule that a changed versioned asset must get a new token.
+`styles.css` did not change and keeps its token.
+
+**Smallest safe next step:** review the diff, then decide the follow-board cache question. Before
+any deploy, migration `0016` must be applied to remote D1 first (`wrangler d1 migrations apply
+fcn-quote --remote`) — it is index-only and additive, but it is still an explicitly authorized
+operation. Preserve the user-owned untracked `.claude/` and `output/`.
+
 Current production source: implementation commit `ccbb7dd`, currently served as Worker
 `5abc0baa-9be0-4021-a90f-d067ed074c0c` on 2026-07-31. Current branch HEAD may include later
 documentation-only commits and must be resolved from Git history.

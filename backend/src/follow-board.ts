@@ -507,13 +507,15 @@ export async function cleanupFollowBoardOperationalData(env: AppEnv): Promise<vo
       WHERE status = 'PUBLISHED' AND expires_at IS NULL
       LIMIT 100`
   ).all<{ id: string; subject_date_mmdd: string; published_at: string }>();
-  for (const row of legacy.results) {
+  // One batched write instead of up to 100 sequential round trips. The `expires_at IS NULL` guard
+  // is unchanged, so a product that gained an expiry meanwhile is still never rewritten.
+  const backfills = legacy.results.flatMap(row => {
     const expiry = legacyExpiryAt(row.subject_date_mmdd, row.published_at);
-    if (!expiry) continue;
-    await env.DB.prepare(
+    return expiry ? [env.DB.prepare(
       "UPDATE follow_board_products SET expires_at = ?, updated_at = ? WHERE id = ? AND expires_at IS NULL"
-    ).bind(expiry, now, row.id).run();
-  }
+    ).bind(expiry, now, row.id)] : [];
+  });
+  if (backfills.length) await env.DB.batch(backfills);
   const expiredProducts = await env.DB.prepare(
     `SELECT id, product_code, expires_at
        FROM follow_board_products
@@ -521,23 +523,29 @@ export async function cleanupFollowBoardOperationalData(env: AppEnv): Promise<vo
       ORDER BY expires_at
       LIMIT 100`
   ).bind(now).all<{ id: string; product_code: string; expires_at: string }>();
-  for (const product of expiredProducts.results) {
-    const archived = await env.DB.prepare(
+  // Archive in one batch, then audit only the rows this run actually changed. The guarded UPDATE is
+  // byte-for-byte the same, so a product archived concurrently still reports zero changes and is
+  // not audited twice.
+  if (expiredProducts.results.length) {
+    const archived = await env.DB.batch(expiredProducts.results.map(product => env.DB.prepare(
       `UPDATE follow_board_products
           SET status = 'ARCHIVED', archived_at = ?, archived_by_user_id = NULL, updated_at = ?
         WHERE id = ? AND status = 'PUBLISHED' AND expires_at IS NOT NULL AND expires_at <= ?`
-    ).bind(now, now, product.id, now).run();
-    if (archived.meta.changes === 1) {
-      await insertAudit(
-        env,
-        "FOLLOW_BOARD_PRODUCT_EXPIRED",
-        "FOLLOW_BOARD_PRODUCT",
+    ).bind(now, now, product.id, now)));
+    const audits = expiredProducts.results.flatMap((product, index) =>
+      archived[index]?.meta.changes === 1 ? [env.DB.prepare(
+        `INSERT INTO audit_events
+          (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+         VALUES (?, NULL, 'FOLLOW_BOARD_PRODUCT_EXPIRED', 'FOLLOW_BOARD_PRODUCT', ?, ?, ?, ?)`
+      ).bind(
+        newId("aud"),
         product.id,
-        null,
         `cron:${now}`,
-        { productCode: product.product_code, expiresAt: product.expires_at }
-      );
-    }
+        JSON.stringify({ productCode: product.product_code, expiresAt: product.expires_at }),
+        now
+      )] : []
+    );
+    if (audits.length) await env.DB.batch(audits);
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM follow_board_idempotency_keys WHERE expires_at < ?").bind(now),

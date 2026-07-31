@@ -10,7 +10,11 @@ const COMMAND_ID = "fbc_64000000-0000-4000-8000-000000000003";
 
 beforeAll(async () => {
   const migrations = testEnv.TEST_MIGRATIONS;
-  await applyD1Migrations(testEnv.DB, migrations.slice(0, -2));
+  // Split by migration name, not by position: this test seeds legacy rows against the pre-0014
+  // schema, so a later migration being appended must not shift which ones run first.
+  const pivot = migrations.findIndex(migration => migration.name.startsWith("0014_"));
+  if (pivot < 0) throw new Error("migration 0014 not found");
+  await applyD1Migrations(testEnv.DB, migrations.slice(0, pivot));
   const now = new Date().toISOString();
   await testEnv.DB.batch([
     testEnv.DB.prepare(
@@ -49,7 +53,7 @@ beforeAll(async () => {
                '2026-07-30', 'APP', ?, ?)`
     ).bind(PRODUCT_ID, now, now)
   ]);
-  await applyD1Migrations(testEnv.DB, migrations.slice(-2));
+  await applyD1Migrations(testEnv.DB, migrations.slice(pivot));
 });
 
 describe("follow-board migrations 0014 and 0015", () => {

@@ -89,3 +89,19 @@ export function requireIdempotencyKey(request: Request): string {
 export function requestId(request: Request): string {
   return request.headers.get("cf-ray")?.split("-")[0] || crypto.randomUUID();
 }
+
+/**
+ * Fails a stalled dependency with a named error instead of letting it hold a worker invocation
+ * open. Browser Rendering has no client-side timeout of its own, and `fcn-image-render` allows only
+ * three concurrent renders, so one hung call otherwise occupies a scarce slot until the platform
+ * kills the invocation.
+ */
+export function withTimeout<T>(work: Promise<T>, milliseconds: number, code: string): Promise<T> {
+  let timer: number | null = null;
+  return Promise.race([
+    work.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(code)), milliseconds);
+    })
+  ]);
+}

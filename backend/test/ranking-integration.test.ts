@@ -391,6 +391,14 @@ describe("versioned ranking persistence", () => {
       .bind(rfqId).first<{ workflow_status: string; current_ranking_version: number }>();
     expect(rfq).toEqual({ workflow_status: "COMPLETED", current_ranking_version: 1 });
 
+    // Reading the finalized payload here is deliberate: the finalized-results cache is keyed by
+    // ranking version, so the recalculated read further down must not return this version-1 copy.
+    const finalized = await (await getRfqResults(testEnv, session, rfqId)).json<{
+      rfq: { rankingVersion: number };
+      trades: Array<{ rankings: Array<{ quoteId: string; rank: number }> }>;
+    }>();
+    expect(finalized.rfq.rankingVersion).toBe(1);
+
     const lateQuoteId = `quo_${crypto.randomUUID()}`;
     const recalculationJobId = `rnkjob_${crypto.randomUUID()}`;
     await testEnv.DB.batch([

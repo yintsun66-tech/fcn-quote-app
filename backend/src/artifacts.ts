@@ -2,12 +2,15 @@ import { requireCsrf } from "./auth";
 import { insertAudit, newId, nowIso } from "./db";
 import { rfqCorrelationCode } from "./crypto";
 import { AppError } from "./errors";
-import { jsonResponse, requestId, requireSameOrigin } from "./http";
+import { jsonResponse, requestId, requireSameOrigin, withTimeout } from "./http";
 import { QUOTE_CARD_WIDTH_PX, renderQuoteCardHtml, type QuoteCardTrade } from "./quote-card";
 import { customFifthCandidates, rankValidQuotes, type QuoteRankRow } from "./ranking-policy";
 import type { AppEnv, ImageRenderJob, SessionContext, TargetField } from "./types";
 
 const LEASE_MILLISECONDS = 3 * 60 * 1000;
+// Comfortably longer than an observed successful render, and comfortably shorter than the lease
+// above, so a timed-out job is requeued while its own lease is still the only one outstanding.
+const BROWSER_RENDER_TIMEOUT_MS = 60 * 1000;
 export const RENDER_PROFILE_VERSION = "quote-card-reference-v3";
 
 export function quoteArtifactIdempotencyKey(
@@ -377,17 +380,20 @@ export async function processImageRenderJob(env: AppEnv, requested: ImageRenderJ
   );
   let response: Response;
   try {
-    response = await env.BROWSER.quickAction("screenshot", {
+    response = await withTimeout(env.BROWSER.quickAction("screenshot", {
       html,
       viewport: { width: QUOTE_CARD_WIDTH_PX, height: 1280, deviceScaleFactor: trades.length > 12 ? 1 : 1.5 },
       screenshotOptions: { type: "png", fullPage: true },
       gotoOptions: { waitUntil: "networkidle0" }
-    });
-  } catch {
+    }), BROWSER_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
+  } catch (error) {
+    // A timeout must stay distinguishable from a refused request: it is retried on the existing
+    // backoff, and it releases the render slot well inside the three-minute job lease.
+    if (error instanceof Error && error.message === "BROWSER_RENDER_TIMEOUT") throw error;
     throw new Error("BROWSER_RENDER_REQUEST_FAILED");
   }
   if (!response.ok) throw new Error(`BROWSER_RENDER_HTTP_${response.status}`);
-  const bytes = await response.arrayBuffer();
+  const bytes = await withTimeout(response.arrayBuffer(), BROWSER_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
   const objectKey = `quote-images/v3/${job.rfq_id}/${job.ranking_run_id}/${job.trade_code}/${job.quote_id}.png`;
   await env.RAW_MAIL_BUCKET.put(objectKey, bytes, {
     httpMetadata: { contentType: "image/png", cacheControl: "private, max-age=0, no-store" },

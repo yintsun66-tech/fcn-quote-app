@@ -158,31 +158,39 @@ export async function scheduledWorkflowRecovery(env: AppEnv): Promise<void> {
     }
   }
 
-  const queued = await env.DB.prepare(
-    `SELECT id, rfq_id, trigger, requested_version FROM quote_rank_jobs
-      WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 100`
-  ).bind(now).all<{ id: string; rfq_id: string; trigger: FinalizationTrigger; requested_version: number }>();
-  for (const row of queued.results) {
-    await env.QUOTE_RANK_QUEUE.send({ jobId: row.id, rfqId: row.rfq_id, trigger: row.trigger, requestedVersion: row.requested_version });
+  // Both recovery sweeps are pure re-enqueues of rows the database already holds, so they are read
+  // together and each is delivered as one batched send instead of up to 100 sequential ones. Both
+  // limits stay inside the 100-message Queues batch cap.
+  const [queued, renderJobs] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, rfq_id, trigger, requested_version FROM quote_rank_jobs
+        WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 100`
+    ).bind(now).all<{ id: string; rfq_id: string; trigger: FinalizationTrigger; requested_version: number }>(),
+    env.DB.prepare(
+      `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer FROM image_render_jobs
+        WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 50`
+    ).bind(now).all<{
+      id: string;
+      artifact_id: string;
+      rfq_id: string;
+      ranking_run_id: string;
+      trade_code: string;
+      quote_id: string;
+      issuer: string;
+    }>()
+  ]);
+  if (queued.results.length) {
+    await env.QUOTE_RANK_QUEUE.sendBatch(queued.results.map(row => ({
+      body: { jobId: row.id, rfqId: row.rfq_id, trigger: row.trigger, requestedVersion: row.requested_version }
+    })));
   }
-
-  const renderJobs = await env.DB.prepare(
-    `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer FROM image_render_jobs
-      WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 50`
-  ).bind(now).all<{
-    id: string;
-    artifact_id: string;
-    rfq_id: string;
-    ranking_run_id: string;
-    trade_code: string;
-    quote_id: string;
-    issuer: string;
-  }>();
-  for (const row of renderJobs.results) {
-    await env.IMAGE_RENDER_QUEUE.send({
-      jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
-      rankingRunId: row.ranking_run_id, tradeCode: row.trade_code,
-      quoteId: row.quote_id, issuer: row.issuer
-    });
+  if (renderJobs.results.length) {
+    await env.IMAGE_RENDER_QUEUE.sendBatch(renderJobs.results.map(row => ({
+      body: {
+        jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
+        rankingRunId: row.ranking_run_id, tradeCode: row.trade_code,
+        quoteId: row.quote_id, issuer: row.issuer
+      }
+    })));
   }
 }

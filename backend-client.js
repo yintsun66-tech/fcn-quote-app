@@ -4,11 +4,14 @@ import {
   parseIndicativeSpot,
   spotStorageKey
 } from "./market-analysis.mjs";
+// The specifier must stay byte-identical to the one app.js uses: a different query string is a
+// different module URL, so the browser would download and instantiate this module a second time,
+// and a version bump would only bust one of the two copies.
 import {
   MARKET_RESOURCE_CONSENT_KEY,
   marketResourceDescriptor,
   tradingViewWidgetUrl
-} from "./market-resources.mjs";
+} from "./market-resources.mjs?v=market-hotlist-v3";
 
 (() => {
   "use strict";
@@ -726,14 +729,17 @@ import {
     renderAnalysisCalculation();
   }
 
+  // Each underlying is an independent lookup. Awaiting them one at a time made the analysis page
+  // wait for the sum of up to five round trips instead of the slowest one; `marketContextRequest`
+  // already de-duplicates a repeated ticker, so running them together issues no extra request.
   async function autoFillPreviousCloses(input) {
-    for (const underlying of input.terms.underlyings) {
+    await Promise.all(input.terms.underlyings.map(async underlying => {
       const descriptor = marketResourceDescriptor(underlying);
       const fields = analysisSpotFields(underlying);
-      if (!fields.source) continue;
+      if (!fields.source) return;
       if (!descriptor.supported) {
         fields.source.textContent = "來源：無法確認美股交易所代碼，請手動輸入。";
-        continue;
+        return;
       }
       fields.source.textContent = "正在取得前一交易日收盤價…";
       try {
@@ -742,7 +748,7 @@ import {
         const equity = payload.marketContext?.alphaVantage?.data;
         if (!equity || !Number.isFinite(Number(equity.closePrice))) {
           fields.source.textContent = "Alpha Vantage 暫時無法提供前一交易日收盤價，請手動輸入。";
-          continue;
+          return;
         }
         if (parseIndicativeSpot(fields.spot?.value) === null) {
           applyPreviousClose(underlying, equity.closePrice, equity.tradingDate, false);
@@ -754,7 +760,7 @@ import {
           fields.source.textContent = `前收自動載入失敗：${error.message || "請手動輸入。"}`;
         }
       }
-    }
+    }));
   }
 
   function renderAnalysisPage(input, quotes) {

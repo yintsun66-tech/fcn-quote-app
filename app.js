@@ -18,6 +18,7 @@ import {
 
   const MAX_ROWS = 20;
   const DRAFT_STORAGE_KEY = "fcn-quote-app.trade-draft.v1";
+  const ROW_CHANGE_DEBOUNCE_MS = 250;
   const MAIL_TO = "i14053@firstbank.com.tw";
   const DEFAULT_MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
   const tableBody = document.querySelector("#quoteTable tbody");
@@ -40,6 +41,8 @@ import {
   let emailQueue = [];
   let emailQueueIndex = -1;
   let emailClipboardFormat = "none";
+  let rowChangeTimer = 0;
+  let bbgLookupPromise = null;
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
@@ -201,6 +204,27 @@ import {
     }
   }
 
+  function applyRowChanges() {
+    rowChangeTimer = 0;
+    saveDraft();
+    if (!quotePreviewPanel.hidden) renderQuoteSheet();
+  }
+
+  function scheduleRowChanges() {
+    cancelRowChanges();
+    rowChangeTimer = setTimeout(applyRowChanges, ROW_CHANGE_DEBOUNCE_MS);
+  }
+
+  function flushRowChanges() {
+    cancelRowChanges();
+    applyRowChanges();
+  }
+
+  function cancelRowChanges() {
+    if (rowChangeTimer) clearTimeout(rowChangeTimer);
+    rowChangeTimer = 0;
+  }
+
   function restoreDraft() {
     try {
       const savedDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -224,6 +248,8 @@ import {
   }
 
   function clearSavedDraft() {
+    // A pending debounced save would otherwise write the draft back moments after it was cleared.
+    cancelRowChanges();
     try {
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     } catch {
@@ -455,6 +481,17 @@ import {
     issuerDialog.showModal();
   }
 
+  // Every await below can stall indefinitely — requestAnimationFrame never fires in a background
+  // tab and html2canvas can hang on mobile WebKit. Without a timeout the unsettled promise never
+  // reaches the caller's catch and the button stays on 「產圖中…」 forever.
+  function withRenderTimeout(promise, milliseconds, message) {
+    let timeoutId;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error(message)), milliseconds); }),
+    ]).finally(() => clearTimeout(timeoutId));
+  }
+
   async function downloadQuoteImage() {
     const generateButton = document.querySelector("#generateQuoteImage");
     if (typeof window.html2canvas !== "function") {
@@ -467,8 +504,12 @@ import {
     const originalText = generateButton.textContent;
     generateButton.textContent = "產圖中…";
     try {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const canvas = await window.html2canvas(quoteSheet, {
+      await withRenderTimeout(
+        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        5_000,
+        "產圖逾時（版面），請切回此分頁後再試一次。"
+      );
+      const canvas = await withRenderTimeout(window.html2canvas(quoteSheet, {
         backgroundColor: "#ffffff",
         scale: Math.max(2, Math.min(3, window.devicePixelRatio || 2)),
         useCORS: true,
@@ -477,7 +518,7 @@ import {
         scrollY: -window.scrollY,
         windowWidth: quoteSheet.scrollWidth,
         windowHeight: quoteSheet.scrollHeight,
-      });
+      }), 20_000, "產圖逾時（繪製），請減少筆數或重新整理後再試。");
       const link = document.createElement("a");
       const datePart = new Date().toISOString().slice(0, 10).replaceAll("-", "");
       link.download = `FCN-DAC-${issuerProfiles[selectedIssuer].shortName}-Quote-${datePart}.png`;
@@ -492,6 +533,23 @@ import {
       generateButton.removeAttribute("aria-busy");
       generateButton.textContent = originalText;
     }
+  }
+
+  // The exchange table is a 74 KB CSV that only the BBG Code fields need, so it is fetched the
+  // first time one of those fields is used instead of on every page load. Fetching it lazily also
+  // removes the old race where a fast typist could blur a field before the startup load finished.
+  function ensureBbgLookup() {
+    if (!bbgLookupPromise) bbgLookupPromise = loadBbgLookup();
+    return bbgLookupPromise;
+  }
+
+  async function normaliseBbgCodeWhenReady(field) {
+    const entered = field.value;
+    await ensureBbgLookup();
+    // The user may have kept typing while the table was loading; never overwrite a newer value.
+    if (field.value !== entered) return;
+    normaliseBbgCode(field);
+    flushRowChanges();
   }
 
   async function loadBbgLookup() {
@@ -726,14 +784,17 @@ import {
     }
     try { await downloadQuoteImage(); } catch (error) { setStatus(error.message); }
   });
+  tableBody.addEventListener("focusin", event => {
+    if (/^bbgCode[1-5]$/.test(event.target.name)) void ensureBbgLookup();
+  });
   tableBody.addEventListener("blur", event => {
-    if (/^bbgCode[1-5]$/.test(event.target.name)) normaliseBbgCode(event.target);
-    saveDraft();
+    if (/^bbgCode[1-5]$/.test(event.target.name)) void normaliseBbgCodeWhenReady(event.target);
+    flushRowChanges();
   }, true);
-  ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, () => {
-    saveDraft();
-    if (!quotePreviewPanel.hidden) renderQuoteSheet();
-  }));
+  // Persisting the draft reads every field of every row, and the preview rebuilds the whole sheet.
+  // Doing that on each keystroke makes typing visibly laggy once the table has many rows and the
+  // preview panel is open, so coalesce the work; leaving a field still flushes it immediately.
+  ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, scheduleRowChanges));
 
   setupHotlist();
 
@@ -843,5 +904,4 @@ import {
   }
 
   if (!restoreDraft()) createRow();
-  loadBbgLookup();
 })();

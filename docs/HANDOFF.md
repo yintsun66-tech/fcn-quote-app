@@ -135,16 +135,43 @@ though `wrangler whoami` showed the correct account with `d1 (write)`. An immedi
 with no configuration change, so treat a single 7403 on the first D1 call of a session as a stale
 OAuth access token and simply retry before investigating entitlements.
 
+### GitHub Pages static snapshot synced
+
+The allowlisted public assets were synced to `yintsun66-tech/fcnV2` `main`, which GitHub Pages
+publishes from the repository root. Only four files had real content changes — `app.js`,
+`backend-client.js`, `index.html` and `README.md` (from `docs/static-release-readme.md`). Static
+program commit is **`7af6b6d`**; the follow-up status-document commit is **`cdafc8a`**. No Worker
+source, migration, Secret, D1/R2 content or private fixture was copied.
+
+`version-status.html` on the static site had drifted two releases behind (it still named commit
+`6d2f3b2` and Worker `23c74ccd`), so this sync also brought it current. The same file was updated in
+this repository and published to Cloudflare in a status-only deployment, Worker
+**`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`** (one asset uploaded; the feature deployment
+`b26d132c-5a0e-4fdf-b765-dbdda1407d73` is what serves the code).
+
+Verification compared all fifteen allowlisted assets over HTTP between `app.yintsun66.com` and
+`yintsun66-tech.github.io/fcnV2`. Nine matched byte-for-byte, including every JavaScript module and
+the vendored `html2canvas`. Both sites reference `?v=perf-p0-v1` for `app.js` and
+`backend-client.js`. The six reported differences were measured and are **not** content drift:
+
+- The four HTML files differ by exactly 359 bytes each because Cloudflare injects a
+  `static.cloudflareinsights.com` Web Analytics beacon into HTML responses. GitHub Pages matches the
+  repository source exactly.
+- `styles.css` and `交易所查詢0715.csv` differ by exactly their CRLF count (82 and 4,625). Cloudflare
+  serves the Windows working copy, which still has CRLF for files nobody has rewritten, while GitHub
+  Pages serves the git-normalized LF blob. After normalizing line endings both hash identically.
+
+**Do not compare the two sites by hashing working-tree files on Windows** — `core.autocrlf=true`
+plus the static repository having no `.gitattributes` makes every file look different. Compare over
+HTTP, normalize line endings, and ignore the beacon.
+
 **Not verified by this rollout:** no RFQ was created or sent, no real issuer mail was exchanged, no
 follow-board publication was made, and therefore the LINE push remains unproven end to end. No
 Browser Rendering job ran, so the new 60-second render timeout has unit coverage but no production
-observation. The GitHub Pages static snapshot was **not** updated; `app.js` and `index.html` there
-still carry the pre-performance versions, so sync `yintsun66-tech/fcnV2` separately if the static
-site should match.
+observation.
 
-**Smallest safe next step:** decide the follow-board manifest cache question above. Optionally sync
-the changed allowlisted public assets to the static snapshot repository. Preserve the user-owned
-untracked `.claude/` and `output/`.
+**Smallest safe next step:** decide the follow-board manifest cache question above. Preserve the
+user-owned untracked `.claude/` and `output/`.
 
 Current production source: implementation commit `e90ce53`, currently served as Worker
 `b26d132c-5a0e-4fdf-b765-dbdda1407d73` on 2026-07-31. Remote D1 migrations are applied through

@@ -43,11 +43,16 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `inbound_messages.r2_raw_mime_key` — it is `NOT NULL` and doing so aborts every scheduled run.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
-  program commit `d787aeb` mirrors the approved public asset set with ZAR, market hot lists,
-  the Zimbra manual-mail fallback and the PIN-gated follow-board page with API fallback. It contains no Cloudflare
+  program commit `7af6b6d` (status-document HEAD `cdafc8a`) mirrors the approved public asset set
+  with ZAR, market hot lists, the Zimbra manual-mail fallback, the PIN-gated follow-board page with
+  API fallback, and the front-end performance fixes. It contains no Cloudflare
   backend or data. Future static syncs must copy only the allowlisted files from
   `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
-  whole backend directory.
+  whole backend directory. Compare the two sites over HTTP, not by hashing working-tree files:
+  Cloudflare serves the Windows working copy (CRLF for files nobody has rewritten) while GitHub
+  Pages serves the git-normalized LF blob, and Cloudflare injects a ~359-byte Web Analytics beacon
+  into every HTML response. Normalize line endings and ignore that beacon before calling a
+  difference real.
 - ADR 0015 is the current timing/ranking contract. `RFQ_DEADLINE_SECONDS=900` is the issuer reply
   window, not the complete hard deadline. `RFQ_MAIL_GRACE_SECONDS=60` extends persisted
   `deadline_at` and the Durable Object alarm to 960 seconds. During the final minute the UI shows

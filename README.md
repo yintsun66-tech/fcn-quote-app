@@ -113,7 +113,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
-  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `d787aeb`。它只包含公開前端，
+  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `7af6b6d`（狀態文件 HEAD `cdafc8a`）。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。

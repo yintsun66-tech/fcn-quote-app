@@ -41,6 +41,15 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   deletes production R2 objects and D1 rows irreversibly and requires explicit authorization. Run
   `applyRetention(env, true)` for a dry-run count first. Never clear
   `inbound_messages.r2_raw_mime_key` — it is `NOT NULL` and doing so aborts every scheduled run.
+- **`fcn-quote-app` must not serve GitHub Pages.** It had Pages enabled from `main` root — an
+  undocumented third static site at `https://yintsun66-tech.github.io/fcn-quote-app/`, serving a
+  147-commit-old build. It was disabled on 2026-07-31. Do not re-enable it, and check before
+  merging anything into `main`. Two reasons it matters: `main` carries `.nojekyll`, so a merge
+  would publish `backend/`, `docs/` and `migrations/` verbatim; and `PUBLIC_ORIGINS` in
+  `follow-board.ts` allows the whole host `https://yintsun66-tech.github.io`, which is the **same
+  origin** as the `fcnV2` site — so that copy would pass follow-board CORS, and
+  `backend-client.js` activates on any host given `?backend=1`. A second, unvetted front end would
+  drift with `main` and bypass the `prepare-assets.mjs` allowlist entirely.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
   program commit `7af6b6d` (status-document HEAD `cdafc8a`) mirrors the approved public asset set

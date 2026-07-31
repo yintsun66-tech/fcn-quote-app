@@ -114,6 +114,12 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
+- **`fcn-quote-app` 本身不得啟用 GitHub Pages。** 它原本以 `main` 根目錄啟用，形成一個沒有
+  任何文件記載、且落後 147 個 commit 的第三份靜態站，已於 2026-07-31 關閉。合併進 `main`
+  之前請先確認未被重新啟用：`main` 帶有 `.nojekyll`，合併會把 `backend/`、`docs/`、
+  `migrations/` 原樣公開；且跟單頁的 CORS 允許整個 `https://yintsun66-tech.github.io`
+  主機，與 `fcnV2` 站是**同一個 origin**，等於多出一份不受 `prepare-assets.mjs`
+  白名單控制、又會隨 `main` 漂移的前端。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
   `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `7af6b6d`（狀態文件 HEAD `cdafc8a`）。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。

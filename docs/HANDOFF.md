@@ -4,6 +4,42 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+## An undocumented third static site was found and disabled (2026-07-31)
+
+Asked whether merging the feature branch into `main` would affect the static release, the answer for
+`yintsun66-tech/fcnV2` is **no** — it is a separate repository, synced by copying allowlisted files,
+with no Git relationship to this one. But checking turned up something no document mentioned:
+
+**`fcn-quote-app` itself had GitHub Pages enabled**, built from `main` root, public, live at
+`https://yintsun66-tech.github.io/fcn-quote-app/`. Because `main` was 147 commits behind, it was
+quietly serving a stale static build (`app.js?v=trade-date-today-v1`).
+
+Merging into `main` would have made that URL serve the current application, and three things made
+that worse than it sounds:
+
+1. `main` carries `.nojekyll`, so files publish verbatim — `backend/`, `docs/`, `migrations/` and
+   `vendor/` would all have become downloadable there. The repository is public, so this exposed no
+   secret that was not already public, but it adds an entry point nobody was tracking.
+2. `PUBLIC_ORIGINS` in `follow-board.ts` allows the whole host `https://yintsun66-tech.github.io`,
+   not a path. That is the **same origin** as the `fcnV2` site, so the copy under
+   `/fcn-quote-app/` would have passed follow-board CORS with exactly the same standing as the
+   sanctioned static site.
+3. `backend-client.js` activates on `app.yintsun66.com` **or** any host with `?backend=1`, so
+   `…/fcn-quote-app/?backend=1` would have been a working second login surface.
+
+None of that is an immediate breach — the follow board still requires the PIN and the application
+still requires credentials — but it would have been a second front end drifting with `main` and
+entirely outside the `prepare-assets.mjs` allowlist that governs what may be published.
+
+**Pages was disabled on `fcn-quote-app` with the owner's explicit approval.** The configuration
+before deletion, for restoration: `build_type: legacy`, `source: { branch: "main", path: "/" }`,
+`public: true`, `https_enforced: true`, `cname: null`. `GET /repos/.../pages` now returns 404, and
+`fcnV2` was re-checked immediately afterwards and is untouched: `status: "built"`, same source, and
+its site and follow-board page both return 200. The GitHub CDN keeps serving a disabled Pages site
+for a few minutes, so a 200 straight after deletion is expected and is not evidence of failure.
+
+Do not re-enable it, and check Pages state before merging anything into `main`.
+
 ## Performance follow-up and documentation reconciliation (committed, pushed and deployed)
 
 A review of the P0–P3 rollout against production and against the documentation. The rollout itself

@@ -32,8 +32,8 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
   source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
   `main`.
-- Production implementation commit `e90ce53` is documented by this handoff and
-  currently served by Worker `ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6` on 2026-07-31. Resolve the
+- Production implementation commit `7abde5d` is documented by this handoff and
+  currently served by Worker `ca46deee-da1c-4aab-91e6-17a772181bfd` on 2026-07-31. Resolve the
   current branch HEAD from Git rather than copying a historical handoff hash. The current
   verification baseline is 27 test files / 191 tests. A deployment record is evidence of
   Worker/static-asset publication, not evidence that real bank mail was delivered.

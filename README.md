@@ -76,12 +76,12 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `e90ce53`；實際最新分支 HEAD
+- 正式功能程式基線為 `7abde5d`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`（2026-07-31
-  部署）。功能程式來自 `b26d132c-5a0e-4fdf-b765-dbdda1407d73`，其後的
-  `ddf8cef7` 只更新了狀態頁資產；Cloudflare 的每次部署都會整包取代 Worker，
-  因此**目前實際服務中的版本是 `ddf8cef7`**，兩者程式內容相同。
+- 最新正式 Worker 版本為 `ca46deee-da1c-4aab-91e6-17a772181bfd`（2026-07-31
+  部署，程式來自 commit `7abde5d`）。Cloudflare 每次部署都會整包取代 Worker，
+  因此**只上傳一個資產的部署同樣在服務程式**。若之後只重新發布狀態頁，
+  線上版本編號會比上面這一組高而程式內容相同；以 `wrangler deployments list` 為準。
 - 跟單商品發布後會推播到一個私密 LINE 群組（`LINE_PUSH_ENABLED="1"`，2026-07-31
   啟用）。推播在發布交易 commit **之後**才執行且不會拋出例外，LINE 中斷或憑證失效
   都不會導致發布失敗或回滾。輸出刻意拆成兩則：商品條件圖走公開 URL，因此**手收

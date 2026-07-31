@@ -4,7 +4,7 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-## Performance follow-up and documentation reconciliation (committed, not yet deployed)
+## Performance follow-up and documentation reconciliation (committed, pushed and deployed)
 
 A review of the P0–P3 rollout against production and against the documentation. The rollout itself
 verified clean — 27 files / 186 tests, migration `0016` applied, live assets byte-identical to the
@@ -58,8 +58,34 @@ three places claimed `b26d132c` was serving production when `wrangler deployment
 `ddf8cef7` at 100%. A Cloudflare deployment replaces the whole Worker, so an asset-only publish also
 becomes the version that serves the code.
 
-Verified: typecheck clean (source and test), **27 test files / 191 tests**, `prepare-assets` plus
-dry-run build (18 assets, `LINE_PUSH_ENABLED ("1")`, `LINE_WEBHOOK_ENABLED ("0")`). **Not deployed.**
+Verified: typecheck clean (source and test), **27 test files / 191 tests**, `node --check` on both
+front-end bundles, `prepare-assets` plus dry-run build (18 assets, `LINE_PUSH_ENABLED ("1")`,
+`LINE_WEBHOOK_ENABLED ("0")`).
+
+### Rollout evidence (2026-07-31)
+
+- Commit `7abde5d` pushed to `origin/codex/market-analysis-phase2-4` (`16ff86b..7abde5d`), local and
+  remote in sync. The outgoing diff was scanned for a group id, bearer token or long base64 secret
+  and was clean.
+- Deployed as Worker **`ca46deee-da1c-4aab-91e6-17a772181bfd`** with both custom domains, the
+  two-minute schedule, all five Queue producers and consumers, and every variable unchanged —
+  `RETENTION_ENABLED ("0")`, `AUTO_RANK_ONE_IMAGE ("0")`, `LINE_PUSH_ENABLED ("1")`,
+  `LINE_WEBHOOK_ENABLED ("0")`. No migration was needed: nothing in this change touches the schema.
+- Post-deploy boundary checks: `/api/v1/health` 200 on both `api.` and `app.`; an unauthenticated
+  snapshot request 401; the public follow-board manifest without a PIN 401; the LINE webhook 404
+  while disabled. The authorization boundaries the snapshot rewrite touches are therefore intact —
+  `snapshotDigest` enforces ownership in its own statement, and the session gate still runs first.
+- Because the batched reads changed the scheduled path, a live cron tick was tailed on the new
+  version: `outcome: "ok"`, no exceptions and no error logs, so the batched recovery sweep, the
+  batched follow-board cleanup and the batched retention read all run clean in production.
+- The status page was then republished with the deployed version id, which necessarily produces a
+  further version carrying identical code. **This is why a recorded Worker id ages out immediately:
+  resolve what is live from `wrangler deployments list`, not from a document.**
+
+**Not verified by this rollout:** no RFQ was created, sent or polled by a real browser, so the
+snapshot digest has unit coverage but no production observation. No follow-board publication was
+made, so the LINE push and its new render budget remain unproven end to end, and no Browser
+Rendering job ran, so neither render deadline has been observed in production.
 
 ## Performance work P0–P3 (committed, pushed, migrated and deployed)
 
@@ -252,8 +278,8 @@ observation.
 user-owned untracked `.claude/` and `output/`.
 
 Current production source: implementation commit `e90ce53`, currently served as Worker
-`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6` on 2026-07-31 (the version `b26d132c` introduced, republished
-by a later status-only asset deploy). Remote D1 migrations are applied through
+`ca46deee-da1c-4aab-91e6-17a772181bfd` on 2026-07-31 (a later status-only asset republish, if any,
+carries a higher id with identical code). Remote D1 migrations are applied through
 `0016`. Current branch HEAD may include later documentation-only commits and must be resolved from
 Git history.
 

@@ -75,9 +75,11 @@ front-end bundles, `prepare-assets` plus dry-run build (18 assets, `LINE_PUSH_EN
   snapshot request 401; the public follow-board manifest without a PIN 401; the LINE webhook 404
   while disabled. The authorization boundaries the snapshot rewrite touches are therefore intact —
   `snapshotDigest` enforces ownership in its own statement, and the session gate still runs first.
-- Because the batched reads changed the scheduled path, a live cron tick was tailed on the new
-  version: `outcome: "ok"`, no exceptions and no error logs, so the batched recovery sweep, the
-  batched follow-board cleanup and the batched retention read all run clean in production.
+- Because the batched reads changed the scheduled path, production was tailed for five minutes
+  across the new versions. **28 events, all `outcome: "ok"`, zero exceptions and zero error logs** —
+  three consecutive cron ticks (14:18:10Z, 14:20:10Z, 14:22:10Z) plus the 17 HTTP requests of the
+  boundary checks. The batched recovery sweep, the batched follow-board cleanup and the batched
+  retention read therefore all run clean in production.
 - The status page was then republished with the deployed version id, which necessarily produces a
   further version carrying identical code. **This is why a recorded Worker id ages out immediately:
   resolve what is live from `wrangler deployments list`, not from a document.**

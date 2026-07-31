@@ -1,0 +1,173 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fcn-quote-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-21",
+  "vars": {
+    "APP_DOMAIN": "yintsun66.com",
+    "SESSION_IDLE_SECONDS": "1800",
+    "SESSION_ABSOLUTE_SECONDS": "28800",
+    "PASSWORD_PBKDF2_ITERATIONS": "10000",
+    "AUTH_RATE_LIMIT_WINDOW_SECONDS": "900",
+    "AUTH_RATE_LIMIT_MAX_ATTEMPTS": "5",
+    "OUTBOUND_FROM": "rfq@yintsun66.com",
+    "OUTBOUND_TO": "i14053@firstbank.com.tw",
+    "INBOUND_ADDRESS": "rfq@yintsun66.com",
+    "MAX_INBOUND_EMAIL_BYTES": "26214400",
+    "RFQ_SOFT_DEADLINE_SECONDS": "420",
+    "RFQ_DEADLINE_SECONDS": "900",
+    "RFQ_MAIL_GRACE_SECONDS": "60",
+    "AUTO_RANK_ONE_IMAGE": "0",
+    "MARKET_CONTEXT_ENABLED": "1",
+    "MARKET_CACHE_TTL_SECONDS": "86400",
+    "MARKET_CACHE_STALE_SECONDS": "604800",
+    "MARKET_CONTEXT_RATE_LIMIT_WINDOW_SECONDS": "60",
+    "MARKET_CONTEXT_RATE_LIMIT_MAX_REQUESTS": "30",
+    "ALPHA_VANTAGE_DAILY_REQUEST_LIMIT": "24",
+    "SEC_USER_AGENT": "FCN Quote App rfq@yintsun66.com",
+    // Retention is destructive and irreversible. It stays off until deliberately enabled, so a
+    // deployment of the retention code alone deletes nothing.
+    "RETENTION_ENABLED": "0",
+    "RETENTION_RAW_MAIL_DAYS": "10",
+    "RETENTION_IMAGE_DAYS": "10",
+    "RETENTION_RESULT_DAYS": "30",
+    // Live. LINE_CHANNEL_ACCESS_TOKEN and LINE_GROUP_ID are Secrets; the push is skipped with
+    // reason NOT_CONFIGURED if either is missing, and never fails a publication.
+    "LINE_PUSH_ENABLED": "1",
+    // Group-id discovery, already done. Stays off; turning it on opens a signature-gated endpoint.
+    "LINE_WEBHOOK_ENABLED": "0",
+    "FOLLOW_BOARD_PUBLIC_ORIGIN": "https://api.yintsun66.com"
+  },
+  "secrets": {
+    "required": [
+      "EMPLOYEE_DATA_KEY",
+      "EMPLOYEE_LOOKUP_KEY",
+      "ALPHA_VANTAGE_API_KEY",
+      "FOLLOW_BOARD_VIEW_PIN"
+    ]
+  },
+  "routes": [
+    {
+      "pattern": "api.yintsun66.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "app.yintsun66.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "public",
+    "run_worker_first": ["/api/*"],
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RFQ_COORDINATOR",
+        "class_name": "RfqCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "rfq-coordinator-v1",
+      "new_sqlite_classes": ["RfqCoordinator"]
+    }
+  ],
+  "triggers": {
+    "crons": ["*/2 * * * *"]
+  },
+  "addresses": ["rfq@yintsun66.com"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fcn-quote",
+      "database_id": "b830c1b1-c1cc-4f8f-bb60-c99f4e489946",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RAW_MAIL_BUCKET",
+      "bucket_name": "fcn-quote-private"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND_EMAIL_QUEUE",
+        "queue": "fcn-outbound-email"
+      },
+      {
+        "binding": "INBOUND_EMAIL_QUEUE",
+        "queue": "fcn-email-parse"
+      },
+      {
+        "binding": "QUOTE_NORMALIZE_QUEUE",
+        "queue": "fcn-quote-normalize"
+      },
+      {
+        "binding": "QUOTE_RANK_QUEUE",
+        "queue": "fcn-quote-rank"
+      },
+      {
+        "binding": "IMAGE_RENDER_QUEUE",
+        "queue": "fcn-image-render"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "fcn-outbound-email",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-outbound-email-dlq",
+        "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-email-parse",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-email-parse-dlq",
+        "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-quote-normalize",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-quote-normalize-dlq",
+        "max_concurrency": 5
+      },
+      {
+        "queue": "fcn-quote-rank",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-quote-rank-dlq",
+        "max_concurrency": 3
+      },
+      {
+        "queue": "fcn-image-render",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "fcn-image-render-dlq",
+        "max_concurrency": 3
+      }
+    ]
+  },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "destination_address": "i14053@firstbank.com.tw",
+      "allowed_sender_addresses": ["rfq@yintsun66.com"]
+    }
+  ]
+}

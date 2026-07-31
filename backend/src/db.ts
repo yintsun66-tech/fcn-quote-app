@@ -1,0 +1,116 @@
+import { sha256Text } from "./crypto";
+import type { AppEnv, SessionContext, UserRole } from "./types";
+
+export function newId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID()}`;
+}
+
+// Derive the effective application role. The stored `role` column keeps its original
+// USER|ADMIN CHECK; the PS tier is layered on with the is_privileged_support flag
+// (migration 0010) so ADMIN always wins, then PS, then plain USER.
+export function effectiveRole(storedRole: "USER" | "ADMIN", isPrivilegedSupport: number | boolean): UserRole {
+  if (storedRole === "ADMIN") return "ADMIN";
+  return isPrivilegedSupport ? "PS" : "USER";
+}
+
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export function addSeconds(date: Date, seconds: number): string {
+  return new Date(date.getTime() + seconds * 1000).toISOString();
+}
+
+/**
+ * The single audit-write shape. Callers that need to write several audit rows in one `DB.batch`
+ * take the statement from here rather than hand-writing the INSERT, so the columns, the id prefix
+ * and the metadata encoding can never drift between the two paths.
+ *
+ * `createdAt` lets a sweep stamp every row it writes with the one timestamp it already computed.
+ */
+export function auditStatement(
+  env: AppEnv,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  actorUserId: string | null,
+  requestId: string,
+  metadata: Record<string, unknown> = {},
+  createdAt: string = nowIso()
+): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT INTO audit_events
+      (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(newId("aud"), actorUserId, action, entityType, entityId, requestId, JSON.stringify(metadata), createdAt);
+}
+
+export async function insertAudit(
+  env: AppEnv,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  actorUserId: string | null,
+  requestId: string,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  await auditStatement(env, action, entityType, entityId, actorUserId, requestId, metadata).run();
+}
+
+interface SessionRow {
+  session_id: string;
+  csrf_token_hash: string;
+  absolute_expires_at: string;
+  expires_at: string;
+  credential_version: number;
+  user_credential_version: number;
+  user_id: string;
+  username_normalized: string;
+  display_name: string;
+  branch_name: string;
+  role: "USER" | "ADMIN";
+  is_privileged_support: number;
+}
+
+export async function loadSession(env: AppEnv, rawToken: string): Promise<SessionContext | null> {
+  const tokenHash = await sha256Text(rawToken);
+  const row = await env.DB.prepare(
+    `SELECT s.id AS session_id, s.csrf_token_hash, s.absolute_expires_at, s.expires_at,
+            s.credential_version, u.credential_version AS user_credential_version,
+            u.id AS user_id, u.username_normalized, u.display_name, u.branch_name, u.role,
+            u.is_privileged_support
+       FROM user_sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ? AND s.revoked_at IS NULL AND u.status = 'ACTIVE'`
+  ).bind(tokenHash).first<SessionRow>();
+
+  if (!row) return null;
+  const now = new Date();
+  if (Date.parse(row.expires_at) <= now.getTime() || Date.parse(row.absolute_expires_at) <= now.getTime()) return null;
+  if (row.credential_version !== row.user_credential_version) return null;
+
+  const idleSeconds = Number(env.SESSION_IDLE_SECONDS);
+  const nextExpiryMs = Math.min(now.getTime() + idleSeconds * 1000, Date.parse(row.absolute_expires_at));
+  // Coalesce the sliding-expiry write (ADR 0003): persist only when the expiry would advance
+  // by more than the threshold. This removes the per-request D1 write from hot paths such as
+  // the 4s result polling, while keeping the idle-timeout semantics within ~60s granularity.
+  const SLIDING_WRITE_THRESHOLD_MS = 60_000;
+  if (nextExpiryMs - Date.parse(row.expires_at) > SLIDING_WRITE_THRESHOLD_MS) {
+    await env.DB.prepare("UPDATE user_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?")
+      .bind(now.toISOString(), new Date(nextExpiryMs).toISOString(), row.session_id).run();
+  }
+
+  return {
+    id: row.session_id,
+    csrfTokenHash: row.csrf_token_hash,
+    absoluteExpiresAt: row.absolute_expires_at,
+    user: {
+      id: row.user_id,
+      username: row.username_normalized,
+      displayName: row.display_name,
+      branchName: row.branch_name,
+      role: effectiveRole(row.role, row.is_privileged_support),
+      credentialVersion: row.user_credential_version
+    }
+  };
+}

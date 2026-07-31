@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=responsive-table-v1" />
+    <link rel="stylesheet" href="./styles.css?v=zimbra-compose-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -26,13 +26,41 @@
         <button id="addRow" type="button" class="secondary">＋ 新增一筆交易</button>
         <button id="removeRow" type="button" class="secondary">－ 刪除最後一筆</button>
         <button id="clearSavedDraft" type="button" class="secondary">清除本機暫存</button>
-        <button id="confirmAllQuotes" type="button" class="secondary">確認所有詢價條件</button>
+        <button id="confirmAllQuotes" type="button" class="manual-email-button">手動貼郵件詢價</button>
         <button id="sendQuotes" type="button" class="primary">發送詢價條件</button>
         <button id="generateQuoteImage" type="button" class="quote-image-button">產出報價圖</button>
+        <a class="secondary guide-link" href="./follow-board.html">跟單專區</a>
         <a class="secondary guide-link" href="./guide.html" target="_blank" rel="noopener">使用說明</a>
       </section>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section id="hotlistPanel" class="hotlist-panel" aria-label="市場熱門榜">
+        <details>
+          <summary>美股／日股熱門榜（找交易想法）</summary>
+          <div class="hotlist-body">
+            <p class="hotlist-note">熱門榜由 TradingView 提供，為公開市場行情參考，不構成投資建議，也不會進入詢價條件、正式排名或報價圖。</p>
+            <label class="hotlist-consent">
+              <input type="checkbox" id="hotlistConsent">
+              我了解載入後 TradingView 會收到我的 IP 與瀏覽器資訊；不會傳送行編、分行、詢價內容或報價資料。
+            </label>
+            <div class="hotlist-controls">
+              <label>市場
+                <select id="hotlistMarket">
+                  <option value="us">美股</option>
+                  <option value="japan">日股</option>
+                </select>
+              </label>
+              <span id="hotlistExchanges" class="hotlist-exchanges"></span>
+              <button id="hotlistLoad" type="button" class="secondary">載入即時熱門榜</button>
+              <button id="hotlistUnload" type="button" class="secondary" hidden>卸載</button>
+            </div>
+            <nav id="hotlistScreens" class="hotlist-screens" aria-label="TradingView 排行"></nav>
+            <p id="hotlistStatus" class="hotlist-status" role="status" aria-live="polite"></p>
+            <div id="hotlistWidget" class="hotlist-widget"></div>
+          </div>
+        </details>
+      </section>
 
       <section class="entry-workspace" aria-label="詢價交易條件">
         <header class="entry-workspace-header">
@@ -154,7 +182,7 @@
           <option value="CA">CA</option>
           <option value="ALL">全部（依序建立 8 封郵件）</option>
         </select>
-        <p id="emailIssuerHint" class="dialog-hint">「全部」會在您確認已寄出目前郵件後，再開啟下一封，避免裝置一次只保留最後一封草稿。</p>
+        <p id="emailIssuerHint" class="dialog-hint">系統會先複製 HTML 表格，再讓您選擇裝置預設郵件程式或已在 Edge 登入的 Zimbra 網頁版。「全部」會逐封準備，避免裝置只保留最後一封草稿。</p>
         <div class="dialog-actions">
           <button id="cancelEmailIssuer" type="button" class="secondary">取消</button>
           <button type="submit" class="primary">準備郵件</button>
@@ -164,17 +192,27 @@
 
     <dialog id="emailQueueDialog" class="issuer-dialog">
       <div class="dialog-content">
-        <h2>全部詢價郵件</h2>
+        <h2>準備詢價郵件</h2>
         <p id="emailQueueProgress"></p>
         <p id="emailQueueDetail" class="dialog-hint"></p>
+        <p id="emailClipboardStatus" class="email-clipboard-status" aria-live="polite"></p>
+        <div class="email-compose-actions">
+          <button id="openDefaultEmail" type="button" class="secondary">使用裝置預設郵件程式</button>
+          <label for="zimbraUrl">Zimbra 網頁網址</label>
+          <input id="zimbraUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://貴行的-zimbra-網址/" />
+          <small>第一次請貼上您目前已登入的 Zimbra 網址；只會儲存在這台瀏覽器，不會上傳。若未直接進入新郵件，請在 Zimbra 按「新郵件」，收件人與主旨可依上方資訊填入。</small>
+          <button id="openZimbraEmail" type="button" class="primary">開啟 Zimbra 新郵件</button>
+          <button id="copyEmailAgain" type="button" class="secondary">重新複製詢價表格</button>
+        </div>
         <div class="dialog-actions">
           <button id="cancelEmailQueue" type="button" class="secondary">結束流程</button>
-          <button id="nextEmailQueue" type="button" class="primary">我已寄出，開啟下一封</button>
+          <button id="nextEmailQueue" type="button" class="primary">這封已完成，準備下一封</button>
         </div>
       </div>
     </dialog>
 
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
-    <script src="./app.js?v=trade-date-today-v1" defer></script>
+    <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
+    <script type="module" src="./app.js?v=perf-p0-v1"></script>
+    <script type="module" src="./backend-client.js?v=perf-p0-v1"></script>
   </body>
 </html>

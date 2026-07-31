@@ -1,8 +1,24 @@
+import {
+  MAIL_INSTITUTION_ORDER as SHARED_MAIL_INSTITUTION_ORDER,
+  buildInstitutionEmail as buildSharedInstitutionEmail,
+} from "./backend/shared/email-formats.js?v=issuer-product-subject-v3";
+import {
+  HOTLIST_CONSENT_KEY,
+  hotlistDescriptor,
+  hotlistWidgetUrl,
+} from "./market-resources.mjs?v=market-hotlist-v3";
+import {
+  ZIMBRA_URL_STORAGE_KEY,
+  buildMailtoUrl,
+  buildZimbraComposeUrl,
+} from "./mail-compose.mjs?v=zimbra-compose-v1";
+
 (() => {
   "use strict";
 
   const MAX_ROWS = 20;
   const DRAFT_STORAGE_KEY = "fcn-quote-app.trade-draft.v1";
+  const ROW_CHANGE_DEBOUNCE_MS = 250;
   const MAIL_TO = "i14053@firstbank.com.tw";
   const DEFAULT_MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
   const tableBody = document.querySelector("#quoteTable tbody");
@@ -18,10 +34,15 @@
   const emailQueueDialog = document.querySelector("#emailQueueDialog");
   const emailQueueProgress = document.querySelector("#emailQueueProgress");
   const emailQueueDetail = document.querySelector("#emailQueueDetail");
+  const emailClipboardStatus = document.querySelector("#emailClipboardStatus");
+  const zimbraUrlInput = document.querySelector("#zimbraUrl");
   let selectedIssuer = "BNP";
   let issuerDialogMode = "download";
   let emailQueue = [];
   let emailQueueIndex = -1;
+  let emailClipboardFormat = "none";
+  let rowChangeTimer = 0;
+  let bbgLookupPromise = null;
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
@@ -133,7 +154,7 @@
     row.innerHTML = `
       <td class="row-number"></td>
       <td>${select("product", ["FCN", "DAC"], "FCN")}</td>
-      <td>${select("currency", ["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD"], "USD")}</td>
+      <td>${select("currency", ["USD", "JPY", "EUR", "HKD", "CNH", "CAD", "GBP", "AUD", "ZAR"], "USD")}</td>
       <td>${input("tradeDate", `value="${formatDate()}" placeholder="DD-MMM-YY" required`)}</td>
       <td>${input("tenor", 'type="number" min="1" max="24" value="12" required')}</td>
       <td>${input("bbgCode1", 'autocomplete="off" placeholder="例如 AAPL" required')}</td>
@@ -183,6 +204,27 @@
     }
   }
 
+  function applyRowChanges() {
+    rowChangeTimer = 0;
+    saveDraft();
+    if (!quotePreviewPanel.hidden) renderQuoteSheet();
+  }
+
+  function scheduleRowChanges() {
+    cancelRowChanges();
+    rowChangeTimer = setTimeout(applyRowChanges, ROW_CHANGE_DEBOUNCE_MS);
+  }
+
+  function flushRowChanges() {
+    cancelRowChanges();
+    applyRowChanges();
+  }
+
+  function cancelRowChanges() {
+    if (rowChangeTimer) clearTimeout(rowChangeTimer);
+    rowChangeTimer = 0;
+  }
+
   function restoreDraft() {
     try {
       const savedDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -206,6 +248,8 @@
   }
 
   function clearSavedDraft() {
+    // A pending debounced save would otherwise write the draft back moments after it was cleared.
+    cancelRowChanges();
     try {
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     } catch {
@@ -437,6 +481,17 @@
     issuerDialog.showModal();
   }
 
+  // Every await below can stall indefinitely — requestAnimationFrame never fires in a background
+  // tab and html2canvas can hang on mobile WebKit. Without a timeout the unsettled promise never
+  // reaches the caller's catch and the button stays on 「產圖中…」 forever.
+  function withRenderTimeout(promise, milliseconds, message) {
+    let timeoutId;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error(message)), milliseconds); }),
+    ]).finally(() => clearTimeout(timeoutId));
+  }
+
   async function downloadQuoteImage() {
     const generateButton = document.querySelector("#generateQuoteImage");
     if (typeof window.html2canvas !== "function") {
@@ -449,8 +504,12 @@
     const originalText = generateButton.textContent;
     generateButton.textContent = "產圖中…";
     try {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const canvas = await window.html2canvas(quoteSheet, {
+      await withRenderTimeout(
+        new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        5_000,
+        "產圖逾時（版面），請切回此分頁後再試一次。"
+      );
+      const canvas = await withRenderTimeout(window.html2canvas(quoteSheet, {
         backgroundColor: "#ffffff",
         scale: Math.max(2, Math.min(3, window.devicePixelRatio || 2)),
         useCORS: true,
@@ -459,7 +518,7 @@
         scrollY: -window.scrollY,
         windowWidth: quoteSheet.scrollWidth,
         windowHeight: quoteSheet.scrollHeight,
-      });
+      }), 20_000, "產圖逾時（繪製），請減少筆數或重新整理後再試。");
       const link = document.createElement("a");
       const datePart = new Date().toISOString().slice(0, 10).replaceAll("-", "");
       link.download = `FCN-DAC-${issuerProfiles[selectedIssuer].shortName}-Quote-${datePart}.png`;
@@ -474,6 +533,23 @@
       generateButton.removeAttribute("aria-busy");
       generateButton.textContent = originalText;
     }
+  }
+
+  // The exchange table is a 74 KB CSV that only the BBG Code fields need, so it is fetched the
+  // first time one of those fields is used instead of on every page load. Fetching it lazily also
+  // removes the old race where a fast typist could blur a field before the startup load finished.
+  function ensureBbgLookup() {
+    if (!bbgLookupPromise) bbgLookupPromise = loadBbgLookup();
+    return bbgLookupPromise;
+  }
+
+  async function normaliseBbgCodeWhenReady(field) {
+    const entered = field.value;
+    await ensureBbgLookup();
+    // The user may have kept typing while the table was loading; never overwrite a newer value.
+    if (field.value !== entered) return;
+    normaliseBbgCode(field);
+    flushRowChanges();
   }
 
   async function loadBbgLookup() {
@@ -526,16 +602,10 @@
   }
 
   function buildInstitutionEmail(key, rows) {
-    const institution = emailInstitutions[key];
-    if (!institution) throw new Error("找不到此詢價對象的郵件模板。");
-    const dataRows = rows.map(row => institution.columns.map(column => String(column.value(row) ?? "")));
-    return {
-      key,
-      label: institution.label,
-      subject: institution.subject,
-      html: buildEmailHtml(institution.columns, dataRows),
-      plainText: buildEmailBody(institution.columns, dataRows),
-    };
+    const records = rows.map(row => Object.fromEntries(
+      fields.map(([name]) => [name, rowValue(row, name)])
+    ));
+    return buildSharedInstitutionEmail(key, records);
   }
 
   async function copyEmailTable(html, plainText) {
@@ -561,28 +631,76 @@
     return rows;
   }
 
-  async function openInstitutionEmail(payload) {
-    const clipboardFormat = await copyEmailTable(payload.html, payload.plainText).catch(() => "none");
-    const mailBody = clipboardFormat === "html" ? "" : payload.plainText;
-    const uri = `mailto:${MAIL_TO}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(mailBody)}`;
-    window.location.href = uri;
-    setStatus(
-      clipboardFormat === "html"
-        ? `已開啟 ${payload.label} 郵件草稿並複製對應 HTML 表格；請在郵件本文貼上後寄送。`
-        : `已開啟 ${payload.label} 郵件草稿；此裝置無法複製 HTML 表格，已改帶入文字格式內容。`,
-      true
-    );
+  function currentEmailPayload() {
+    return emailQueue[emailQueueIndex] ?? null;
   }
 
-  async function openQueuedEmail() {
-    const payload = emailQueue[emailQueueIndex];
+  function updateClipboardStatus(format) {
+    emailClipboardStatus.textContent = format === "html"
+      ? "HTML 詢價表格已複製。開啟郵件後，請在本文按「貼上」。"
+      : format === "text"
+        ? "此瀏覽器只允許複製文字格式；開啟郵件後，請在本文按「貼上」。"
+        : "瀏覽器未允許剪貼簿存取；使用預設郵件程式時會改把文字內容帶入本文。";
+    emailClipboardStatus.dataset.state = format;
+  }
+
+  async function copyCurrentEmailTable() {
+    const payload = currentEmailPayload();
+    if (!payload) return;
+    emailClipboardFormat = await copyEmailTable(payload.html, payload.plainText).catch(() => "none");
+    updateClipboardStatus(emailClipboardFormat);
+  }
+
+  function storedZimbraUrl() {
+    try { return localStorage.getItem(ZIMBRA_URL_STORAGE_KEY) ?? ""; }
+    catch { return ""; }
+  }
+
+  function saveZimbraUrl(url) {
+    try { localStorage.setItem(ZIMBRA_URL_STORAGE_KEY, url); }
+    catch { /* Private browsing may disable storage; opening Zimbra should still work. */ }
+  }
+
+  async function prepareQueuedEmail() {
+    const payload = currentEmailPayload();
     if (!payload) return;
     emailQueueProgress.textContent = `第 ${emailQueueIndex + 1} / ${emailQueue.length} 封：${payload.label}`;
-    emailQueueDetail.textContent = `主旨：${payload.subject}。請貼上已複製的表格並寄出，完成後回到此頁開啟下一封。`;
+    emailQueueDetail.textContent = `收件人：${MAIL_TO}｜主旨：${payload.subject}`;
     const nextButton = document.querySelector("#nextEmailQueue");
-    nextButton.textContent = emailQueueIndex === emailQueue.length - 1 ? "我已寄出，完成流程" : "我已寄出，開啟下一封";
+    nextButton.textContent = emailQueueIndex === emailQueue.length - 1 ? "這封已完成，結束流程" : "這封已完成，準備下一封";
     if (!emailQueueDialog.open) emailQueueDialog.showModal();
-    await openInstitutionEmail(payload);
+    await copyCurrentEmailTable();
+  }
+
+  function openPreparedEmail(mode) {
+    const payload = currentEmailPayload();
+    if (!payload) return;
+    try {
+      if (mode === "zimbra") {
+        const zimbraUrl = zimbraUrlInput.value.trim();
+        const composeUrl = buildZimbraComposeUrl(zimbraUrl, {
+          to: MAIL_TO,
+          subject: payload.subject,
+        });
+        saveZimbraUrl(zimbraUrl);
+        const opened = window.open(composeUrl, "_blank");
+        if (opened) opened.opener = null;
+        if (!opened) throw new Error("Edge 已阻擋新分頁，請允許此網站開啟彈出式視窗後再試一次。");
+        setStatus(`已開啟 ${payload.label} 的 Zimbra 郵件頁；請貼上已複製的詢價表格並寄出。`, true);
+        return;
+      }
+      const mailBody = emailClipboardFormat === "html" ? "" : payload.plainText;
+      window.location.href = buildMailtoUrl({
+        to: MAIL_TO,
+        subject: payload.subject,
+        body: mailBody,
+      });
+      setStatus(`已交由裝置的預設郵件程式開啟 ${payload.label} 郵件；請貼上表格並寄出。`, true);
+    } catch (error) {
+      setStatus(error.message);
+      emailClipboardStatus.textContent = error.message;
+      emailClipboardStatus.dataset.state = "error";
+    }
   }
 
   function showMailIssuerDialog() {
@@ -612,13 +730,20 @@
       const rows = validatedMailRows();
       const selection = emailIssuerSelect.value;
       emailIssuerDialog.close();
-      if (selection === "ALL") {
-        emailQueue = mailInstitutionOrder.map(key => buildInstitutionEmail(key, rows));
-        emailQueueIndex = 0;
-        await openQueuedEmail();
-      } else {
-        await openInstitutionEmail(buildInstitutionEmail(selection, rows));
-      }
+      emailQueue = selection === "ALL"
+        ? SHARED_MAIL_INSTITUTION_ORDER.map(key => buildInstitutionEmail(key, rows))
+        : [buildInstitutionEmail(selection, rows)];
+      emailQueueIndex = 0;
+      zimbraUrlInput.value = storedZimbraUrl();
+      await prepareQueuedEmail();
+    } catch (error) { setStatus(error.message); }
+  });
+  document.querySelector("#openDefaultEmail").addEventListener("click", () => openPreparedEmail("default"));
+  document.querySelector("#openZimbraEmail").addEventListener("click", () => openPreparedEmail("zimbra"));
+  document.querySelector("#copyEmailAgain").addEventListener("click", async () => {
+    try {
+      await copyCurrentEmailTable();
+      setStatus("已重新複製目前郵件的詢價表格。", true);
     } catch (error) { setStatus(error.message); }
   });
   document.querySelector("#cancelEmailQueue").addEventListener("click", () => {
@@ -636,7 +761,7 @@
       return;
     }
     emailQueueIndex += 1;
-    try { await openQueuedEmail(); } catch (error) { setStatus(error.message); }
+    try { await prepareQueuedEmail(); } catch (error) { setStatus(error.message); }
   });
   document.querySelector("#generateQuoteImage").addEventListener("click", () => {
     try {
@@ -659,19 +784,124 @@
     }
     try { await downloadQuoteImage(); } catch (error) { setStatus(error.message); }
   });
+  tableBody.addEventListener("focusin", event => {
+    if (/^bbgCode[1-5]$/.test(event.target.name)) void ensureBbgLookup();
+  });
   tableBody.addEventListener("blur", event => {
-    if (/^bbgCode[1-5]$/.test(event.target.name)) normaliseBbgCode(event.target);
-    saveDraft();
+    if (/^bbgCode[1-5]$/.test(event.target.name)) void normaliseBbgCodeWhenReady(event.target);
+    flushRowChanges();
   }, true);
-  ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, () => {
-    saveDraft();
-    if (!quotePreviewPanel.hidden) renderQuoteSheet();
-  }));
+  // Persisting the draft reads every field of every row, and the preview rebuilds the whole sheet.
+  // Doing that on each keystroke makes typing visibly laggy once the table has many rows and the
+  // preview panel is open, so coalesce the work; leaving a field still flushes it immediately.
+  ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, scheduleRowChanges));
+
+  setupHotlist();
 
   const dialog = document.querySelector("#helpDialog");
   document.querySelector("#showHelp").addEventListener("click", () => dialog.showModal());
   document.querySelector("#closeHelp").addEventListener("click", () => dialog.close());
 
+  // Market hot lists are opt-in: no third-party frame is created until the user consents, so a
+  // plain visit to the quote page never discloses an IP to TradingView.
+  function setupHotlist() {
+    const panel = document.querySelector("#hotlistPanel");
+    if (!panel) return;
+    const consent = panel.querySelector("#hotlistConsent");
+    const marketSelect = panel.querySelector("#hotlistMarket");
+    const loadButton = panel.querySelector("#hotlistLoad");
+    const unloadButton = panel.querySelector("#hotlistUnload");
+    const status = panel.querySelector("#hotlistStatus");
+    const host = panel.querySelector("#hotlistWidget");
+    const screensNav = panel.querySelector("#hotlistScreens");
+    const exchanges = panel.querySelector("#hotlistExchanges");
+
+    let stored = null;
+    try {
+      stored = localStorage.getItem(HOTLIST_CONSENT_KEY);
+    } catch {
+      // private mode or blocked storage: treat as no stored consent
+    }
+    consent.checked = stored === "1";
+
+    // Rebuilds the ranking links and exchange caption for the selected market. These are plain
+    // links to TradingView's own pages, so they need no consent and work for both markets.
+    function syncMarket() {
+      const descriptor = hotlistDescriptor(marketSelect.value);
+      if (!descriptor) return;
+      exchanges.textContent = descriptor.exchanges;
+      screensNav.replaceChildren(...descriptor.screens.map(screen => {
+        const link = document.createElement("a");
+        link.href = screen.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer nofollow";
+        link.textContent = screen.label;
+        return link;
+      }));
+      loadButton.hidden = !descriptor.embeddable || !unloadButton.hidden;
+    }
+
+    function unload() {
+      host.replaceChildren();
+      unloadButton.hidden = true;
+      loadButton.hidden = false;
+      status.textContent = "";
+    }
+
+    function load() {
+      if (!consent.checked) {
+        status.textContent = "請先勾選同意，才會載入外部熱門榜。";
+        return;
+      }
+      const descriptor = hotlistDescriptor(marketSelect.value);
+      if (!descriptor) {
+        status.textContent = "不支援的市場。";
+        return;
+      }
+      // TradingView's free widgets cover US exchanges only; their Japan-looking values silently
+      // return US rows. Say so plainly rather than show US stocks under a Japan label.
+      if (!descriptor.embeddable) {
+        unload();
+        status.textContent = `${descriptor.label}沒有可內嵌的即時熱門榜（TradingView 免費 widget 僅提供美股），請改用上方排行連結開啟 TradingView 網站。`;
+        return;
+      }
+      let url;
+      try {
+        url = hotlistWidgetUrl(marketSelect.value);
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+      const frame = document.createElement("iframe");
+      frame.title = `${descriptor.label} 熱門榜`;
+      frame.loading = "lazy";
+      frame.referrerPolicy = "no-referrer";
+      // Matches the already-deployed Phase 2 chart widget, which is confirmed working in production.
+      frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+      frame.src = url;
+      host.replaceChildren(frame);
+      loadButton.hidden = true;
+      unloadButton.hidden = false;
+      status.textContent = `${descriptor.label}｜資料由 TradingView 提供，可能為延遲或收盤資料。`;
+    }
+
+    consent.addEventListener("change", () => {
+      try {
+        if (consent.checked) localStorage.setItem(HOTLIST_CONSENT_KEY, "1");
+        else localStorage.removeItem(HOTLIST_CONSENT_KEY);
+      } catch {
+        // storage failures must not block the panel
+      }
+      if (!consent.checked) unload();
+    });
+    marketSelect.addEventListener("change", () => {
+      syncMarket();
+      if (!unloadButton.hidden) load();
+    });
+    loadButton.addEventListener("click", load);
+    unloadButton.addEventListener("click", () => { unload(); syncMarket(); });
+    syncMarket();
+  }
+
   if (!restoreDraft()) createRow();
-  loadBbgLookup();
 })();

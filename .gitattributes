@@ -1,0 +1,5 @@
+# Vendored third-party assets must round-trip byte-exactly. This repository is developed on
+# Windows with core.autocrlf=true, which would otherwise rewrite LF to CRLF on checkout and change
+# the file's bytes — invalidating the SHA-256 recorded in vendor/README.md and making the
+# provenance check unverifiable after a fresh clone.
+vendor/** -text

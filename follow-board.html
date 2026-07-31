@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#075985" />
+    <title>FCN / DAC 跟單專區</title>
+    <link rel="stylesheet" href="./follow-board.css?v=follow-board-v3" />
+  </head>
+  <body>
+    <main class="follow-shell">
+      <header class="follow-hero">
+        <div>
+          <p class="eyebrow">STRUCTURED PRODUCT FOLLOW BOARD</p>
+          <h1>跟單專區</h1>
+          <p>查看目前可跟單商品、下載商品圖片，並登記預計跟單金額。</p>
+        </div>
+        <a href="./index.html" class="back-link">返回詢價系統</a>
+      </header>
+
+      <section id="pinGate" class="pin-gate" aria-labelledby="pinTitle">
+        <form id="pinForm" autocomplete="off">
+          <div>
+            <p class="eyebrow">VIEW ACCESS</p>
+            <h2 id="pinTitle">輸入四位數檢視密碼</h2>
+            <p>跟單專區不需要註冊。密碼請向管理者或 PS 索取。</p>
+          </div>
+          <label for="viewPin">四位數密碼</label>
+          <input id="viewPin" name="viewPin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required />
+          <button type="submit">進入跟單專區</button>
+          <p id="pinError" class="form-error" role="alert"></p>
+          <a
+            id="officialFollowBoardLink"
+            class="official-board-link"
+            href="https://app.yintsun66.com/follow-board.html"
+            hidden
+          >若無法連線，改用正式跟單頁</a>
+        </form>
+      </section>
+
+      <div id="boardContent" hidden>
+        <section class="board-intro">
+          <div>
+            <p class="eyebrow">AVAILABLE PRODUCTS</p>
+            <h2 id="boardTitle">目前可跟單商品</h2>
+          </div>
+          <div class="board-actions">
+            <span id="boardDate"></span>
+            <button id="refreshBoard" type="button" class="secondary">重新整理</button>
+            <button id="lockBoard" type="button" class="secondary">離開專區</button>
+          </div>
+        </section>
+
+        <p id="boardStatus" class="board-status" role="status" aria-live="polite"></p>
+        <section id="productGrid" class="product-grid" aria-label="可跟單商品"></section>
+
+        <section id="interestPanel" class="interest-panel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">FOLLOW INTEREST</p>
+              <h2>登記預計跟單金額</h2>
+            </div>
+            <strong id="selectedProductCode"></strong>
+          </div>
+          <p class="notice-text">此登記僅供彙整跟單意向，不代表交易成立。正式條件仍以相關文件及最終確認為準。</p>
+          <form id="interestForm">
+            <label>分行代號
+              <input name="branchCode" type="text" maxlength="10" autocomplete="organization" required />
+            </label>
+            <label>分行名稱
+              <input name="branchName" type="text" maxlength="40" autocomplete="organization" required />
+            </label>
+            <label>五碼行編
+              <input name="employeeNumber" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="off" required />
+            </label>
+            <label>預計跟單金額
+              <span class="amount-input"><input name="amountValue" type="number" min="1" max="999999999999" step="1" required /><b id="interestCurrency"></b></span>
+            </label>
+            <button type="submit">送出跟單意向</button>
+          </form>
+          <p id="interestStatus" class="board-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="dailyPanel" class="daily-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DAILY SUMMARY</p>
+              <h2>當日跟單彙整</h2>
+            </div>
+            <strong id="dailyTotal"></strong>
+          </div>
+          <p class="privacy-note">行編僅顯示遮蔽資料；完整明細限 ADMIN／PS 查看。</p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr><th>商品代碼</th><th>分行</th><th>行編</th><th>預計金額</th><th>更新時間</th></tr>
+              </thead>
+              <tbody id="dailyInterestRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="adminPanel" class="admin-panel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ADMIN / PS</p>
+              <h2>完整跟單明細</h2>
+            </div>
+            <div class="admin-controls">
+              <input id="adminDate" type="date" />
+              <button id="refreshAdmin" type="button" class="secondary">載入明細</button>
+            </div>
+          </div>
+          <p id="adminStatus" class="board-status" role="status"></p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr><th>商品</th><th>分行代號</th><th>分行名稱</th><th>完整行編</th><th>金額</th><th>來源</th><th>更新時間</th></tr>
+              </thead>
+              <tbody id="adminInterestRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="captureHost" class="capture-host" aria-hidden="true"></div>
+    </main>
+
+    <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
+    <script type="module" src="./follow-board.mjs?v=follow-board-v4"></script>
+  </body>
+</html>

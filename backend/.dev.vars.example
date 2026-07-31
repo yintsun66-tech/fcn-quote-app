@@ -1,0 +1,25 @@
+# Copy this file to .dev.vars and fill every value. Never commit .dev.vars.
+# These four names must stay in sync with `secrets.required` in wrangler.jsonc.
+
+# Independent, base64url-encoded 32-byte keys. Do not reuse the same value for both.
+EMPLOYEE_DATA_KEY=
+EMPLOYEE_LOOKUP_KEY=
+
+# Alpha Vantage API key. Used only for the per-symbol previous close that fills
+# 「輸入標的參考現價」 (ADR 0024). Local development may leave this blank: the market panel then
+# reports the provider as unavailable and no other feature is affected.
+ALPHA_VANTAGE_API_KEY=
+
+# PIN gating the follow-board manifest and interest endpoints (ADR 0025).
+FOLLOW_BOARD_VIEW_PIN=
+
+# Optional. LINE Messaging API push for follow-board publications (LINE_PUSH_ENABLED must be "1").
+# Leave blank to disable; the push is skipped with reason NOT_CONFIGURED and publication is
+# unaffected. The group id identifies a private chat, so treat it as a Secret, not a var.
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_GROUP_ID=
+
+# Optional, and only needed once. LINE never shows a group id in its console; it delivers it inside
+# a webhook event. Set this to the channel secret, flip LINE_WEBHOOK_ENABLED to "1" long enough to
+# capture the id from the LINE_SOURCE_DISCOVERED audit event, then turn the webhook off again.
+LINE_CHANNEL_SECRET=

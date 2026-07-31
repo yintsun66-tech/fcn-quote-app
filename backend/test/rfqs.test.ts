@@ -1,0 +1,465 @@
+import { env } from "cloudflare:workers";
+import { applyD1Migrations, createExecutionContext, type D1Migration, waitOnExecutionContext } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import worker from "../src/index";
+import type { AppEnv } from "../src/types";
+
+const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
+const BASE_URL = "https://api.yintsun66.com";
+const PASSWORD = "Correct Horse Battery 123!";
+let userA: { cookie: string; csrf: string };
+let userB: { cookie: string; csrf: string };
+
+async function api(path: string, init: RequestInit = {}, ip = "203.0.113.10"): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("origin", BASE_URL);
+  headers.set("cf-connecting-ip", ip);
+  if (init.body) headers.set("content-type", "application/json");
+  const context = createExecutionContext();
+  const request = new Request(`${BASE_URL}${path}`, { ...init, headers }) as unknown as Request<unknown, IncomingRequestCfProperties>;
+  const response = await worker.fetch(request, testEnv, context);
+  await waitOnExecutionContext(context);
+  return response;
+}
+
+function authentication(response: Response): { cookie: string; csrf: string } {
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  const session = /__Host-fcn_session=([^;,]+)/.exec(setCookie)?.[1];
+  const csrf = /__Host-fcn_csrf=([^;,]+)/.exec(setCookie)?.[1];
+  if (!session || !csrf) throw new Error("Authentication cookies were not returned");
+  return { cookie: `__Host-fcn_session=${session}; __Host-fcn_csrf=${csrf}`, csrf };
+}
+
+async function createActiveUser(attemptedUsername: string, employeeNumber: string, ip: string): Promise<{ cookie: string; csrf: string }> {
+  await api("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      employeeNumber,
+      branchName: "RFQ 測試分行",
+      displayName: attemptedUsername,
+      username: attemptedUsername,
+      password: PASSWORD
+    })
+  }, ip);
+  await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE' WHERE username_normalized = ?").bind(employeeNumber).run();
+  const login = await api("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username: employeeNumber, password: PASSWORD })
+  }, ip);
+  if (login.status !== 200) throw new Error(`Unable to log in test user: ${login.status}`);
+  return authentication(login);
+}
+
+function trade(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    product: "FCN",
+    currency: "USD",
+    tradeDate: "21-Jul-26",
+    effectiveDateOffsetCalendarDays: 7,
+    tenorMonths: 12,
+    guaranteedPeriodsMonths: 1,
+    underlyings: ["AAPL UW", "MSFT UW"],
+    strikePct: 85,
+    koType: "Daily Memory",
+    koBarrierPct: 110,
+    couponPaPct: null,
+    upfrontOrNotePricePct: 98,
+    barrierType: "NONE",
+    kiBarrierPct: null,
+    observationFrequencyMonths: 1,
+    otc: "Note",
+    ...overrides
+  };
+}
+
+async function createRfq(auth: { cookie: string; csrf: string }, trades: unknown[], key = `idem-${crypto.randomUUID()}`): Promise<Response> {
+  return api("/api/v1/rfqs", {
+    method: "POST",
+    headers: {
+      cookie: auth.cookie,
+      "x-csrf-token": auth.csrf,
+      "idempotency-key": key
+    },
+    body: JSON.stringify({ trades })
+  });
+}
+
+beforeAll(async () => {
+  await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  userA = await createActiveUser("rfqusera", "22345", "203.0.113.11");
+  userB = await createActiveUser("rfquserb", "22346", "203.0.113.12");
+});
+
+describe("RFQ API", () => {
+  it("creates one to twenty trades and assigns the target field", async () => {
+    const response = await createRfq(userA, Array.from({ length: 20 }, (_, index) => trade({ underlyings: [`TEST${index} UW`] })));
+    expect(response.status).toBe(201);
+    const body = await response.json<{ rfq: { tradeCount: number; trades: Array<{ tradeCode: string; targetField: string }> } }>();
+    expect(body.rfq.tradeCount).toBe(20);
+    expect(body.rfq.trades[0]).toMatchObject({ tradeCode: "T01", targetField: "COUPON" });
+    expect(body.rfq.trades[19]).toMatchObject({ tradeCode: "T20", targetField: "COUPON" });
+  });
+
+  it("accepts ZAR as an RFQ currency", async () => {
+    const response = await createRfq(userA, [trade({ currency: "ZAR" })]);
+    expect(response.status).toBe(201);
+    const body = await response.json<{ rfq: { trades: Array<{ currency: string }> } }>();
+    expect(body.rfq.trades[0]?.currency).toBe("ZAR");
+  });
+
+  it("rejects more than twenty trades and invalid blank-field rules", async () => {
+    const tooMany = await createRfq(userA, Array.from({ length: 21 }, () => trade()));
+    expect(tooMany.status).toBe(422);
+    const multipleBlanks = await createRfq(userA, [trade({ couponPaPct: null, strikePct: null })]);
+    expect(multipleBlanks.status).toBe(422);
+    const noneWithKi = await createRfq(userA, [trade({ couponPaPct: 15, kiBarrierPct: 65 })]);
+    expect(noneWithKi.status).toBe(422);
+  });
+
+  it("replays identical idempotent creates and rejects key reuse with different content", async () => {
+    const key = `idem-${crypto.randomUUID()}`;
+    const first = await createRfq(userA, [trade()], key);
+    const second = await createRfq(userA, [trade()], key);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const firstBody = await first.json<{ rfq: { id: string } }>();
+    const secondBody = await second.json<{ rfq: { id: string } }>();
+    expect(secondBody.rfq.id).toBe(firstBody.rfq.id);
+    const conflict = await createRfq(userA, [trade({ tenorMonths: 6 })], key);
+    expect(conflict.status).toBe(409);
+  });
+
+  it("enforces ownership without disclosing another user's RFQ", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const body = await created.json<{ rfq: { id: string } }>();
+    const own = await api(`/api/v1/rfqs/${body.rfq.id}`, { headers: { cookie: userA.cookie } });
+    expect(own.status).toBe(200);
+    const other = await api(`/api/v1/rfqs/${body.rfq.id}`, { headers: { cookie: userB.cookie } });
+    expect(other.status).toBe(404);
+  });
+
+  it("lists only the current user's RFQs with scopes and stable pagination", async () => {
+    const activeCreated = await createRfq(userA, [trade({ underlyings: ["ACTIVE UW"] })]);
+    const activeId = (await activeCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const completedCreated = await createRfq(userA, [trade({ underlyings: ["DONE UW"] })]);
+    const completedId = (await completedCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const foreignCreated = await createRfq(userB, [trade({ underlyings: ["FOREIGN UW"] })]);
+    const foreignId = (await foreignCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET workflow_status = 'WAITING', dispatch_status = 'WAITING',
+                status = 'VALIDATED', expected_issuer_count = 11,
+                created_at = '2099-01-03T00:00:00.000Z'
+          WHERE id = ?`
+      ).bind(activeId),
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET workflow_status = 'COMPLETED', dispatch_status = 'WAITING',
+                status = 'VALIDATED', current_ranking_version = 1,
+                created_at = '2099-01-02T00:00:00.000Z',
+                finalized_at = '2099-01-02T00:15:00.000Z'
+          WHERE id = ?`
+      ).bind(completedId),
+      testEnv.DB.prepare(
+        "UPDATE rfqs SET created_at = '2099-01-04T00:00:00.000Z' WHERE id = ?"
+      ).bind(foreignId)
+    ]);
+
+    const firstPage = await api("/api/v1/rfqs?scope=all&limit=1", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(firstPage.status).toBe(200);
+    const firstBody = await firstPage.json<{
+      rfqs: Array<{ id: string; workflowStatus: string; firstTrade: { underlyings: string[] } }>;
+      summary: { activeCount: number };
+      nextCursor: string | null;
+    }>();
+    expect(firstBody.rfqs).toEqual([expect.objectContaining({
+      id: activeId,
+      workflowStatus: "WAITING",
+      firstTrade: expect.objectContaining({ underlyings: ["ACTIVE UW"] })
+    })]);
+    expect(firstBody.summary.activeCount).toBeGreaterThanOrEqual(1);
+    expect(firstBody.nextCursor).toBeTruthy();
+    const summary = await api("/api/v1/rfqs/summary", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toEqual({ activeCount: firstBody.summary.activeCount });
+
+    const secondPage = await api(
+      `/api/v1/rfqs?scope=all&limit=1&cursor=${encodeURIComponent(firstBody.nextCursor ?? "")}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    const secondBody = await secondPage.json<{ rfqs: Array<{ id: string }> }>();
+    expect(secondBody.rfqs[0]?.id).toBe(completedId);
+    expect(secondBody.rfqs.some(item => item.id === foreignId)).toBe(false);
+
+    const active = await api("/api/v1/rfqs?scope=active&limit=50", {
+      headers: { cookie: userA.cookie }
+    });
+    const activeBody = await active.json<{ rfqs: Array<{ id: string }> }>();
+    expect(activeBody.rfqs.some(item => item.id === activeId)).toBe(true);
+    expect(activeBody.rfqs.some(item => item.id === completedId)).toBe(false);
+
+    const completed = await api("/api/v1/rfqs?scope=completed&limit=50", {
+      headers: { cookie: userA.cookie }
+    });
+    const completedBody = await completed.json<{ rfqs: Array<{ id: string }> }>();
+    expect(completedBody.rfqs.some(item => item.id === completedId)).toBe(true);
+    expect(completedBody.rfqs.some(item => item.id === activeId)).toBe(false);
+
+    const invalidCursor = await api("/api/v1/rfqs?cursor=not-a-valid-cursor", {
+      headers: { cookie: userA.cookie }
+    });
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json()).toMatchObject({ error: { code: "INVALID_RFQ_LIST_CURSOR" } });
+  });
+
+  it("returns a versioned owner-scoped snapshot and skips unchanged result data", async () => {
+    const created = await createRfq(userA, [trade({ underlyings: ["SNAPSHOT UW"] })]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.prepare(
+      `UPDATE rfqs
+          SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING',
+              sent_at = '2099-01-01T00:00:00.000Z',
+              deadline_at = '2099-01-01T00:15:00.000Z'
+        WHERE id = ?`
+    ).bind(rfqId).run();
+
+    const first = await api(`/api/v1/rfqs/${rfqId}/snapshot`, {
+      headers: { cookie: userA.cookie }
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json<{
+      changed: boolean;
+      version: string;
+      status: { rfq: { workflowStatus: string } };
+      results: { rfq: { isProvisional: boolean } };
+      artifacts: unknown[];
+    }>();
+    expect(firstBody).toMatchObject({
+      changed: true,
+      status: { rfq: { workflowStatus: "WAITING" } },
+      results: { rfq: { isProvisional: true } },
+      artifacts: []
+    });
+    expect(firstBody.version).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+
+    const unchanged = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(firstBody.version)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    expect(await unchanged.json()).toEqual({ changed: false, version: firstBody.version });
+
+    await testEnv.DB.prepare("UPDATE rfqs SET workflow_status = 'PARTIAL' WHERE id = ?").bind(rfqId).run();
+    const changed = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(firstBody.version)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    const changedBody = await changed.json<{ changed: boolean; version: string }>();
+    expect(changedBody.changed).toBe(true);
+    expect(changedBody.version).not.toBe(firstBody.version);
+
+    const otherUser = await api(`/api/v1/rfqs/${rfqId}/snapshot`, {
+      headers: { cookie: userB.cookie }
+    });
+    expect(otherUser.status).toBe(404);
+
+    const invalidVersion = await api(`/api/v1/rfqs/${rfqId}/snapshot?since=invalid`, {
+      headers: { cookie: userA.cookie }
+    });
+    expect(invalidVersion.status).toBe(400);
+  });
+
+  // The unchanged answer comes from a one-statement digest rather than the full status read, so the
+  // property that matters is that the digest is never LESS sensitive than the payload. Missing a
+  // change would freeze a polling browser on stale data, which is far worse than a redundant fetch.
+  it("changes the snapshot version for every kind of state the payload reflects", async () => {
+    const created = await createRfq(userA, [trade({ underlyings: ["DIGEST UW"] })]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    const now = new Date().toISOString();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING',
+                sent_at = '2099-01-01T00:00:00.000Z', deadline_at = '2099-01-01T00:15:00.000Z'
+          WHERE id = ?`
+      ).bind(rfqId),
+      testEnv.DB.prepare(
+        `INSERT INTO rfq_expected_issuers
+          (id, rfq_id, issuer, outbound_batch_code, status, snapshot_at)
+         VALUES (?, ?, 'BNP', 'BMJB', 'PENDING', ?)`
+      ).bind(`exp_${crypto.randomUUID()}`, rfqId, now)
+    ]);
+
+    const versionNow = async (): Promise<string> => {
+      const response = await api(`/api/v1/rfqs/${rfqId}/snapshot`, { headers: { cookie: userA.cookie } });
+      return (await response.json<{ version: string }>()).version;
+    };
+
+    const seen = new Set<string>();
+    const record = async (label: string) => {
+      const version = await versionNow();
+      expect(seen.has(version), `${label} did not change the snapshot version`).toBe(false);
+      seen.add(version);
+    };
+    await record("baseline");
+
+    // An expected issuer reaching a terminal state. A digest built only from counts and MAX()
+    // timestamps could miss this, which is exactly why the issuer statuses are folded in per row.
+    await testEnv.DB.prepare(
+      "UPDATE rfq_expected_issuers SET status = 'NO_QUOTE' WHERE rfq_id = ?"
+    ).bind(rfqId).run();
+    await record("expected-issuer status change");
+
+    // A quote arriving: the provisional ranking is rebuilt from it.
+    const tradeRow = await testEnv.DB.prepare(
+      "SELECT id FROM rfq_trades WHERE rfq_id = ? LIMIT 1"
+    ).bind(rfqId).first<{ id: string }>();
+    const inboundId = `inb_${crypto.randomUUID()}`;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO inbound_messages
+          (id, r2_raw_mime_key, content_hash, envelope_from, envelope_to, raw_subject,
+           raw_size_bytes, received_at, rfq_id, detected_issuer, status)
+         VALUES (?, ?, ?, 'quotation.tw@bnpparibas.com', 'rfq@yintsun66.com', 'Quote',
+                 100, ?, ?, 'BNP', 'PARSED')`
+      ).bind(inboundId, `raw/${inboundId}`, `content-${inboundId}`, now, rfqId),
+      testEnv.DB.prepare(
+        `INSERT INTO issuer_quotes
+          (id, rfq_id, trade_id, inbound_message_id, issuer, issuer_display_name, status,
+           received_at, created_at, coupon_pa_pct, parser_profile, parser_version,
+           source_table_index, source_row_index, raw_values_json)
+         VALUES (?, ?, ?, ?, 'BNP', 'BNP', 'VALID', ?, ?, 12.5, 'BNP', 'v5', 0, 0, '{}')`
+      ).bind(`quo_${crypto.randomUUID()}`, rfqId, tradeRow!.id, inboundId, now, now)
+    ]);
+    await record("first quote received");
+
+    // The workflow advancing.
+    await testEnv.DB.prepare("UPDATE rfqs SET workflow_status = 'PARTIAL' WHERE id = ?").bind(rfqId).run();
+    await record("workflow status change");
+
+    // And an unchanged poll must still say so.
+    const latest = await versionNow();
+    const unchanged = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(latest)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    expect(await unchanged.json()).toEqual({ changed: false, version: latest });
+  });
+
+  it("validates and freezes a draft RFQ", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const body = await created.json<{ rfq: { id: string } }>();
+    const validated = await api(`/api/v1/rfqs/${body.rfq.id}/validate`, {
+      method: "POST",
+      headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(validated.status).toBe(200);
+    const result = await validated.json<{ rfq: { status: string; version: number; trades: Array<{ frozenAt: string }> } }>();
+    expect(result.rfq.status).toBe("VALIDATED");
+    expect(result.rfq.version).toBe(2);
+    expect(result.rfq.trades[0]?.frozenAt).toBeTruthy();
+  });
+
+  it("requires CSRF protection for mutations", async () => {
+    const response = await api("/api/v1/rfqs", {
+      method: "POST",
+      headers: { cookie: userA.cookie, "idempotency-key": `idem-${crypto.randomUUID()}` },
+      body: JSON.stringify({ trades: [trade()] })
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "CSRF_VALIDATION_FAILED" } });
+  });
+
+  it("lets the owner close the reply window early and blocks others and wrong states", async () => {
+    const created = await createRfq(userA, [trade()]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    const now = new Date().toISOString();
+    const deadline = new Date(Date.now() + 600_000).toISOString();
+    await testEnv.DB.prepare(
+      "UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING', sent_at = ?, deadline_at = ? WHERE id = ?"
+    ).bind(now, deadline, rfqId).run();
+
+    const foreign = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(foreign.status).toBe(404);
+
+    const noCsrf = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie }
+    });
+    expect(noCsrf.status).toBe(403);
+
+    const finalize = await api(`/api/v1/rfqs/${rfqId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(finalize.status).toBe(202);
+    expect(await finalize.json()).toMatchObject({ rfq: { id: rfqId, workflowStatus: "FINALIZING" } });
+    const row = await testEnv.DB.prepare("SELECT workflow_status FROM rfqs WHERE id = ?").bind(rfqId).first<{ workflow_status: string }>();
+    expect(row?.workflow_status).toBe("FINALIZING");
+    const jobs = await testEnv.DB.prepare("SELECT COUNT(*) AS count FROM quote_rank_jobs WHERE rfq_id = ?").bind(rfqId).first<{ count: number }>();
+    expect(Number(jobs?.count)).toBe(1);
+
+    const draft = await createRfq(userA, [trade()]);
+    const draftId = (await draft.json<{ rfq: { id: string } }>()).rfq.id;
+    const wrongState = await api(`/api/v1/rfqs/${draftId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(wrongState.status).toBe(409);
+
+    const graceCreated = await createRfq(userA, [trade({ underlyings: ["GRACE UW"] })]);
+    const graceId = (await graceCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    const graceSentAt = new Date(Date.now() - 15 * 60_000 - 10_000).toISOString();
+    const graceDeadline = new Date(Date.parse(graceSentAt) + 16 * 60_000).toISOString();
+    await testEnv.DB.prepare(
+      "UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING', sent_at = ?, deadline_at = ? WHERE id = ?"
+    ).bind(graceSentAt, graceDeadline, graceId).run();
+    const graceFinalize = await api(`/api/v1/rfqs/${graceId}/finalize`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(graceFinalize.status).toBe(409);
+    expect(await graceFinalize.json()).toMatchObject({ error: { code: "RFQ_MAIL_GRACE_ACTIVE" } });
+  });
+
+  it("lets an owner or ADMIN request a versioned recalculation, but not another user", async () => {
+    const ownerCreated = await createRfq(userA, [trade()]);
+    const ownerRfqId = (await ownerCreated.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.prepare(
+      `UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING',
+              workflow_status = 'COMPLETED', current_ranking_version = 1,
+              finalized_at = ? WHERE id = ?`
+    ).bind(new Date().toISOString(), ownerRfqId).run();
+
+    const foreign = await api(`/api/v1/rfqs/${ownerRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(foreign.status).toBe(404);
+    const owner = await api(`/api/v1/rfqs/${ownerRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userA.cookie, "x-csrf-token": userA.csrf }
+    });
+    expect(owner.status).toBe(202);
+    expect(await owner.json()).toMatchObject({ rfq: { requestedVersion: 2 } });
+
+    const adminTarget = await createRfq(userA, [trade({ underlyings: ["ADMIN TARGET UW"] })]);
+    const adminRfqId = (await adminTarget.json<{ rfq: { id: string } }>()).rfq.id;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs SET status = 'VALIDATED', dispatch_status = 'WAITING',
+                workflow_status = 'COMPLETED', current_ranking_version = 1,
+                finalized_at = ? WHERE id = ?`
+      ).bind(new Date().toISOString(), adminRfqId),
+      testEnv.DB.prepare("UPDATE users SET role = 'ADMIN' WHERE username_normalized = '22346'")
+    ]);
+    const admin = await api(`/api/v1/rfqs/${adminRfqId}/recalculate`, {
+      method: "POST", headers: { cookie: userB.cookie, "x-csrf-token": userB.csrf }
+    });
+    expect(admin.status).toBe(202);
+    const audit = await testEnv.DB.prepare(
+      "SELECT safe_metadata_json FROM audit_events WHERE action = 'RFQ_RECALCULATION_REQUESTED' AND entity_id = ?"
+    ).bind(adminRfqId).first<{ safe_metadata_json: string }>();
+    expect(JSON.parse(audit?.safe_metadata_json ?? "{}")).toMatchObject({ requestedByAdmin: true });
+  });
+});

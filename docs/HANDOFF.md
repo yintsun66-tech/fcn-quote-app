@@ -40,8 +40,20 @@ Two changes followed:
   committed and nothing tried again.
 
 The audit now also records `attempts`. Verified: 27 test files / **194 tests**, typecheck clean,
-dry-run build clean. **Not yet deployed**, and the underlying cause of the 429 is **still unknown** —
-the next 429 will name itself, or a read-only `GET /v2/bot/info` check may show it sooner.
+dry-run build clean. Deployed as Worker **`08adb175-d1b1-44eb-8a97-42588ad669d0`** with every
+variable unchanged (`LINE_PUSH_ENABLED ("1")`, `LINE_WEBHOOK_ENABLED ("0")`,
+`RETENTION_ENABLED ("0")`); post-deploy checks: health 200 on both domains, unauthenticated snapshot
+401, manifest without a PIN 401, LINE webhook 404.
+
+**The cause of the 429 is still unknown.** Nothing here fixes it — the change makes the *next* one
+explain itself. When the next follow-board publication runs, read `providerMessage` on the
+`FOLLOW_BOARD_LINE_PUSHED` event before changing any code:
+
+- a monthly-cap message means the LINE plan is the constraint, not this repository;
+- a rate-limit message means the opposite, and would be surprising at five pushes a day;
+- `attempts: 2` with a success means the retry did its job and no action is needed.
+
+A read-only `GET /v2/bot/info` against the channel may identify it sooner.
 
 ## Current state at a glance
 
@@ -52,7 +64,7 @@ not be edited to match later reality.
 | | |
 |---|---|
 | Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
-| Deployed Worker | code from `ca46deee-da1c-4aab-91e6-17a772181bfd`; a later asset-only republish serves it. **Resolve the live id from `wrangler deployments list`, never from this table** |
+| Deployed Worker | `08adb175-d1b1-44eb-8a97-42588ad669d0`. **Resolve the live id from `wrangler deployments list`, never from this table** |
 | Remote D1 | migrations applied through `0016` |
 | Verification | 27 test files / 194 tests; typecheck (source + test) and dry-run build clean |
 | GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |

@@ -35,8 +35,13 @@ entirely outside the `prepare-assets.mjs` allowlist that governs what may be pub
 before deletion, for restoration: `build_type: legacy`, `source: { branch: "main", path: "/" }`,
 `public: true`, `https_enforced: true`, `cname: null`. `GET /repos/.../pages` now returns 404, and
 `fcnV2` was re-checked immediately afterwards and is untouched: `status: "built"`, same source, and
-its site and follow-board page both return 200. The GitHub CDN keeps serving a disabled Pages site
-for a few minutes, so a 200 straight after deletion is expected and is not evidence of failure.
+its site and follow-board page both return 200.
+
+Teardown was then confirmed by measurement rather than assumed. The GitHub CDN kept serving the
+disabled site for about five minutes — four one-minute checks still returned 200, the fifth returned
+404 — so a 200 straight after deletion is expected and is not evidence of failure. Final state:
+`/fcn-quote-app/`, its `index.html` and its `app.js` all return **404**, while `fcnV2`'s site,
+`follow-board.html` and `app.js` all return **200**. Only the intended site was removed.
 
 Do not re-enable it, and check Pages state before merging anything into `main`.
 

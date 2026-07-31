@@ -149,17 +149,31 @@ this repository and published to Cloudflare in a status-only deployment, Worker
 **`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`** (one asset uploaded; the feature deployment
 `b26d132c-5a0e-4fdf-b765-dbdda1407d73` is what serves the code).
 
-Verification compared all fifteen allowlisted assets over HTTP between `app.yintsun66.com` and
-`yintsun66-tech.github.io/fcnV2`. Nine matched byte-for-byte, including every JavaScript module and
-the vendored `html2canvas`. Both sites reference `?v=perf-p0-v1` for `app.js` and
-`backend-client.js`. The six reported differences were measured and are **not** content drift:
+Verification fetched all fifteen allowlisted assets over HTTP from both sites and hashed each
+against the repository source. **Both sides are identical to source on all fifteen: zero
+mismatches** — GitHub Pages byte-for-byte after LF normalization, Cloudflare likewise once its
+injected beacon is removed. Nine of the fifteen are also identical to each other raw. The six raw
+differences were measured and are **not** content drift:
 
 - The four HTML files differ by exactly 359 bytes each because Cloudflare injects a
-  `static.cloudflareinsights.com` Web Analytics beacon into HTML responses. GitHub Pages matches the
-  repository source exactly.
+  `static.cloudflareinsights.com` Web Analytics beacon immediately before `</body>`, replacing the
+  indentation there. (A canonicalizing regex that eats the whitespace around the tag will leave a
+  spurious two-character difference; strip only the tag.)
 - `styles.css` and `交易所查詢0715.csv` differ by exactly their CRLF count (82 and 4,625). Cloudflare
   serves the Windows working copy, which still has CRLF for files nobody has rewritten, while GitHub
-  Pages serves the git-normalized LF blob. After normalizing line endings both hash identically.
+  Pages serves the git-normalized LF blob.
+
+Live content checks on the static site confirmed the P0/P1 front-end changes are actually being
+served: `index.html` references `?v=perf-p0-v1` for both modules and no longer the previous token,
+`app.js` contains `withRenderTimeout`, `scheduleRowChanges` and `ensureBbgLookup`,
+`backend-client.js` uses the versioned `market-resources.mjs` specifier and the parallel
+previous-close fetch, and `version-status.html` names Worker `b26d132c`, source commit `e90ce53` and
+static commit `7af6b6d`.
+
+A working tree cloned from `fcnV2` on Windows will show roughly ten files as modified straight after
+a sync. That is the stat cache plus line endings, not content: `git diff --numstat` is empty and
+`git hash-object --path <file> <file>` returns the blob already stored in `HEAD` for every one of
+them. There is nothing further to commit.
 
 **Do not compare the two sites by hashing working-tree files on Windows** — `core.autocrlf=true`
 plus the static repository having no `.gitattributes` makes every file look different. Compare over

@@ -192,6 +192,87 @@ Current production source: implementation commit `e90ce53`, currently served as 
 `0016`. Current branch HEAD may include later documentation-only commits and must be resolved from
 Git history.
 
+## Known limitation: a quote sent as an image is never read (confirmed, not fixed)
+
+Inbound parsing reads **only HTML table text**. Nothing in the pipeline decodes an image, whether it
+is an inline screenshot in the mail body or a file attachment. `inbound-parser.ts` records
+`attachment_count` and stores the raw MIME in R2, but never looks inside an attachment, and
+`parseIssuerTables` works purely from the extracted HTML tables. So if an issuer answers with a
+quote card or a screenshot instead of a table, the terms simply never reach D1.
+
+What actually happens today, verified against the code rather than assumed:
+
+- `processQuoteNormalizeJob` finds zero rows and writes a `quote_parse_errors` row with
+  `NO_QUOTE_ROWS_FOUND`.
+- `expectedIssuerStatus([])` returns **`PARSE_ERROR`**, so `rfq_expected_issuers` gets
+  `status = 'PARSE_ERROR'`, `terminal_reason = 'NO_QUOTE_ROWS_FOUND'`. That much *is* visible to the
+  RFQ owner in the issuer list of the status payload — the reply is not entirely invisible.
+- **But the inbound message stays `PARSED`.** The ADMIN health panel counts only `MANUAL_REVIEW` and
+  `SENDER_MISMATCH` (`admin-rfq.ts`), so an image-only reply never appears in the manual-review
+  queue and nobody is prompted to transcribe it. It also counts as a terminal issuer state, so the
+  coordinator will happily finalize the RFQ without those terms.
+
+Net effect: a real, priced reply can be dropped from ranking with no operator prompt. This is a data
+capture gap, not a parser bug — there is nothing to fix in the issuer profiles.
+
+**Possible technical path, not started.** Cloudflare Workers AI offers vision models that could read
+an attached or inline quote image into the same normalized row shape. Two constraints must be
+designed in from the start:
+
+1. **It cannot be trusted automatically.** These are financial terms; a hallucinated coupon or
+   strike that flows into ranking is worse than a missing quote. Any such row must land in a
+   review state and require explicit human confirmation before it can be ranked — it must not
+   short-circuit `matchRows`/`rankValidQuotes`.
+2. **Route the message to `MANUAL_REVIEW` first.** The cheapest useful change, independent of any
+   model, is to stop treating a zero-row reply from a recognized issuer as a quiet terminal state
+   and surface it for transcription. That alone closes the silent-drop problem.
+
+The raw MIME is retained for ten days (ADR 0030), so a message that hit this path recently can still
+be reprocessed; after that window the image is gone.
+
+## Evaluated and deferred: on-demand product condition charts
+
+A feature was fully designed and then **deliberately shelved — the user decided not to build it for
+now.** Recorded here so a future restart does not repeat the investigation.
+
+**What it was:** an on-demand price chart for a product's underlying, with the product's own terms
+drawn over it as horizontal reference lines — strike, KO barrier and KI barrier against the actual
+price history, so the distance to each level is visible at a glance.
+
+**Data source options considered:**
+
+- **A — a paid/keyed market data API.** Reliable history and clear licensing, but adds a recurring
+  cost and another Secret, and the Alpha Vantage experience recorded elsewhere in this file is a
+  warning about relying on a free tier.
+- **B — reuse the existing SEC/public cache path.** No new provider, but it carries no price
+  history; it would have to be extended, and SEC does not publish quotes.
+- **C — a third-party embedded widget.** Zero data plumbing, but no control over the rendering.
+
+**Technical approach if restarted:** fetch the price series from a chosen provider, cache it in the
+existing `public_data_cache` shape, and draw the chart as **server-generated SVG with the reference
+lines computed from the stored quote terms**. This deliberately mirrors the "Deferred: SVG
+rendering (B)" note later in this file — same reasoning about determinism and no rasterizer
+dependency — and it keeps the terms server-side rather than trusting a browser-supplied level.
+
+**Phasing that was agreed:** a single underlying and a single quote first, read-only and
+owner-scoped like the Phase 1 analysis view; only then multiple underlyings, and only then any
+export or sharing.
+
+### TradingView screenshotting: evaluated and rejected
+
+Screenshotting a TradingView widget to obtain the same picture was considered and **rejected on two
+independent grounds**:
+
+1. **It cannot do the job.** The free embeddable widgets expose no API for drawing custom horizontal
+   lines, and the reference levels are the entire point of the feature. This matches what ADR 0024
+   already documents about those widgets ignoring documented parameters.
+2. **Redistribution risk.** Capturing a provider's rendered chart and re-serving it to bank staff is
+   a licensing question, not a technical one, and the repository's standing rule is that third-party
+   market content stays link-only or opt-in embedded, never scraped or re-hosted (ADR 0021/0022).
+
+The conclusion stands: if this feature is ever restarted, use our own price data plus our own SVG.
+Do not reopen the screenshot route.
+
 ## LINE push for follow-board publications (live)
 
 When a follow-board product is published, the Worker can push it to a private LINE group. The push

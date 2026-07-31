@@ -18,9 +18,9 @@
 
 - 靜態同步來源：`yintsun66-tech/fcn-quote-app`
 - 來源分支：`codex/market-analysis-phase2-4`
-- 來源功能 HEAD：`335a561`
-- 正式靜態程式基線：Cloudflare 功能 commit `335a561`
-- 同步日期：2026-07-30（Asia/Taipei）
+- 來源功能 HEAD：`e90ce53`
+- 正式靜態程式基線：Cloudflare 功能 commit `e90ce53`
+- 同步日期：2026-07-31（Asia/Taipei）
 
 ## 重要邊界
 

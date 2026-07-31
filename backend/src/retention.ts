@@ -149,18 +149,19 @@ export async function applyRetention(env: AppEnv, dryRun = false): Promise<Reten
           OR f.source_outbound_batch_id IN (SELECT b.id FROM outbound_email_batches b WHERE b.rfq_id = r.id)
     )`;
 
-  const [candidates, held] = await Promise.all([
+  const [candidateRows, heldRows] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(
       `SELECT r.id FROM rfqs r
         WHERE r.created_at < ? AND NOT ${heldClause}
         ORDER BY r.created_at
         LIMIT ?`
-    ).bind(resultCutoff, MAX_RFQS_PER_RUN).all<{ id: string }>(),
+    ).bind(resultCutoff, MAX_RFQS_PER_RUN),
     env.DB.prepare(
       `SELECT COUNT(*) AS count FROM rfqs r WHERE r.created_at < ? AND ${heldClause}`
-    ).bind(resultCutoff).first<{ count: number }>()
+    ).bind(resultCutoff)
   ]);
-  report.rfqsHeldByFollowBoard = Number(held?.count ?? 0);
+  const candidates = { results: (candidateRows?.results ?? []) as { id: string }[] };
+  report.rfqsHeldByFollowBoard = Number(heldRows?.results[0]?.count ?? 0);
 
   if (!effectiveDryRun && candidates.results.length) {
     await env.DB.batch(candidates.results.map(row =>

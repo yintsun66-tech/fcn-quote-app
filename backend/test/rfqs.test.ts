@@ -273,6 +273,83 @@ describe("RFQ API", () => {
     expect(invalidVersion.status).toBe(400);
   });
 
+  // The unchanged answer comes from a one-statement digest rather than the full status read, so the
+  // property that matters is that the digest is never LESS sensitive than the payload. Missing a
+  // change would freeze a polling browser on stale data, which is far worse than a redundant fetch.
+  it("changes the snapshot version for every kind of state the payload reflects", async () => {
+    const created = await createRfq(userA, [trade({ underlyings: ["DIGEST UW"] })]);
+    const rfqId = (await created.json<{ rfq: { id: string } }>()).rfq.id;
+    const now = new Date().toISOString();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `UPDATE rfqs
+            SET status = 'VALIDATED', dispatch_status = 'WAITING', workflow_status = 'WAITING',
+                sent_at = '2099-01-01T00:00:00.000Z', deadline_at = '2099-01-01T00:15:00.000Z'
+          WHERE id = ?`
+      ).bind(rfqId),
+      testEnv.DB.prepare(
+        `INSERT INTO rfq_expected_issuers
+          (id, rfq_id, issuer, outbound_batch_code, status, snapshot_at)
+         VALUES (?, ?, 'BNP', 'BMJB', 'PENDING', ?)`
+      ).bind(`exp_${crypto.randomUUID()}`, rfqId, now)
+    ]);
+
+    const versionNow = async (): Promise<string> => {
+      const response = await api(`/api/v1/rfqs/${rfqId}/snapshot`, { headers: { cookie: userA.cookie } });
+      return (await response.json<{ version: string }>()).version;
+    };
+
+    const seen = new Set<string>();
+    const record = async (label: string) => {
+      const version = await versionNow();
+      expect(seen.has(version), `${label} did not change the snapshot version`).toBe(false);
+      seen.add(version);
+    };
+    await record("baseline");
+
+    // An expected issuer reaching a terminal state. A digest built only from counts and MAX()
+    // timestamps could miss this, which is exactly why the issuer statuses are folded in per row.
+    await testEnv.DB.prepare(
+      "UPDATE rfq_expected_issuers SET status = 'NO_QUOTE' WHERE rfq_id = ?"
+    ).bind(rfqId).run();
+    await record("expected-issuer status change");
+
+    // A quote arriving: the provisional ranking is rebuilt from it.
+    const tradeRow = await testEnv.DB.prepare(
+      "SELECT id FROM rfq_trades WHERE rfq_id = ? LIMIT 1"
+    ).bind(rfqId).first<{ id: string }>();
+    const inboundId = `inb_${crypto.randomUUID()}`;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO inbound_messages
+          (id, r2_raw_mime_key, content_hash, envelope_from, envelope_to, raw_subject,
+           raw_size_bytes, received_at, rfq_id, detected_issuer, status)
+         VALUES (?, ?, ?, 'quotation.tw@bnpparibas.com', 'rfq@yintsun66.com', 'Quote',
+                 100, ?, ?, 'BNP', 'PARSED')`
+      ).bind(inboundId, `raw/${inboundId}`, `content-${inboundId}`, now, rfqId),
+      testEnv.DB.prepare(
+        `INSERT INTO issuer_quotes
+          (id, rfq_id, trade_id, inbound_message_id, issuer, issuer_display_name, status,
+           received_at, created_at, coupon_pa_pct, parser_profile, parser_version,
+           source_table_index, source_row_index, raw_values_json)
+         VALUES (?, ?, ?, ?, 'BNP', 'BNP', 'VALID', ?, ?, 12.5, 'BNP', 'v5', 0, 0, '{}')`
+      ).bind(`quo_${crypto.randomUUID()}`, rfqId, tradeRow!.id, inboundId, now, now)
+    ]);
+    await record("first quote received");
+
+    // The workflow advancing.
+    await testEnv.DB.prepare("UPDATE rfqs SET workflow_status = 'PARTIAL' WHERE id = ?").bind(rfqId).run();
+    await record("workflow status change");
+
+    // And an unchanged poll must still say so.
+    const latest = await versionNow();
+    const unchanged = await api(
+      `/api/v1/rfqs/${rfqId}/snapshot?since=${encodeURIComponent(latest)}`,
+      { headers: { cookie: userA.cookie } }
+    );
+    expect(await unchanged.json()).toEqual({ changed: false, version: latest });
+  });
+
   it("validates and freezes a draft RFQ", async () => {
     const created = await createRfq(userA, [trade()]);
     const body = await created.json<{ rfq: { id: string } }>();

@@ -21,20 +21,27 @@ function stubEnv(
   rankQueue: unknown,
   renderQueue: unknown
 ): AppEnv {
+  const rowsFor = (sql: string) => {
+    if (sql.includes("FROM quote_rank_jobs")) return rankRows;
+    if (sql.includes("FROM image_render_jobs")) return renderRows;
+    return [];
+  };
+  // The stub records the SQL on the bound statement so `batch` can answer each one in order, the
+  // way D1 does. `batch` is what the sweep uses: one request for both job tables.
   return {
     DB: {
       prepare(sql: string) {
         return {
           bind() {
             return {
-              async all() {
-                if (sql.includes("FROM quote_rank_jobs")) return { results: rankRows };
-                if (sql.includes("FROM image_render_jobs")) return { results: renderRows };
-                return { results: [] };
-              }
+              sql,
+              async all() { return { results: rowsFor(sql) }; }
             };
           }
         };
+      },
+      async batch(statements: { sql: string }[]) {
+        return statements.map(statement => ({ results: rowsFor(statement.sql) }));
       }
     },
     QUOTE_RANK_QUEUE: rankQueue,

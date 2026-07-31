@@ -76,10 +76,12 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 ## 目前正式環境基線
 
 - 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
-- 正式功能程式基線為 `ccbb7dd`；實際最新分支 HEAD
+- 正式功能程式基線為 `e90ce53`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `5abc0baa-9be0-4021-a90f-d067ed074c0c`（2026-07-31
-  部署）。
+- 最新正式 Worker 版本為 `ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`（2026-07-31
+  部署）。功能程式來自 `b26d132c-5a0e-4fdf-b765-dbdda1407d73`，其後的
+  `ddf8cef7` 只更新了狀態頁資產；Cloudflare 的每次部署都會整包取代 Worker，
+  因此**目前實際服務中的版本是 `ddf8cef7`**，兩者程式內容相同。
 - 跟單商品發布後會推播到一個私密 LINE 群組（`LINE_PUSH_ENABLED="1"`，2026-07-31
   啟用）。推播在發布交易 commit **之後**才執行且不會拋出例外，LINE 中斷或憑證失效
   都不會導致發布失敗或回滾。輸出刻意拆成兩則：商品條件圖走公開 URL，因此**手收
@@ -99,7 +101,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 正式結果自動顯示經濟排名 1–4；第五列由使用者從前四名以外的有效發行機構選擇，
   並可產圖。晚到報價保留原始狀態，僅能由詢價本人或 ADMIN 建立新的不可變排名版本。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
-  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0015`。
+  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0016`。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
   家族在野村、DBS、SG、GS、CA 使用 `DRA(T+7)`，BMJB、UBS、CITI 使用
   `DAC(T+7)`；規則詳見 ADR 0014。
@@ -108,7 +110,7 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 - 首頁「美股／日股熱門榜」（ADR 0024）在靜態版與 Cloudflare 版皆可使用；不需 API Key、
   不佔 Alpha Vantage 額度。五種排行以官網連結提供、美日皆可用；美股另內嵌即時熱門榜，
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
-- 目前驗證基線為 23 個測試檔、168 項測試；JavaScript 語法、TypeScript typecheck、
+- 目前驗證基線為 27 個測試檔、191 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
   邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
   目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。

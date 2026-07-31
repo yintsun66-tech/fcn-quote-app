@@ -3,9 +3,10 @@
 This runbook applies only after explicit migration/Secret/deployment authorization. It must not be
 used to change RFQ, ranking, mail-routing or ownership data.
 
-Current production baseline (2026-07-30): market migration `0012` and the Secret name are present;
-all repository migrations through `0015` are applied, and Worker
-`6429a8bf-a735-47b4-a5ba-5fa3684ec282` is deployed. A read-only aggregate check found three fresh
+Current production baseline (2026-07-31): market migration `0012` and the Secret name are present;
+all repository migrations through `0016` are applied, and Worker
+`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6` is deployed. The Alpha Vantage findings below are from a
+read-only check on 2026-07-30 and have not been re-measured since. That check found three fresh
 SEC instrument/filing pairs, no Alpha Vantage cache row, and ten provider attempts on 2026-07-29.
 Previous-close data is therefore still operationally unavailable. Verify one current symbol and,
 if needed, the key's activation/entitlement through the hidden Secret workflow before changing

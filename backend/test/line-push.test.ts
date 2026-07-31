@@ -1,7 +1,13 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildFollowBoardFlexMessage, getFollowBoardImage, handleLineWebhook, pushFollowBoardProducts } from "../src/line-push";
+import {
+  buildFollowBoardFlexMessage,
+  getFollowBoardImage,
+  handleLineWebhook,
+  pushFollowBoardProducts,
+  renderFollowBoardImage
+} from "../src/line-push";
 import type { AppEnv } from "../src/types";
 
 const testEnv = env as unknown as AppEnv & { TEST_MIGRATIONS: D1Migration[] };
@@ -97,6 +103,37 @@ describe("LINE follow-board push", () => {
       expect(audit.safe_metadata_json).not.toContain("test-token-must-never-be-logged");
       expect(audit.safe_metadata_json).not.toContain("Cgroup123");
     }
+  });
+
+  it("aborts a stalled push and records it as a timeout, not a generic failure", async () => {
+    // AbortSignal.timeout actually cancels the request, so LINE cannot still deliver a message the
+    // audit has written off. The reason must stay distinguishable from a refused connection.
+    let sawSignal = false;
+    const aborting = (async (_url: string, init: RequestInit) => {
+      sawSignal = init.signal instanceof AbortSignal;
+      const error = new Error("The operation was aborted due to timeout");
+      error.name = "TimeoutError";
+      throw error;
+    }) as unknown as typeof fetch;
+
+    expect(await pushFollowBoardProducts(lineEnv(), [PRODUCT], aborting))
+      .toMatchObject({ sent: false, reason: "TIMEOUT" });
+    expect(sawSignal).toBe(true);
+  });
+
+  it("skips a card once the shared render budget is spent", async () => {
+    let renders = 0;
+    const budgetEnv = {
+      ...lineEnv(),
+      FOLLOW_BOARD_PUBLIC_ORIGIN: "https://api.yintsun66.com",
+      BROWSER: { async quickAction() { renders += 1; throw new Error("unreachable"); } }
+    } as unknown as AppEnv;
+
+    // An exhausted deadline must stop the render before it reaches Browser Rendering: the renders
+    // are sequential by design, so without a shared budget four cards could hold the invocation for
+    // four times the per-render timeout, after the publication has already committed.
+    expect(await renderFollowBoardImage(budgetEnv, PRODUCT, Date.now() - 1)).toBeNull();
+    expect(renders).toBe(0);
   });
 
   it("reports the last available day in Taipei, not the stored UTC expiry instant", () => {

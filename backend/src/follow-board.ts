@@ -1,6 +1,6 @@
 import { requireAdminOrPs, requireCsrf } from "./auth";
 import { encryptEmployeeNumber, decryptEmployeeNumber, keyedHash, sha256Text, stableStringify } from "./crypto";
-import { insertAudit, newId, nowIso } from "./db";
+import { auditStatement, insertAudit, newId, nowIso } from "./db";
 import { AppError } from "./errors";
 import {
   clientAddress,
@@ -533,15 +533,14 @@ export async function cleanupFollowBoardOperationalData(env: AppEnv): Promise<vo
         WHERE id = ? AND status = 'PUBLISHED' AND expires_at IS NOT NULL AND expires_at <= ?`
     ).bind(now, now, product.id, now)));
     const audits = expiredProducts.results.flatMap((product, index) =>
-      archived[index]?.meta.changes === 1 ? [env.DB.prepare(
-        `INSERT INTO audit_events
-          (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
-         VALUES (?, NULL, 'FOLLOW_BOARD_PRODUCT_EXPIRED', 'FOLLOW_BOARD_PRODUCT', ?, ?, ?, ?)`
-      ).bind(
-        newId("aud"),
+      archived[index]?.meta.changes === 1 ? [auditStatement(
+        env,
+        "FOLLOW_BOARD_PRODUCT_EXPIRED",
+        "FOLLOW_BOARD_PRODUCT",
         product.id,
+        null,
         `cron:${now}`,
-        JSON.stringify({ productCode: product.product_code, expiresAt: product.expires_at }),
+        { productCode: product.product_code, expiresAt: product.expires_at },
         now
       )] : []
     );

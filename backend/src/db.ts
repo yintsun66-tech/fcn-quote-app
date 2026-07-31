@@ -21,6 +21,30 @@ export function addSeconds(date: Date, seconds: number): string {
   return new Date(date.getTime() + seconds * 1000).toISOString();
 }
 
+/**
+ * The single audit-write shape. Callers that need to write several audit rows in one `DB.batch`
+ * take the statement from here rather than hand-writing the INSERT, so the columns, the id prefix
+ * and the metadata encoding can never drift between the two paths.
+ *
+ * `createdAt` lets a sweep stamp every row it writes with the one timestamp it already computed.
+ */
+export function auditStatement(
+  env: AppEnv,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  actorUserId: string | null,
+  requestId: string,
+  metadata: Record<string, unknown> = {},
+  createdAt: string = nowIso()
+): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT INTO audit_events
+      (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(newId("aud"), actorUserId, action, entityType, entityId, requestId, JSON.stringify(metadata), createdAt);
+}
+
 export async function insertAudit(
   env: AppEnv,
   action: string,
@@ -30,11 +54,7 @@ export async function insertAudit(
   requestId: string,
   metadata: Record<string, unknown> = {}
 ): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO audit_events
-      (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(newId("aud"), actorUserId, action, entityType, entityId, requestId, JSON.stringify(metadata), nowIso()).run();
+  await auditStatement(env, action, entityType, entityId, actorUserId, requestId, metadata).run();
 }
 
 interface SessionRow {

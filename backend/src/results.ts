@@ -104,38 +104,49 @@ async function loadRfqStatus(
   provisionalQuoteState: ProvisionalQuoteState;
 }> {
   const rfq = await ownedWorkflow(env, session.user.id, rfqId);
-  // The browser polls this every four seconds. None of these reads depend on each other once the
-  // owning RFQ row is known, so they are issued together instead of one after another.
-  const [issuers, lateReplies, artifacts, provisionalQuoteState] = await Promise.all([
-    env.DB.prepare(
-      `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
-        WHERE rfq_id = ? ORDER BY issuer`
-    ).bind(rfqId).all<{ issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null }>(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE
-                WHEN run.trigger = 'RECALCULATION'
-                 AND run.completed_at >= COALESCE(message.normalized_at, message.received_at)
-                THEN 0 ELSE 1 END) AS unranked
-         FROM inbound_messages message
-         JOIN rfqs rfq ON rfq.id = message.rfq_id
-         LEFT JOIN ranking_runs run
-           ON run.rfq_id = rfq.id AND run.version = rfq.current_ranking_version
-        WHERE message.rfq_id = ? AND message.status = 'LATE_REPLY'`
-    ).bind(rfqId).first<{ total: number; unranked: number | null }>(),
-    rfq.current_ranking_version > 0 ? env.DB.prepare(
-      `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
-        WHERE rfq_id = ? AND ranking_run_id = (
-          SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
-        ) ORDER BY trade_code, created_at`
-    ).bind(rfqId, rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
-      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
-    options.includeProvisionalQuoteState && isProvisionalWorkflow(rfq) ? env.DB.prepare(
+  // None of these reads depend on each other once the owning RFQ row is known. `batch` sends them
+  // as one request rather than several concurrent ones: the same single wave of latency, but one
+  // subrequest instead of four, and — because a batch is one transaction — one consistent read
+  // snapshot, so a finalization committing mid-flight can no longer produce a payload that mixes
+  // pre- and post-finalize rows.
+  const statements: D1PreparedStatement[] = [];
+  const issuersAt = statements.push(env.DB.prepare(
+    `SELECT issuer, status, terminal_at, terminal_reason FROM rfq_expected_issuers
+      WHERE rfq_id = ? ORDER BY issuer`
+  ).bind(rfqId)) - 1;
+  const lateRepliesAt = statements.push(env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE
+              WHEN run.trigger = 'RECALCULATION'
+               AND run.completed_at >= COALESCE(message.normalized_at, message.received_at)
+              THEN 0 ELSE 1 END) AS unranked
+       FROM inbound_messages message
+       JOIN rfqs rfq ON rfq.id = message.rfq_id
+       LEFT JOIN ranking_runs run
+         ON run.rfq_id = rfq.id AND run.version = rfq.current_ranking_version
+      WHERE message.rfq_id = ? AND message.status = 'LATE_REPLY'`
+  ).bind(rfqId)) - 1;
+  const artifactsAt = rfq.current_ranking_version > 0 ? statements.push(env.DB.prepare(
+    `SELECT id, trade_code, quote_id, issuer, status, byte_size, completed_at, expires_at FROM generated_artifacts
+      WHERE rfq_id = ? AND ranking_run_id = (
+        SELECT id FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1
+      ) ORDER BY trade_code, created_at`
+  ).bind(rfqId, rfqId, rfq.current_ranking_version)) - 1 : -1;
+  const quoteStateAt = options.includeProvisionalQuoteState && isProvisionalWorkflow(rfq)
+    ? statements.push(env.DB.prepare(
       `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
          FROM issuer_quotes WHERE rfq_id = ?`
-    ).bind(rfqId).first<{ quote_count: number; latest_quote_at: string | null }>()
-      : Promise.resolve(null)
-  ]);
+    ).bind(rfqId)) - 1
+    : -1;
+  const batched = await env.DB.batch<Record<string, unknown>>(statements);
+  const issuers = (batched[issuersAt]?.results ?? []) as {
+    issuer: string; status: string; terminal_at: string | null; terminal_reason: string | null;
+  }[];
+  const lateReplies = (batched[lateRepliesAt]?.results[0] ?? null) as
+    { total: number; unranked: number | null } | null;
+  const artifacts = artifactsAt >= 0 ? batched[artifactsAt]?.results ?? [] : [];
+  const provisionalQuoteState = (quoteStateAt >= 0 ? batched[quoteStateAt]?.results[0] ?? null : null) as
+    ProvisionalQuoteState;
   return { rfq, provisionalQuoteState, payload: {
     rfq: {
       id: rfq.id, workflowStatus: rfq.workflow_status, createdAt: rfq.created_at,
@@ -146,8 +157,8 @@ async function loadRfqStatus(
       hasLateReplies: Number(lateReplies?.total ?? 0) > 0,
       hasUnrankedLateReplies: Number(lateReplies?.unranked ?? 0) > 0
     },
-    issuers: issuers.results.map(row => ({ issuer: row.issuer, status: row.status, terminalAt: row.terminal_at, reason: row.terminal_reason })),
-    artifacts: artifacts.results.map(row => ({
+    issuers: issuers.map(row => ({ issuer: row.issuer, status: row.status, terminalAt: row.terminal_at, reason: row.terminal_reason })),
+    artifacts: artifacts.map(row => ({
       id: row.id, tradeCode: row.trade_code, quoteId: row.quote_id, issuer: row.issuer,
       status: row.status, byteSize: row.byte_size,
       completedAt: row.completed_at, expiresAt: row.expires_at
@@ -157,6 +168,55 @@ async function loadRfqStatus(
 
 export async function getRfqStatus(env: AppEnv, session: SessionContext, rfqId: string): Promise<Response> {
   return jsonResponse((await loadRfqStatus(env, session, rfqId)).payload);
+}
+
+/**
+ * A single-statement fingerprint of everything the snapshot version is derived from.
+ *
+ * The browser polls every four seconds and almost every poll is unchanged, yet answering "unchanged"
+ * still cost the full status read. This answers it from one query instead.
+ *
+ * The digest must be a function of every input to the version hash, so that any real change also
+ * changes the digest. It is deliberately *coarser* than the payload — it covers all artifacts of the
+ * RFQ rather than only the current run's — because being over-sensitive costs one redundant full
+ * response, while being under-sensitive would freeze the caller's view. Ownership is enforced in the
+ * same statement.
+ */
+async function snapshotDigest(
+  env: AppEnv,
+  userId: string,
+  rfqId: string
+): Promise<Record<string, unknown> | null> {
+  const row = await env.DB.prepare(
+    `SELECT r.workflow_status, r.current_ranking_version, r.created_at, r.sent_at, r.deadline_at,
+            r.finalized_at, r.finalization_trigger,
+            (SELECT group_concat(d) FROM (
+               SELECT e.issuer || '|' || e.status || '|' || COALESCE(e.terminal_at, '') || '|'
+                      || COALESCE(e.terminal_reason, '') AS d
+                 FROM rfq_expected_issuers e WHERE e.rfq_id = r.id ORDER BY e.issuer)) AS issuer_digest,
+            (SELECT group_concat(d) FROM (
+               SELECT a.id || '|' || a.trade_code || '|' || a.quote_id || '|' || a.issuer || '|'
+                      || a.status || '|' || COALESCE(a.byte_size, '') || '|'
+                      || COALESCE(a.completed_at, '') || '|' || COALESCE(a.expires_at, '') AS d
+                 FROM generated_artifacts a WHERE a.rfq_id = r.id
+                ORDER BY a.trade_code, a.created_at, a.id)) AS artifact_digest,
+            (SELECT COUNT(*) FROM issuer_quotes q WHERE q.rfq_id = r.id) AS quote_count,
+            (SELECT MAX(q.created_at) FROM issuer_quotes q WHERE q.rfq_id = r.id) AS latest_quote_at,
+            (SELECT COUNT(*) FROM inbound_messages m
+              WHERE m.rfq_id = r.id AND m.status = 'LATE_REPLY') AS late_reply_count,
+            (SELECT MAX(COALESCE(m.normalized_at, m.received_at)) FROM inbound_messages m
+              WHERE m.rfq_id = r.id AND m.status = 'LATE_REPLY') AS latest_late_reply_at
+       FROM rfqs r WHERE r.id = ? AND r.user_id = ?`
+  ).bind(rfqId, userId).first<Record<string, unknown>>();
+  if (!row) return null;
+  // The two derived deadlines come from environment variables rather than the database, so they are
+  // folded in here; otherwise changing one and redeploying would leave a polling client on the old
+  // value until something else changed.
+  return {
+    ...row,
+    softDeadlineAt: rfqSoftDeadlineAt(env, row.sent_at as string | null),
+    mailGraceStartsAt: rfqMailGraceStartsAt(env, row.sent_at as string | null)
+  };
 }
 
 export async function getRfqSnapshot(
@@ -169,19 +229,23 @@ export async function getRfqSnapshot(
   if (since && !/^[A-Za-z0-9_-]{43}$/u.test(since)) {
     throw new AppError(400, "INVALID_SNAPSHOT_VERSION", "詢價快照版本格式無效。 ");
   }
+  // The version is always measured *before* the payload is read. If the RFQ changes in between, the
+  // caller receives newer data than the version it stores, so its next poll sees a different digest
+  // and re-fetches. The reverse order — a version newer than the payload it accompanies — would
+  // strand the caller on stale data, and is what this ordering rules out.
+  const digest = await snapshotDigest(env, session.user.id, rfqId);
+  if (!digest) throw new AppError(404, "RFQ_NOT_FOUND", "找不到此詢價，或您沒有權限查看。 ");
+  const version = await sha256Text(stableStringify(digest));
+  // The common case: nothing has moved since the last poll, and this is the entire request — one
+  // statement, no status read, no payload construction.
+  if (since === version) return jsonResponse({ changed: false, version });
+
   const loadedStatus = await loadRfqStatus(env, session, rfqId, { includeProvisionalQuoteState: true });
   const status = loadedStatus.payload as {
     rfq: { workflowStatus: string; rankingVersion: number };
     issuers: unknown[];
     artifacts: unknown[];
   };
-  const quoteState = loadedStatus.provisionalQuoteState;
-  const version = await sha256Text(stableStringify({
-    status,
-    provisionalQuoteCount: Number(quoteState?.quote_count ?? 0),
-    provisionalLatestQuoteAt: quoteState?.latest_quote_at ?? null
-  }));
-  if (since === version) return jsonResponse({ changed: false, version });
 
   const hasResults = ["WAITING", "PARTIAL", "FINALIZING", "COMPLETED", "NO_VALID_QUOTE"].includes(
     status.rfq.workflowStatus
@@ -213,38 +277,47 @@ async function loadRfqResultsPayload(
   const isProvisional = isProvisionalWorkflow(rfq);
   // Every one of these reads is keyed only by the RFQ and its current ranking version, so they are
   // issued together; sequencing them was the largest single cost of the polling path.
-  const [trades, currentRun, results, exclusions, candidateQuotes] = await Promise.all([
-    env.DB.prepare(
-      `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
-         FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
-    ).bind(rfqId).all<Record<string, unknown>>(),
-    rfq.current_ranking_version > 0 ? env.DB.prepare(
-      "SELECT trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
-    ).bind(rfqId, rfq.current_ranking_version).first<{ trigger: string }>() : Promise.resolve(null),
-    rfq.current_ranking_version > 0 ? env.DB.prepare(
-      `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
-              r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
-              q.id AS quote_id, q.issuer, q.issuer_display_name, q.received_at,
-              q.normalization_warnings_json, q.rejection_reason, q.issuer_comment
-         FROM ranking_results r JOIN issuer_quotes q ON q.id = r.quote_id
-         JOIN ranking_runs run ON run.id = r.ranking_run_id
-        WHERE r.rfq_id = ? AND run.version = ?
-        ORDER BY r.trade_id, r.economic_rank, r.display_order`
-    ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
-      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
-    rfq.current_ranking_version > 0 ? env.DB.prepare(
-      `SELECT e.trade_id, e.issuer, e.reason_code FROM ranking_exclusions e
-         JOIN ranking_runs run ON run.id = e.ranking_run_id
-        WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
-    ).bind(rfqId, rfq.current_ranking_version).all<Record<string, unknown>>()
-      : Promise.resolve({ results: [] as Record<string, unknown>[] }),
-    isProvisional || rfq.current_ranking_version > 0 ? env.DB.prepare(
-      `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
-               strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
-               ki_barrier_pct, normalization_warnings_json, rejection_reason
-          FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
-    ).bind(rfqId).all<ProvisionalQuoteRow>() : Promise.resolve({ results: [] as ProvisionalQuoteRow[] })
-  ]);
+  const ranked = rfq.current_ranking_version > 0;
+  const statements: D1PreparedStatement[] = [];
+  const tradesAt = statements.push(env.DB.prepare(
+    `SELECT id, sequence, trade_code, product, currency, target_field, underlyings_json
+       FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
+  ).bind(rfqId)) - 1;
+  const currentRunAt = ranked ? statements.push(env.DB.prepare(
+    "SELECT trigger FROM ranking_runs WHERE rfq_id = ? AND version = ? LIMIT 1"
+  ).bind(rfqId, rfq.current_ranking_version)) - 1 : -1;
+  const resultsAt = ranked ? statements.push(env.DB.prepare(
+    `SELECT r.trade_id, r.economic_rank, r.display_order, r.target_field,
+            r.normalized_value, r.direction, r.is_image_winner, r.tie_group,
+            q.id AS quote_id, q.issuer, q.issuer_display_name, q.received_at,
+            q.normalization_warnings_json, q.rejection_reason, q.issuer_comment
+       FROM ranking_results r JOIN issuer_quotes q ON q.id = r.quote_id
+       JOIN ranking_runs run ON run.id = r.ranking_run_id
+      WHERE r.rfq_id = ? AND run.version = ?
+      ORDER BY r.trade_id, r.economic_rank, r.display_order`
+  ).bind(rfqId, rfq.current_ranking_version)) - 1 : -1;
+  const exclusionsAt = ranked ? statements.push(env.DB.prepare(
+    `SELECT e.trade_id, e.issuer, e.reason_code FROM ranking_exclusions e
+       JOIN ranking_runs run ON run.id = e.ranking_run_id
+      WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
+  ).bind(rfqId, rfq.current_ranking_version)) - 1 : -1;
+  const quotesAt = isProvisional || ranked ? statements.push(env.DB.prepare(
+    `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
+             strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
+             ki_barrier_pct, normalization_warnings_json, rejection_reason
+        FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
+  ).bind(rfqId)) - 1 : -1;
+  // One request, one transaction: the trades, the ranking rows and the quotes are guaranteed to
+  // come from the same instant, which concurrent statements did not guarantee.
+  const batched = await env.DB.batch<Record<string, unknown>>(statements);
+  const trades = { results: batched[tradesAt]?.results ?? [] };
+  const currentRun = (currentRunAt >= 0 ? batched[currentRunAt]?.results[0] ?? null : null) as
+    { trigger: string } | null;
+  const results = { results: resultsAt >= 0 ? batched[resultsAt]?.results ?? [] : [] };
+  const exclusions = { results: exclusionsAt >= 0 ? batched[exclusionsAt]?.results ?? [] : [] };
+  const candidateQuotes = {
+    results: (quotesAt >= 0 ? batched[quotesAt]?.results ?? [] : []) as unknown as ProvisionalQuoteRow[]
+  };
   const rankOptions = {
     includeLateReplies: currentRun?.trigger === "RECALCULATION",
     maxEconomicRank: Number.MAX_SAFE_INTEGER

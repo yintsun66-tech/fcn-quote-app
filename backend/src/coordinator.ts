@@ -161,31 +161,30 @@ export async function scheduledWorkflowRecovery(env: AppEnv): Promise<void> {
   // Both recovery sweeps are pure re-enqueues of rows the database already holds, so they are read
   // together and each is delivered as one batched send instead of up to 100 sequential ones. Both
   // limits stay inside the 100-message Queues batch cap.
-  const [queued, renderJobs] = await Promise.all([
+  const [queued, renderJobs] = await env.DB.batch([
     env.DB.prepare(
       `SELECT id, rfq_id, trigger, requested_version FROM quote_rank_jobs
         WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 100`
-    ).bind(now).all<{ id: string; rfq_id: string; trigger: FinalizationTrigger; requested_version: number }>(),
+    ).bind(now),
     env.DB.prepare(
       `SELECT id, artifact_id, rfq_id, ranking_run_id, trade_code, quote_id, issuer FROM image_render_jobs
         WHERE status = 'QUEUED' AND available_at <= ? ORDER BY created_at LIMIT 50`
-    ).bind(now).all<{
-      id: string;
-      artifact_id: string;
-      rfq_id: string;
-      ranking_run_id: string;
-      trade_code: string;
-      quote_id: string;
-      issuer: string;
-    }>()
+    ).bind(now)
   ]);
-  if (queued.results.length) {
-    await env.QUOTE_RANK_QUEUE.sendBatch(queued.results.map(row => ({
+  const queuedRows = (queued?.results ?? []) as {
+    id: string; rfq_id: string; trigger: FinalizationTrigger; requested_version: number;
+  }[];
+  const renderRows = (renderJobs?.results ?? []) as {
+    id: string; artifact_id: string; rfq_id: string; ranking_run_id: string;
+    trade_code: string; quote_id: string; issuer: string;
+  }[];
+  if (queuedRows.length) {
+    await env.QUOTE_RANK_QUEUE.sendBatch(queuedRows.map(row => ({
       body: { jobId: row.id, rfqId: row.rfq_id, trigger: row.trigger, requestedVersion: row.requested_version }
     })));
   }
-  if (renderJobs.results.length) {
-    await env.IMAGE_RENDER_QUEUE.sendBatch(renderJobs.results.map(row => ({
+  if (renderRows.length) {
+    await env.IMAGE_RENDER_QUEUE.sendBatch(renderRows.map(row => ({
       body: {
         jobId: row.id, artifactId: row.artifact_id, rfqId: row.rfq_id,
         rankingRunId: row.ranking_run_id, tradeCode: row.trade_code,

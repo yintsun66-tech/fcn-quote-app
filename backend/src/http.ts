@@ -105,3 +105,20 @@ export function withTimeout<T>(work: Promise<T>, milliseconds: number, code: str
     })
   ]);
 }
+
+/**
+ * A single wall-clock budget shared by several sequential awaits.
+ *
+ * Applying `withTimeout` separately to each step bounds each step but not the sequence: two 60s
+ * steps allow 120s, which is most of a three-minute job lease rather than the third of it the
+ * per-step number suggests. A deadline makes the total the number that was actually chosen.
+ */
+export function deadlineAt(milliseconds: number): number {
+  return Date.now() + milliseconds;
+}
+
+export function withDeadline<T>(work: Promise<T>, deadline: number, code: string): Promise<T> {
+  // Never pass a negative delay to setTimeout: it would fire on the next tick and reject a step
+  // that was about to succeed. An exhausted budget still gets one final tick to settle.
+  return withTimeout(work, Math.max(0, deadline - Date.now()), code);
+}

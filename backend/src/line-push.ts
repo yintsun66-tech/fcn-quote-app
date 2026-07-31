@@ -1,10 +1,12 @@
 import { keyedHash } from "./crypto";
 import { insertAudit, nowIso } from "./db";
-import { withTimeout } from "./http";
+import { deadlineAt, withDeadline } from "./http";
 import { QUOTE_CARD_WIDTH_PX, renderQuoteCardHtml } from "./quote-card";
 import type { AppEnv } from "./types";
 
 const FOLLOW_BOARD_RENDER_TIMEOUT_MS = 60 * 1000;
+// Total wall clock for every card of one publication, not per card.
+const FOLLOW_BOARD_RENDER_BUDGET_MS = 90 * 1000;
 const LINE_PUSH_TIMEOUT_MS = 15 * 1000;
 
 // Follow-board card images pushed to LINE. LINE fetches an image itself and sends no credentials,
@@ -150,10 +152,15 @@ export function buildFollowBoardFlexMessage(products: readonly FollowBoardPushPr
  */
 export async function renderFollowBoardImage(
   env: AppEnv,
-  product: FollowBoardPushProduct
+  product: FollowBoardPushProduct,
+  deadline: number = deadlineAt(FOLLOW_BOARD_RENDER_TIMEOUT_MS)
 ): Promise<string | null> {
   const publicBase = String(env.FOLLOW_BOARD_PUBLIC_ORIGIN ?? "").trim().replace(/\/+$/, "");
   if (!publicBase) return null;
+  // Checked before the call, not only around it: `withDeadline` can bound a request that is already
+  // in flight, but only an early return keeps an exhausted budget from taking a Browser Rendering
+  // slot at all.
+  if (deadline <= Date.now()) return null;
   try {
     const html = renderQuoteCardHtml(product.issuerDisplayName, [{
       sequence: 1,
@@ -178,14 +185,14 @@ export async function renderFollowBoardImage(
     }], "");
     // This runs after a publication has already committed, so a stalled render must not hold the
     // invocation open; the catch below then pushes the text message without an image.
-    const response = await withTimeout(env.BROWSER.quickAction("screenshot", {
+    const response = await withDeadline(env.BROWSER.quickAction("screenshot", {
       html,
       viewport: { width: QUOTE_CARD_WIDTH_PX, height: 1280, deviceScaleFactor: 1.5 },
       screenshotOptions: { type: "png", fullPage: true },
       gotoOptions: { waitUntil: "networkidle0" }
-    }), FOLLOW_BOARD_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
+    }), deadline, "BROWSER_RENDER_TIMEOUT");
     if (!response.ok) return null;
-    const bytes = await withTimeout(response.arrayBuffer(), FOLLOW_BOARD_RENDER_TIMEOUT_MS, "BROWSER_RENDER_TIMEOUT");
+    const bytes = await withDeadline(response.arrayBuffer(), deadline, "BROWSER_RENDER_TIMEOUT");
     const token = await followBoardImageToken(env, product.productCode);
     await env.RAW_MAIL_BUCKET.put(followBoardImageKey(token), bytes, {
       httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=86400" }
@@ -310,16 +317,26 @@ export async function pushFollowBoardProducts(
   // Product-conditions images first, then one Flex message carrying the trade date and 手收.
   // Keeping the sales fee out of the image is deliberate: the image sits behind a public URL for
   // LINE to fetch, while the text stays inside the private group.
+  // The renders stay sequential on purpose — Browser Rendering concurrency is the documented
+  // constraint — but they share one budget rather than getting a fresh timeout each. Four products
+  // with a per-render timeout could otherwise hold this invocation for four times that number,
+  // after the publication has already committed and with the message still unsent. When the budget
+  // runs out the remaining cards are simply dropped: the text message carries what matters.
   const images: unknown[] = [];
+  const renderBudget = deadlineAt(FOLLOW_BOARD_RENDER_BUDGET_MS);
   for (const product of products.slice(0, MAX_MESSAGES_PER_PUSH - 1)) {
-    const url = await renderFollowBoardImage(env, product);
+    const perRender = Math.min(deadlineAt(FOLLOW_BOARD_RENDER_TIMEOUT_MS), renderBudget);
+    if (perRender <= Date.now()) break;
+    const url = await renderFollowBoardImage(env, product, perRender);
     if (url) images.push({ type: "image", originalContentUrl: url, previewImageUrl: url });
   }
   const messages = [...images, buildFollowBoardFlexMessage(products)].slice(0, MAX_MESSAGES_PER_PUSH);
   let status: number | null = null;
   let reason: string | undefined;
   try {
-    const response = await withTimeout(fetcher(LINE_PUSH_ENDPOINT, {
+    // An AbortSignal actually cancels the request. Racing a timer instead would leave the call in
+    // flight, so LINE could still deliver the message while the audit recorded a timeout.
+    const response = await fetcher(LINE_PUSH_ENDPOINT, {
       method: "POST",
       headers: {
         // The token is only ever placed in this header — never logged, audited or echoed.
@@ -328,12 +345,15 @@ export async function pushFollowBoardProducts(
         // Lets LINE de-duplicate if we retry the same publication.
         "x-line-retry-key": crypto.randomUUID()
       },
-      body: JSON.stringify({ to: credentials.groupId, messages })
-    }), LINE_PUSH_TIMEOUT_MS, "LINE_PUSH_TIMEOUT");
+      body: JSON.stringify({ to: credentials.groupId, messages }),
+      signal: AbortSignal.timeout(LINE_PUSH_TIMEOUT_MS)
+    });
     status = response.status;
     if (!response.ok) reason = `HTTP_${response.status}`;
   } catch (error) {
-    reason = error instanceof Error && error.message === "LINE_PUSH_TIMEOUT" ? "TIMEOUT" : "REQUEST_FAILED";
+    // AbortSignal.timeout rejects with TimeoutError; an explicit abort would be AbortError.
+    const name = error instanceof Error ? error.name : "";
+    reason = name === "TimeoutError" || name === "AbortError" ? "TIMEOUT" : "REQUEST_FAILED";
   }
 
   // Counts and a safe status only: no token, group id, quote value or RFQ identifier.

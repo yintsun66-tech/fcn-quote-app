@@ -4,13 +4,71 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
+## Performance follow-up and documentation reconciliation (committed, not yet deployed)
+
+A review of the P0–P3 rollout against production and against the documentation. The rollout itself
+verified clean — 27 files / 186 tests, migration `0016` applied, live assets byte-identical to the
+repository — and the riskiest item, the in-isolate memoisation of finalized results, was re-derived
+and is sound: `rankValidQuotes` admits only `status = 'VALID'` when `includeLateReplies` is false, so
+a late reply arriving after finalization cannot change a cached payload, and a recalculation always
+advances the version and therefore the key.
+
+Six things were changed on top of it.
+
+- **The LINE push now aborts rather than races.** `withTimeout` left the request in flight, so LINE
+  could still deliver a message the audit had already recorded as failed. It uses
+  `AbortSignal.timeout` and reports `TIMEOUT` distinctly from `REQUEST_FAILED`.
+- **Browser Rendering is bounded by a deadline, not by a per-step timeout.** `artifacts.ts` applied
+  60 s to the request *and* 60 s to reading its body, so the real bound was 120 s against a 180 s
+  lease. `deadlineAt`/`withDeadline` in `http.ts` give the whole render one budget.
+- **The follow-board push has a total render budget** (`FOLLOW_BOARD_RENDER_BUDGET_MS`, 90 s).
+  Renders stay sequential — Browser Rendering concurrency is still the constraint — but four cards
+  can no longer hold the consumer for four times the per-card timeout after the publication has
+  already committed. The budget is checked *before* each call, because bounding a promise cannot
+  stop a request that was already issued.
+- **`auditStatement` in `db.ts` is now the single audit-write shape.** The batched follow-board
+  expiry sweep had a hand-written copy of the INSERT; `insertAudit` is now a thin wrapper over the
+  same builder, so the two cannot drift.
+- **Independent D1 reads use `batch` instead of `Promise.all`.** Same single wave of latency, but one
+  subrequest instead of four or five, and — because a batch is one transaction — one consistent read
+  snapshot. Concurrent statements could previously straddle a commit and return a payload mixing
+  pre- and post-finalize rows.
+- **An unchanged poll is now answered by one statement.** `GET /rfqs/:id/snapshot` is polled every
+  four seconds and is almost always unchanged, yet saying so still cost the full status read.
+  `snapshotDigest` fingerprints everything the version derives from in a single query, with
+  ownership enforced in the same statement.
+
+The digest deliberately does **not** use a `rfqs.revision` counter, which was the obvious design. A
+counter has to be bumped by every writer, and a single missed bump would freeze a polling browser on
+stale data with nothing to indicate why. The digest instead reads the state itself: per-row issuer
+statuses (not a count, which would miss a status flip), an artifact fingerprint, quote and
+late-reply counts and timestamps, and the two deadlines derived from environment variables. It is
+deliberately coarser than the payload in one place — it covers all artifacts of the RFQ, not only the
+current run's — because over-sensitivity costs one redundant fetch while under-sensitivity would be
+invisible and wrong. `test/rfqs.test.ts` pins this by asserting the version changes for an
+expected-issuer status change, a first quote, and a workflow transition.
+
+The version is always measured **before** the payload is read. If the RFQ changes in between, the
+caller gets data newer than the version it stores and simply re-fetches on the next poll; the
+reverse order would strand it on stale data.
+
+Documentation corrected in the same pass: `CLAUDE.md`, `README.md`, `version-status.html` and the
+market-context runbook all named superseded Workers, commits, migration levels or test counts, and
+three places claimed `b26d132c` was serving production when `wrangler deployments list` shows
+`ddf8cef7` at 100%. A Cloudflare deployment replaces the whole Worker, so an asset-only publish also
+becomes the version that serves the code.
+
+Verified: typecheck clean (source and test), **27 test files / 191 tests**, `prepare-assets` plus
+dry-run build (18 assets, `LINE_PUSH_ENABLED ("1")`, `LINE_WEBHOOK_ENABLED ("0")`). **Not deployed.**
+
 ## Performance work P0–P3 (committed, pushed, migrated and deployed)
 
 A performance review produced a P0/P1/P2 list. Everything on it is implemented except one item that
 was deliberately stopped (see the "Stopped" paragraph). Implementation commit `e90ce53` is pushed to
-`origin/codex/market-analysis-phase2-4`, migration `0016` is applied to remote D1, and Worker
-`b26d132c-5a0e-4fdf-b765-dbdda1407d73` is deployed. Deployment evidence is at the end of this
-section.
+`origin/codex/market-analysis-phase2-4`, migration `0016` is applied to remote D1, and the code was
+deployed as Worker `b26d132c-5a0e-4fdf-b765-dbdda1407d73` — republished unchanged by a later
+status-only asset deploy, so `ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6` is what serves production.
+Deployment evidence is at the end of this section.
 
 **P0**
 
@@ -146,8 +204,14 @@ source, migration, Secret, D1/R2 content or private fixture was copied.
 `version-status.html` on the static site had drifted two releases behind (it still named commit
 `6d2f3b2` and Worker `23c74ccd`), so this sync also brought it current. The same file was updated in
 this repository and published to Cloudflare in a status-only deployment, Worker
-**`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`** (one asset uploaded; the feature deployment
-`b26d132c-5a0e-4fdf-b765-dbdda1407d73` is what serves the code).
+**`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6`**, which only had one asset to upload.
+
+**That is the version now serving production.** A Cloudflare deployment replaces the whole Worker,
+so an asset-only publish still produces a new version that serves the code as well —
+`b26d132c-5a0e-4fdf-b765-dbdda1407d73` is the deployment the feature *arrived* in, not the one
+running. Both carry the same code, from `e90ce53`. Resolve "what is live" from
+`wrangler deployments list`, which shows `ddf8cef7` at 100%, rather than from the deployment that
+introduced a change.
 
 Verification fetched all fifteen allowlisted assets over HTTP from both sites and hashed each
 against the repository source. **Both sides are identical to source on all fifteen: zero
@@ -188,7 +252,8 @@ observation.
 user-owned untracked `.claude/` and `output/`.
 
 Current production source: implementation commit `e90ce53`, currently served as Worker
-`b26d132c-5a0e-4fdf-b765-dbdda1407d73` on 2026-07-31. Remote D1 migrations are applied through
+`ddf8cef7-ccc2-49d8-91ca-11fdc2b4e0a6` on 2026-07-31 (the version `b26d132c` introduced, republished
+by a later status-only asset deploy). Remote D1 migrations are applied through
 `0016`. Current branch HEAD may include later documentation-only commits and must be resolved from
 Git history.
 

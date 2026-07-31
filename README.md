@@ -75,7 +75,10 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 
 ## 目前正式環境基線
 
-- 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
+- 正式後端來源分支為 `codex/market-analysis-phase2-4`，已於 2026-07-31 合併進 `main`
+  （merge commit `748f5d9`，合併後 tree 與分支逐位元組相同）。`main` 現在包含完整
+  Cloudflare 後端，不再只是純靜態檔案。但部署仍是從工作樹執行 `wrangler deploy`、
+  不是從 `main` 觸發，所以兩者日後仍可能分歧。
 - 正式功能程式基線為 `7abde5d`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
 - 最新正式 Worker 版本為 `ca46deee-da1c-4aab-91e6-17a772181bfd`（2026-07-31
@@ -112,8 +115,10 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
   需勾選同意才載入。**不可**把日股改成 `JP`／`JPX`／`TYO`（會顯示美股資料）。
 - 目前驗證基線為 27 個測試檔、191 項測試；JavaScript 語法、TypeScript typecheck、
   完整測試及 Cloudflare Worker dry-run build 均通過。正式部署後 API health、授權
-  邊界、新前端程式與快取版本均已驗證；Alpha Vantage 真實資料仍未成功正規化，是
-  目前第一優先待確認事項，其次才是以真實手機／平板測試「下載報價圖」。
+  邊界、新前端程式與快取版本均已驗證。Alpha Vantage 已放棄，前一日收盤價自動帶入
+  屬於**停用功能而非待修缺陷**，不需要再去查證。目前第一優先是讓一次真實跟單發布
+  自然發生並觀察 LINE 推播（可一次驗證推播、伺服器產圖、產圖預算與逾時中止），
+  其次才是以真實手機／平板測試「下載報價圖」。
 - **`fcn-quote-app` 本身不得啟用 GitHub Pages。** 它原本以 `main` 根目錄啟用，形成一個沒有
   任何文件記載、且落後 147 個 commit 的第三份靜態站，已於 2026-07-31 關閉。合併進 `main`
   之前請先確認未被重新啟用：`main` 帶有 `.nojekyll`，合併會把 `backend/`、`docs/`、

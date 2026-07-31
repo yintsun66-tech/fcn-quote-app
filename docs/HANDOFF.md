@@ -2,7 +2,40 @@
 
 Updated: 2026-07-31 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`
+Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
+
+## Branch merged into `main` (2026-07-31)
+
+`codex/market-analysis-phase2-4` was merged into `main` as `748f5d9` and pushed
+(`07d0cc1..748f5d9`). `main` had previously carried only the eight-file static set and was 147
+commits behind; it now holds the full Cloudflare backend, 153 tracked files.
+
+Checked before merging, not after:
+
+- **Nothing from `main` was lost.** `main` had two `app.js` commits the branch did not have as
+  commits — `bef54f6` (SG outbound columns) and `07d0cc1` (NOMURA effective-date offset). Both
+  results were already present in the branch content; the actual code was compared across `main`,
+  the branch and the merge-tree preview and all three read
+  `{ label: "Effective Date Offset", value: () => "7" }`.
+- **The merge introduced nothing unverified.** A `git merge-tree` preview produced no conflicts and
+  a tree hash — `0b64a771bf66bd5be545862bf3032bb5b1a576f4` — **identical to the branch tree**, which
+  the real merge then reproduced. `git diff HEAD codex/…` on the merged `main` is empty. The
+  verification that applied to the branch (27 test files / 191 tests, typecheck, dry-run build)
+  therefore applies to `main` unchanged, and the suite was not re-run: an identical tree hash is the
+  same content.
+- The merge ran in the `FCN V2-main-sg` worktree, confirmed clean and in sync first, so the primary
+  working tree was never disturbed. `--no-ff` keeps the merge as an event rather than flattening it.
+- Pre-push scan found only a deliberately fake test token and the minified vendored html2canvas. No
+  `.dev.vars`, `.env`, `settings.local.json`, `output/` or `.msg` file is tracked, and
+  `.dev.vars.example` holds blank placeholders only.
+
+Post-push state: `origin/main` = `748f5d9`; GitHub Pages still disabled on this repository (API 404
+and the URL 404 — pushing `main` did not re-enable it, which was the point of disabling it first);
+`fcnV2` static site 200; `api.` and `app.yintsun66.com` 200.
+
+**`main` is not a deployment trigger.** Cloudflare is published by running `wrangler deploy` from a
+working tree, so `main` and the deployed Worker can diverge. Resolve what is live from
+`wrangler deployments list`.
 
 ## An undocumented third static site was found and disabled (2026-07-31)
 

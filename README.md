@@ -75,7 +75,10 @@ Trends、Cboe 與 OIC 的主動外部連結；第三方資料不會進入正式�
 
 ## 目前正式環境基線
 
-- 正式後端來源分支為 `codex/market-analysis-phase2-4`，尚未合併至 `main`。
+- 正式後端來源分支為 `codex/market-analysis-phase2-4`，已於 2026-07-31 合併進 `main`
+  （merge commit `748f5d9`，合併後 tree 與分支逐位元組相同）。`main` 現在包含完整
+  Cloudflare 後端，不再只是純靜態檔案。但部署仍是從工作樹執行 `wrangler deploy`、
+  不是從 `main` 觸發，所以兩者日後仍可能分歧。
 - 正式功能程式基線為 `7abde5d`；實際最新分支 HEAD
   仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
 - 最新正式 Worker 版本為 `ca46deee-da1c-4aab-91e6-17a772181bfd`（2026-07-31

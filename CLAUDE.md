@@ -29,9 +29,12 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `backend/worker-configuration.d.ts`.
 - A real RFQ, email-route change, D1 mutation, migration, commit, push, merge, or deployment
   requires explicit user authorization.
-- `feature/subject-branch-correlation` is the previous stable backend ancestor. Current production
-  source is `codex/market-analysis-phase2-4`, and neither branch is automatically equivalent to
-  `main`.
+- `feature/subject-branch-correlation` is the previous stable backend ancestor. Production source is
+  `codex/market-analysis-phase2-4`, **merged into `main` on 2026-07-31** (`748f5d9`) with a tree
+  byte-identical to the branch, so `main` now carries the full Cloudflare backend rather than the
+  old static-only set. Do not assume the two stay equal: deployment still runs `wrangler deploy`
+  from a working tree, not from `main`, so the branch can move ahead again. Resolve what is
+  deployed from `wrangler deployments list`, not from a branch name.
 - Production implementation commit `7abde5d` is documented by this handoff and
   currently served by Worker `ca46deee-da1c-4aab-91e6-17a772181bfd` on 2026-07-31. Resolve the
   current branch HEAD from Git rather than copying a historical handoff hash. The current

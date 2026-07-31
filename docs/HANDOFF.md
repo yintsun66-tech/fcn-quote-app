@@ -4,11 +4,13 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`
 
-## Performance work P0–P3 (local only; not committed, migrated or deployed)
+## Performance work P0–P3 (committed, pushed, migrated and deployed)
 
 A performance review produced a P0/P1/P2 list. Everything on it is implemented except one item that
-was deliberately stopped (see the last bullet). **Nothing here is committed, pushed, migrated to
-remote D1 or deployed.** Migration `0016` exists locally only; remote D1 is still at `0015`.
+was deliberately stopped (see the "Stopped" paragraph). Implementation commit `e90ce53` is pushed to
+`origin/codex/market-analysis-phase2-4`, migration `0016` is applied to remote D1, and Worker
+`b26d132c-5a0e-4fdf-b765-dbdda1407d73` is deployed. Deployment evidence is at the end of this
+section.
 
 **P0**
 
@@ -100,14 +102,54 @@ The asset cache token for `index.html` moved to `?v=perf-p0-v1` for `app.js` and
 `backend-client.js`, per the recorded rule that a changed versioned asset must get a new token.
 `styles.css` did not change and keeps its token.
 
-**Smallest safe next step:** review the diff, then decide the follow-board cache question. Before
-any deploy, migration `0016` must be applied to remote D1 first (`wrangler d1 migrations apply
-fcn-quote --remote`) — it is index-only and additive, but it is still an explicitly authorized
-operation. Preserve the user-owned untracked `.claude/` and `output/`.
+### Rollout evidence (2026-07-31)
 
-Current production source: implementation commit `ccbb7dd`, currently served as Worker
-`5abc0baa-9be0-4021-a90f-d067ed074c0c` on 2026-07-31. Current branch HEAD may include later
-documentation-only commits and must be resolved from Git history.
+- Implementation commit `e90ce53` pushed to `origin/codex/market-analysis-phase2-4`
+  (`c190b8d..e90ce53`), local and remote in sync. The outgoing diff was scanned for tokens, keys and
+  the LINE group id and was clean.
+- Migration `0016_query_performance_indexes.sql` applied to remote D1 `fcn-quote`: 5 commands
+  executed, `migrations list --remote` then returned "No migrations to apply", a direct
+  `sqlite_master` read confirmed all four index names exist, and `PRAGMA foreign_key_check` returned
+  no rows. Remote D1 is now applied through `0016`.
+- Worker `b26d132c-5a0e-4fdf-b765-dbdda1407d73` deployed with both custom domains, the two-minute
+  schedule, all five Queue producers and consumers, the Durable Object, Email, D1, R2 and Browser
+  bindings, and every environment variable unchanged — including `RETENTION_ENABLED ("0")`,
+  `AUTO_RANK_ONE_IMAGE ("0")`, `LINE_PUSH_ENABLED ("1")` and `LINE_WEBHOOK_ENABLED ("0")`. Three
+  static assets were uploaded (`index.html`, `app.js`, `backend-client.js`); the other 15 were
+  already present.
+- Post-deploy checks: `/api/v1/health` returned HTTP 200 on both `api.` and `app.`; the homepage,
+  `follow-board.html` and both new asset tokens returned HTTP 200; the public follow-board manifest
+  returned HTTP 401 without a PIN. The live index references `?v=perf-p0-v1` for both modules and no
+  longer references the previous token. The live `app.js` contains `withRenderTimeout`,
+  `scheduleRowChanges` and `ensureBbgLookup`, and no longer calls `loadBbgLookup()` at startup. The
+  live `backend-client.js` imports `market-resources.mjs?v=market-hotlist-v3` and maps the
+  underlyings for the parallel previous-close fetch.
+- Because this change touches the scheduled handler, two consecutive cron ticks were tailed live on
+  the new version: both reported `outcome: "ok"` with no exceptions and no error logs, so the
+  batched recovery sweep, the batched follow-board cleanup and the batched retention pass all run
+  clean in production.
+
+**Anomaly worth recording:** the first `wrangler d1 migrations list --remote` failed with Cloudflare
+API error 7403 ("the given account is not valid or is not authorized to access this service") even
+though `wrangler whoami` showed the correct account with `d1 (write)`. An immediate retry succeeded
+with no configuration change, so treat a single 7403 on the first D1 call of a session as a stale
+OAuth access token and simply retry before investigating entitlements.
+
+**Not verified by this rollout:** no RFQ was created or sent, no real issuer mail was exchanged, no
+follow-board publication was made, and therefore the LINE push remains unproven end to end. No
+Browser Rendering job ran, so the new 60-second render timeout has unit coverage but no production
+observation. The GitHub Pages static snapshot was **not** updated; `app.js` and `index.html` there
+still carry the pre-performance versions, so sync `yintsun66-tech/fcnV2` separately if the static
+site should match.
+
+**Smallest safe next step:** decide the follow-board manifest cache question above. Optionally sync
+the changed allowlisted public assets to the static snapshot repository. Preserve the user-owned
+untracked `.claude/` and `output/`.
+
+Current production source: implementation commit `e90ce53`, currently served as Worker
+`b26d132c-5a0e-4fdf-b765-dbdda1407d73` on 2026-07-31. Remote D1 migrations are applied through
+`0016`. Current branch HEAD may include later documentation-only commits and must be resolved from
+Git history.
 
 ## LINE push for follow-board publications (live)
 

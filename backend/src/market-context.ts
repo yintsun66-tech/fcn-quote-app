@@ -9,7 +9,10 @@ const SEC_SUBMISSIONS_ORIGIN = "https://data.sec.gov";
 const SEC_ARCHIVES_ORIGIN = "https://www.sec.gov";
 const ALPHA_VANTAGE_ORIGIN = "https://www.alphavantage.co";
 const TWELVE_DATA_ORIGIN = "https://api.twelvedata.com";
-const YAHOO_CHART_ORIGIN = "https://query1.finance.yahoo.com";
+// Yahoo's keyless chart endpoint was tried as a fallback and removed on 2026-08-01. It answers 200
+// from a residential address and 429 from this Worker: Cloudflare's shared egress is rate-limited by
+// Yahoo, so it failed every time in production while passing every test from a developer machine.
+// Do not re-add it without measuring from the Worker itself — a local curl proves nothing here.
 const CACHE_LEASE_SECONDS = 30;
 // How long a failed source waits before it is retried.
 const ERROR_DIAGNOSTIC_SECONDS = 10 * 60;
@@ -35,7 +38,7 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 // provider that actually answered is recorded in the payload, so swapping providers does not strand
 // cached rows under a name nothing reads.
 type SourceName = "SEC" | "FRED" | "ALPHA_VANTAGE" | "EQUITY_DAILY";
-export type EquityProvider = "TWELVE_DATA" | "YAHOO" | "ALPHA_VANTAGE";
+export type EquityProvider = "TWELVE_DATA" | "ALPHA_VANTAGE";
 
 const runtimeFetch: Fetcher = (input, init) => globalThis.fetch(input, init);
 
@@ -656,58 +659,6 @@ async function fetchTwelveDataBars(
     .filter((point): point is AlphaDailyPoint => point !== null);
 }
 
-interface YahooChartResponse {
-  chart?: {
-    error?: { code?: unknown; description?: unknown } | null;
-    result?: {
-      timestamp?: unknown[];
-      indicators?: { quote?: { open?: unknown[]; high?: unknown[]; low?: unknown[]; close?: unknown[]; volume?: unknown[] }[] };
-    }[];
-  };
-}
-
-/**
- * Keyless fallback. Deliberately last: this is not a contracted API, so it can change shape or
- * refuse Cloudflare egress without notice. It exists so a provider outage degrades to a stale or
- * second-choice price rather than to no price at all.
- *
- * The `meta.chartPreviousClose` field is **not** used, and must not be: it is the close before the
- * requested range begins, so with a multi-day range it reports a price from days earlier. Only the
- * timestamp/close arrays give per-session closes.
- */
-async function fetchYahooBars(
-  env: AppEnv,
-  symbol: string,
-  fetcher: Fetcher
-): Promise<AlphaDailyPoint[]> {
-  await consumeProviderBudget(env, "YAHOO", positiveInteger(env.YAHOO_DAILY_REQUEST_LIMIT, 500));
-  const url = new URL(`/v8/finance/chart/${encodeURIComponent(symbol)}`, YAHOO_CHART_ORIGIN);
-  url.searchParams.set("range", "3mo");
-  url.searchParams.set("interval", "1d");
-  const { data } = await fetchJson<YahooChartResponse>(
-    url, MAX_EQUITY_PROVIDER_BYTES, { accept: "application/json" }, fetcher
-  );
-  if (data.chart?.error) throw new AppError(404, "YAHOO_SYMBOL_NOT_FOUND", "找不到此股票代碼。 ");
-  const result = data.chart?.result?.[0];
-  const quote = result?.indicators?.quote?.[0];
-  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
-  if (!quote || !timestamps.length) throw new AppError(503, "YAHOO_DAILY_INVALID", "日線資料無法正規化。 ");
-  return timestamps
-    .map((timestamp, index) => {
-      const seconds = finiteNumber(timestamp);
-      if (seconds === null) return null;
-      // The bar's trading date is its New York date, not UTC: a US session stamped at 13:30 UTC
-      // belongs to the previous calendar day in some time zones.
-      const tradingDate = easternMoment(new Date(seconds * 1000)).date;
-      return normalizeDailyBar(
-        tradingDate,
-        quote.open?.[index], quote.high?.[index], quote.low?.[index],
-        quote.close?.[index], quote.volume?.[index]
-      );
-    })
-    .filter((point): point is AlphaDailyPoint => point !== null);
-}
-
 interface EquityProviderAttempt {
   provider: EquityProvider;
   errorCode: string;
@@ -729,7 +680,6 @@ export async function fetchEquityDailyContext(
 ): Promise<CacheLoadResult<AlphaEquityContext>> {
   const chain: { provider: EquityProvider; load: () => Promise<AlphaDailyPoint[]> }[] = [
     { provider: "TWELVE_DATA", load: () => fetchTwelveDataBars(env, symbol, fetcher) },
-    { provider: "YAHOO", load: () => fetchYahooBars(env, symbol, fetcher) },
     { provider: "ALPHA_VANTAGE", load: () => fetchAlphaVantageBars(env, symbol, fetcher) }
   ];
 

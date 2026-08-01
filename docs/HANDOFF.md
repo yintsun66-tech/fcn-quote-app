@@ -4,7 +4,40 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
-## Previous close automated: why it was broken, and a provider chain (not deployed, migration pending)
+## The diagnostic worked, and it removed Yahoo (2026-08-01)
+
+The first real lookup after the provider chain shipped still produced no price — and for the first
+time the reason was recorded rather than erased:
+
+```
+equity:daily:v2:TSM  status=ERROR
+EQUITY_DAILY_UNAVAILABLE (TWELVE_DATA=TWELVE_DATA_NOT_CONFIGURED,
+                          YAHOO=UPSTREAM_RATE_LIMITED,
+                          ALPHA_VANTAGE=ALPHA_VANTAGE_RATE_LIMITED)
+```
+
+Three facts came out of one row:
+
+- **Yahoo is not usable from a Worker.** The same request returns **HTTP 200 from a residential
+  address and 429 from Cloudflare's egress** — measured both ways on the same symbol, minutes apart.
+  Yahoo rate-limits shared datacenter IPs. It was recommended and shipped as the keyless fallback on
+  the strength of a local `curl`, which did not represent the runtime at all. **A local test of an
+  outbound dependency proves nothing about this Worker.** Yahoo has been removed from the chain and
+  a comment at the call site records why, so it is not re-added as an easy win.
+- **Alpha Vantage's long-standing failure is finally named**: `ALPHA_VANTAGE_RATE_LIMITED`, which is
+  how its `Information` response is mapped. The usage counter shows one or two requests a day, far
+  below any quota, so the likelier readings are an unactivated key or an endpoint that is no longer
+  free — not real over-use. Not worth further investigation; it is last in the chain.
+- **Twelve Data is the only remaining path** and needs a key (`TWELVE_DATA_API_KEY`, free tier, 800
+  credits/day against a real load of tens of requests). Until it is set, the previous close stays
+  manual.
+
+The chain is now Twelve Data → Alpha Vantage. Migration `0017`'s CHECK still lists `YAHOO`, which is
+harmless and deliberately left alone: an applied migration is not edited.
+
+Verified after removal: 27 test files / **197 tests**, typecheck clean, dry-run build clean.
+
+## Previous close automated: why it was broken, and a provider chain (deployed 2026-08-01)
 
 The manual entry of US closing prices was traced before anything was replaced, and the finding
 changes what the fix had to be.

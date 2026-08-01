@@ -6,7 +6,7 @@ EMPLOYEE_DATA_KEY=
 EMPLOYEE_LOOKUP_KEY=
 
 # Optional. Primary provider for the previous close that fills 「輸入標的參考現價」. The chain is
-# Twelve Data → Yahoo (keyless) → Alpha Vantage, and it falls through on any failure, so leaving
+# Twelve Data → Alpha Vantage, and it falls through on any failure, so leaving
 # this blank costs the preferred provider but not the feature. Which provider actually answered is
 # recorded in the payload and shown in the UI — never assume it was this one.
 TWELVE_DATA_API_KEY=

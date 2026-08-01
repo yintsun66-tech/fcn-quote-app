@@ -104,42 +104,17 @@ function publicDataFetcher(onRequest?: (url: URL) => void): typeof fetch {
         })
       });
     }
-    if (url.hostname === "query1.finance.yahoo.com") {
-      const bars = Array.from({ length: 25 }, (_, index) => {
-        // 20:00 UTC is inside the US session, so the New York calendar date is the same day.
-        const day = new Date(Date.UTC(2026, 6, 28 - index, 20, 0, 0));
-        return { seconds: Math.floor(day.getTime() / 1000), close: 400 - index };
-      }).reverse();
-      return jsonResponse({
-        chart: {
-          error: null,
-          result: [{
-            timestamp: bars.map(bar => bar.seconds),
-            indicators: {
-              quote: [{
-                open: bars.map(bar => bar.close - 1),
-                high: bars.map(bar => bar.close + 2),
-                low: bars.map(bar => bar.close - 3),
-                close: bars.map(bar => bar.close),
-                volume: bars.map(() => 4_000_000)
-              }]
-            }
-          }]
-        }
-      });
-    }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;
 }
 
 // Only the hosts named here answer; everything else 404s, so a test can force one provider to fail.
-function equityFetcher(allowed: ("twelve" | "yahoo" | "alpha")[]): typeof fetch {
+function equityFetcher(allowed: ("twelve" | "alpha")[]): typeof fetch {
   const inner = publicDataFetcher();
   return (async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
     const host = url.hostname;
     if (host === "api.twelvedata.com" && !allowed.includes("twelve")) return new Response("no", { status: 500 });
-    if (host === "query1.finance.yahoo.com" && !allowed.includes("yahoo")) return new Response("no", { status: 500 });
     if (host === "www.alphavantage.co" && !allowed.includes("alpha")) return new Response("no", { status: 500 });
     return inner(input, init);
   }) as typeof fetch;
@@ -251,13 +226,13 @@ describe("official public market context", () => {
 
   it("prefers the keyed provider, and records what the others said when it falls back", async () => {
     // No Twelve Data key is configured in the test environment, so the chain must fall through.
-    const viaYahoo = await fetchEquityDailyContext(testEnv, "AAPL", equityFetcher(["yahoo", "alpha"]));
-    expect(viaYahoo.data.provider).toBe("YAHOO");
-    expect(viaYahoo.data.closePrice).toBe(400);
-    expect(viaYahoo.data.providerAttempts.join(" ")).toContain("TWELVE_DATA=TWELVE_DATA_NOT_CONFIGURED");
+    const fallback = await fetchEquityDailyContext(testEnv, "AAPL", equityFetcher(["alpha"]));
+    expect(fallback.data.provider).toBe("ALPHA_VANTAGE");
+    expect(fallback.data.closePrice).toBe(200);
+    expect(fallback.data.providerAttempts.join(" ")).toContain("TWELVE_DATA=TWELVE_DATA_NOT_CONFIGURED");
 
     const keyed = { ...testEnv, TWELVE_DATA_API_KEY: "twelvedatatestkey123" } as unknown as AppEnv;
-    const viaTwelve = await fetchEquityDailyContext(keyed, "AAPL", equityFetcher(["twelve", "yahoo", "alpha"]));
+    const viaTwelve = await fetchEquityDailyContext(keyed, "AAPL", equityFetcher(["twelve", "alpha"]));
     expect(viaTwelve.data.provider).toBe("TWELVE_DATA");
     expect(viaTwelve.data.closePrice).toBe(300);
     expect(viaTwelve.data.providerAttempts).toEqual([]);
@@ -345,9 +320,9 @@ describe("official public market context", () => {
     const firstPayload = await first.json<Record<string, any>>();
     expect(firstPayload.marketContext.sec.status).toBe("FRESH");
     expect(firstPayload.marketContext.equityDaily.status).toBe("FRESH");
-    // No Twelve Data key is configured, so the keyless fallback is what answers here.
-    expect(firstPayload.marketContext.equityDaily.data.provider).toBe("YAHOO");
-    expect(firstPayload.marketContext.equityDaily.data.closePrice).toBe(400);
+    // No Twelve Data key is configured in tests, so the chain falls through to the last provider.
+    expect(firstPayload.marketContext.equityDaily.data.provider).toBe("ALPHA_VANTAGE");
+    expect(firstPayload.marketContext.equityDaily.data.closePrice).toBe(200);
     // The deprecated alias must keep pointing at the same envelope until both sides are current.
     expect(firstPayload.marketContext.alphaVantage).toEqual(firstPayload.marketContext.equityDaily);
 
@@ -403,8 +378,8 @@ describe("official public market context", () => {
     });
     expect(payload.marketContext.equityDaily.status).toBe("FRESH");
     expect(payload.marketContext.equityDaily.data.symbol).toBe("NVDA");
-    // Alpha Vantage sits last in the chain and is never reached while the fallback answers.
-    expect(alphaRequests).toBe(0);
+    // With no Twelve Data key configured, the chain reaches its last provider exactly once.
+    expect(alphaRequests).toBe(1);
 
     const beforeCleanup = await testEnv.DB.prepare(
       `SELECT status, fetched_at, stale_until, updated_at
@@ -585,7 +560,7 @@ describe("official public market context", () => {
         `INSERT INTO public_data_cache
           (cache_key, source, symbol, data_type, normalized_payload_json, expires_at,
            stale_until, status, last_error_code, updated_at)
-         VALUES ('test:recent-error:v1', 'EQUITY_DAILY', 'NEW', 'TEST', '{}', ?, ?, 'ERROR', 'EQUITY_DAILY_UNAVAILABLE (YAHOO=YAHOO_DAILY_INVALID)', ?)`
+         VALUES ('test:recent-error:v1', 'EQUITY_DAILY', 'NEW', 'TEST', '{}', ?, ?, 'ERROR', 'EQUITY_DAILY_UNAVAILABLE (TWELVE_DATA=TWELVE_DATA_RATE_LIMITED)', ?)`
       ).bind(expired, expired, expired),
       // A failure old enough that keeping it serves no one.
       testEnv.DB.prepare(
@@ -612,7 +587,7 @@ describe("official public market context", () => {
       "SELECT last_error_code FROM public_data_cache WHERE cache_key = 'test:recent-error:v1'"
     ).first<{ last_error_code: string }>();
     // The whole point: the reason survives long enough to be read.
-    expect(kept?.last_error_code).toContain("YAHOO=YAHOO_DAILY_INVALID");
+    expect(kept?.last_error_code).toContain("TWELVE_DATA=TWELVE_DATA_RATE_LIMITED");
     const dropped = await testEnv.DB.prepare(
       "SELECT cache_key FROM public_data_cache WHERE cache_key = 'test:expired:v1'"
     ).first();

@@ -63,5 +63,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0028: Issuer-declared follow-board commands and automatic expiry](0028-follow-board-expiry-and-issuer-command.md)
 - [ADR 0029: Follow-board sales-fee display](0029-follow-board-sales-fee.md)
 - [ADR 0030: Scheduled retention for mail, images and structured results](0030-scheduled-retention.md)
+- [ADR 0031: Selected-issuer ranking boundary and accelerated small-RFQ submission](0031-selected-issuer-boundary-and-small-rfq-submit.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

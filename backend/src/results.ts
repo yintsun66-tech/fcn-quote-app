@@ -134,9 +134,14 @@ async function loadRfqStatus(
   ).bind(rfqId, rfqId, rfq.current_ranking_version)) - 1 : -1;
   const quoteStateAt = options.includeProvisionalQuoteState && isProvisionalWorkflow(rfq)
     ? statements.push(env.DB.prepare(
-      `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
-         FROM issuer_quotes WHERE rfq_id = ?`
-    ).bind(rfqId)) - 1
+       `SELECT COUNT(*) AS quote_count, MAX(created_at) AS latest_quote_at
+          FROM issuer_quotes q
+         WHERE q.rfq_id = ?
+           AND EXISTS (
+             SELECT 1 FROM rfq_expected_issuers expected
+              WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+           )`
+     ).bind(rfqId)) - 1
     : -1;
   const batched = await env.DB.batch<Record<string, unknown>>(statements);
   const issuers = (batched[issuersAt]?.results ?? []) as {
@@ -200,8 +205,18 @@ async function snapshotDigest(
                       || COALESCE(a.completed_at, '') || '|' || COALESCE(a.expires_at, '') AS d
                  FROM generated_artifacts a WHERE a.rfq_id = r.id
                 ORDER BY a.trade_code, a.created_at, a.id)) AS artifact_digest,
-            (SELECT COUNT(*) FROM issuer_quotes q WHERE q.rfq_id = r.id) AS quote_count,
-            (SELECT MAX(q.created_at) FROM issuer_quotes q WHERE q.rfq_id = r.id) AS latest_quote_at,
+            (SELECT COUNT(*) FROM issuer_quotes q
+              WHERE q.rfq_id = r.id
+                AND EXISTS (
+                  SELECT 1 FROM rfq_expected_issuers expected
+                   WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+                )) AS quote_count,
+            (SELECT MAX(q.created_at) FROM issuer_quotes q
+              WHERE q.rfq_id = r.id
+                AND EXISTS (
+                  SELECT 1 FROM rfq_expected_issuers expected
+                   WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+                )) AS latest_quote_at,
             (SELECT COUNT(*) FROM inbound_messages m
               WHERE m.rfq_id = r.id AND m.status = 'LATE_REPLY') AS late_reply_count,
             (SELECT MAX(COALESCE(m.normalized_at, m.received_at)) FROM inbound_messages m
@@ -302,11 +317,17 @@ async function loadRfqResultsPayload(
       WHERE e.rfq_id = ? AND run.version = ? ORDER BY e.trade_id, e.issuer`
   ).bind(rfqId, rfq.current_ranking_version)) - 1 : -1;
   const quotesAt = isProvisional || ranked ? statements.push(env.DB.prepare(
-    `SELECT id, trade_id, issuer, issuer_display_name, status, received_at,
-             strike_pct, ko_barrier_pct, coupon_pa_pct, comparable_price_pct,
-             ki_barrier_pct, normalization_warnings_json, rejection_reason
-        FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
-  ).bind(rfqId)) - 1 : -1;
+    `SELECT q.id, q.trade_id, q.issuer, q.issuer_display_name, q.status, q.received_at,
+             q.strike_pct, q.ko_barrier_pct, q.coupon_pa_pct, q.comparable_price_pct,
+             q.ki_barrier_pct, q.normalization_warnings_json, q.rejection_reason
+        FROM issuer_quotes q
+       WHERE q.rfq_id = ?
+         AND EXISTS (
+           SELECT 1 FROM rfq_expected_issuers expected
+            WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+         )
+       ORDER BY q.received_at, q.id`
+   ).bind(rfqId)) - 1 : -1;
   // One request, one transaction: the trades, the ranking rows and the quotes are guaranteed to
   // come from the same instant, which concurrent statements did not guarantee.
   const batched = await env.DB.batch<Record<string, unknown>>(statements);

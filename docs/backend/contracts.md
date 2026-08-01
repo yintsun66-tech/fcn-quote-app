@@ -142,9 +142,23 @@ private R2 keys or message IDs.
 
 Creates a draft RFQ containing 1 to 20 trades. The server assigns RFQ and trade IDs and determines each trade's single target field.
 
+### `POST /api/v1/rfqs/:rfqId/validate`
+
+Revalidates the persisted trades, freezes their matching keys, and moves a draft RFQ to
+`VALIDATED`.
+
 ### `POST /api/v1/rfqs/:rfqId/send`
 
-Validates and freezes the RFQ, snapshots expected issuers/outbound batches, and queues sending. Requires an idempotency key. A second request with the same key returns the original operation result.
+Requires a validated RFQ, snapshots selected expected issuers/outbound batches, and queues sending.
+Requires an idempotency key. A second request with the same key returns the original operation
+result.
+
+### `POST /api/v1/rfqs/submit`
+
+Accepts `{ trades, issuers }` and performs the existing create → validate → send workflow in one
+browser round trip. It requires same-origin, CSRF and an idempotency key. Deterministic child keys
+make a retry resume the same RFQ rather than create or dispatch a duplicate. This endpoint is
+additive; the three individual endpoints remain supported.
 
 ### User read endpoints
 
@@ -178,8 +192,9 @@ count. It never returns another user's RFQ or raw email content.
 
 Artifacts are keyed to an exact current-version quote choice (ADR 0015): each `artifacts[]` entry
 carries `tradeCode`, `quoteId`, `issuer`, `rank`, `isCustom`, `isDefault`, `status`, `downloadUrl`,
-and `previewUrl` (`?preview=1` renders inline). The deterministic rank-one artifact is queued at
-finalization; ranks 1–4 and the server-validated custom-fifth candidate are optional.
+and `previewUrl` (`?preview=1` renders inline). Images are created on demand for ranks 1–4 or a
+server-validated custom-fifth candidate; the browser rasterizes first and may fall back to the
+idempotent server-render path.
 
 While an RFQ is `WAITING`, `PARTIAL`, or `FINALIZING`, `GET /results` returns
 `rfq.isProvisional: true`, `allTradesHaveFiveValidQuotes`, the compatibility field
@@ -187,6 +202,9 @@ While an RFQ is `WAITING`, `PARTIAL`, or `FINALIZING`, `GET /results` returns
 `validQuoteCount`/`lastUpdatedAt`. Each trade returns automatic `rankings` for economic ranks 1–4
 and `alternateQuotes`, containing one best eligible quote per issuer outside those ranks. These
 values use the final ranking algorithm but are not written to `ranking_runs` or `ranking_results`.
+Both provisional and finalized candidate sets are restricted to the immutable
+`rfq_expected_issuers` snapshot. A shared BMJB reply from an issuer the user did not select is kept
+for audit but cannot appear in rankings, custom-fifth choices or quote-card authorization.
 
 Status payloads expose `mailGraceStartsAt`, the actual `deadlineAt`, `hasLateReplies`, and
 `hasUnrankedLateReplies`. At `mailGraceStartsAt` the UI remains provisional for sixty seconds and
@@ -430,7 +448,8 @@ For issuer fields already expressed as Note Price/Cost/Offer Price, the issuer p
 
 ## Ranking contract
 
-Ranking is independent for each RFQ trade and compares only quotes matched to that immutable trade.
+Ranking is independent for each RFQ trade and compares only quotes matched to that immutable trade
+whose issuer exists in the RFQ's immutable `rfq_expected_issuers` snapshot.
 
 | Target | Direction |
 | --- | --- |
@@ -458,11 +477,14 @@ Every finalized result records:
 ## Artifact contract
 
 Generated quote images are tied to a finalized ranking version. The deterministic
-`is_image_winner = 1` quote is queued automatically for each trade. The owner may request an image
+`is_image_winner = 1` quote identifies the default choice, but images are generated on demand unless
+the explicit compatibility switch `AUTO_RANK_ONE_IMAGE="1"` is enabled. The owner may request an image
 for an exact rank 1–4 quote or for one server-returned custom-fifth candidate. A custom candidate
 must belong to the same trade, be the issuer's best eligible quote, and come from an issuer absent
 from ranks 1–4. Arbitrary, rejected, invalid, unmatched or unrecalculated-late quote IDs remain
-unavailable. Each artifact is rendered as a mobile-portrait PNG using that issuer's theme.
+unavailable, as do quotes from issuers absent from `rfq_expected_issuers`. Each card uses a
+mobile-portrait layout and that issuer's theme; the browser rasterizes it locally first, with the
+private server artifact path retained as fallback.
 
 A failed artifact can be re-requested by its owner through the same idempotent ranked-quote
 endpoint. The existing artifact/job is reset and re-enqueued; no duplicate artifact is created.

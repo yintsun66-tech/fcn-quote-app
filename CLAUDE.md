@@ -69,6 +69,10 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   window, not the complete hard deadline. `RFQ_MAIL_GRACE_SECONDS=60` extends persisted
   `deadline_at` and the Durable Object alarm to 960 seconds. During the final minute the UI shows
   `正在等待最後郵件轉送`, stays provisional, and must not allow early finalization.
+- ADR 0031 makes `rfq_expected_issuers` the ranking and quote-card authorization boundary. Shared
+  BMJB replies from unselected issuers remain auditable but must never enter provisional/final
+  results, custom-fifth choices or images. `POST /api/v1/rfqs/submit` is the one-round-trip wrapper;
+  keep the individual create/validate/send endpoints compatible.
 - Public results show economic ranks 1–4 plus a server-returned custom fifth issuer outside those
   ranks. The database still persists the first five economic ranks for compatibility/audit.
   Never authorize an arbitrary quote ID only because the browser submitted it.

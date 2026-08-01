@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { sha256Text } from "../src/crypto";
 import { outboundArchiveKey } from "../src/admin-outbound";
 import { processOutboundEmailJob, sendRfq } from "../src/outbound";
+import { submitRfq } from "../src/rfq-submit";
 import { getRfqStatus } from "../src/results";
 import type { AppEnv, OutboundEmailJob, SessionContext } from "../src/types";
 import { EMAIL_INSTITUTIONS, branchSubjectLabel } from "../shared/email-formats.js";
@@ -222,5 +223,57 @@ describe("outbound RFQ email workflow", () => {
       { batch_code: "BMJB", base_subject: `BMJB[詢價]FCBKTPE: DAC(T+7) ${branch}` },
       { batch_code: "SG", base_subject: `SG[詢價]FCBKTPE: DRA(T+7) ${branch}` }
     ]);
+  });
+
+  it("creates, validates and queues a selective RFQ in one idempotent request", async () => {
+    const key = `submit-workflow-${crypto.randomUUID()}`;
+    const body = JSON.stringify({
+      issuers: ["BNP", "UBS", "MS"],
+      trades: [{
+        product: "FCN",
+        currency: "USD",
+        tradeDate: "01-Aug-26",
+        effectiveDateOffsetCalendarDays: 7,
+        tenorMonths: 6,
+        guaranteedPeriodsMonths: 1,
+        underlyings: ["AAPL UW"],
+        strikePct: 85,
+        koType: "Daily Memory",
+        koBarrierPct: 100,
+        couponPaPct: null,
+        upfrontOrNotePricePct: 98,
+        barrierType: "NONE",
+        kiBarrierPct: null,
+        observationFrequencyMonths: 1,
+        otc: "Note"
+      }]
+    });
+    const makeRequest = () => new Request(`${BASE_URL}/api/v1/rfqs/submit`, {
+      method: "POST",
+      headers: {
+        origin: BASE_URL,
+        cookie: `__Host-fcn_csrf=${RAW_CSRF}`,
+        "x-csrf-token": RAW_CSRF,
+        "idempotency-key": key,
+        "content-type": "application/json"
+      },
+      body
+    });
+    const queuedBefore = queued.length;
+    const first = await submitRfq(makeRequest(), appEnv, session);
+    expect(first.status).toBe(202);
+    const payload = await first.json<{ rfq: { id: string; expectedIssuerCount: number; outboundBatchCount: number } }>();
+    expect(payload.rfq).toMatchObject({ expectedIssuerCount: 3, outboundBatchCount: 2 });
+    expect(queued).toHaveLength(queuedBefore + 2);
+
+    const second = await submitRfq(makeRequest(), appEnv, session);
+    expect(second.status).toBe(202);
+    expect(await second.json()).toMatchObject({ rfq: { id: payload.rfq.id } });
+    const counts = await testEnv.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM rfq_expected_issuers WHERE rfq_id = ?) AS issuer_count,
+        (SELECT COUNT(*) FROM outbound_email_batches WHERE rfq_id = ?) AS batch_count`
+    ).bind(payload.rfq.id, payload.rfq.id).first<{ issuer_count: number; batch_count: number }>();
+    expect(counts).toEqual({ issuer_count: 3, batch_count: 2 });
   });
 });

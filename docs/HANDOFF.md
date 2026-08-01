@@ -4,6 +4,171 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## Previous close is working in production (verified 2026-08-01)
+
+`TWELVE_DATA_API_KEY` was configured and the Worker deployed as
+`7ea7c41e-ae32-4610-92c5-39f879779919`. The operator opened one analysis page, and the cache row was
+then read rather than trusted:
+
+```
+equity:daily:v2:TSM   status=FRESH   last_error_code=null
+provider=TWELVE_DATA  providerAttempts=[]
+tradingDate=2026-07-31  closePrice=404.25  priorTradingDate=2026-07-30
+```
+
+First choice answered with no fallback. The value was **cross-checked against an independent pull of
+the same symbol made earlier in the session from a different provider entirely**, which reported
+2026-07-31 → 404.25 and 2026-07-30 → 403.31. Two unrelated sources agreeing on both the price and
+the session date is what confirms the New York date handling and the completed-session rule — a
+single number in the right shape would not have.
+
+**This closes the manual previous-close entry.** The chain to get here was: the failure could not be
+diagnosed because the evidence self-destructed → fix the retention first → then the recorded reasons
+eliminated Yahoo and Alpha Vantage in one reading → configure the one provider left.
+
+Still true: Alpha Vantage remains last in the chain and is still broken; nothing depends on it now.
+
+## The diagnostic worked, and it removed Yahoo (2026-08-01)
+
+The first real lookup after the provider chain shipped still produced no price — and for the first
+time the reason was recorded rather than erased:
+
+```
+equity:daily:v2:TSM  status=ERROR
+EQUITY_DAILY_UNAVAILABLE (TWELVE_DATA=TWELVE_DATA_NOT_CONFIGURED,
+                          YAHOO=UPSTREAM_RATE_LIMITED,
+                          ALPHA_VANTAGE=ALPHA_VANTAGE_RATE_LIMITED)
+```
+
+Three facts came out of one row:
+
+- **Yahoo is not usable from a Worker.** The same request returns **HTTP 200 from a residential
+  address and 429 from Cloudflare's egress** — measured both ways on the same symbol, minutes apart.
+  Yahoo rate-limits shared datacenter IPs. It was recommended and shipped as the keyless fallback on
+  the strength of a local `curl`, which did not represent the runtime at all. **A local test of an
+  outbound dependency proves nothing about this Worker.** Yahoo has been removed from the chain and
+  a comment at the call site records why, so it is not re-added as an easy win.
+- **Alpha Vantage's long-standing failure is finally named**: `ALPHA_VANTAGE_RATE_LIMITED`, which is
+  how its `Information` response is mapped. The usage counter shows one or two requests a day, far
+  below any quota, so the likelier readings are an unactivated key or an endpoint that is no longer
+  free — not real over-use. Not worth further investigation; it is last in the chain.
+- **Twelve Data is the only remaining path** and needs a key (`TWELVE_DATA_API_KEY`, free tier, 800
+  credits/day against a real load of tens of requests). Until it is set, the previous close stays
+  manual.
+
+The chain is now Twelve Data → Alpha Vantage. Migration `0017`'s CHECK still lists `YAHOO`, which is
+harmless and deliberately left alone: an applied migration is not edited.
+
+Verified after removal: 27 test files / **197 tests**, typecheck clean, dry-run build clean.
+
+## Previous close automated: why it was broken, and a provider chain (deployed 2026-08-01)
+
+The manual entry of US closing prices was traced before anything was replaced, and the finding
+changes what the fix had to be.
+
+**The provider was not the whole problem — the diagnosis was.** Production D1 showed
+`market_provider_daily_usage` recording Alpha Vantage requests every day, and `public_data_cache`
+holding six SEC rows and **not one Alpha Vantage row of any status, including `ERROR`**. The reason:
+a failed refresh writes an `ERROR` row with `stale_until = now + 10 minutes`, and
+`cleanupExpiredMarketData` — which runs on the **two-minute** cron — deletes any row whose
+`stale_until` has passed. Every failure was therefore erased about ten minutes after it happened.
+`stale_until` was gating both *when to retry* and *when to delete*, which are not the same question.
+That is why the feature could sit broken for weeks with nobody able to say why.
+
+**Swapping providers without fixing that would have reproduced the same blindness**, so it was fixed
+first: an `ERROR` row is now kept for seven days (retry timing unchanged), and `last_error_code`
+carries per-provider detail rather than a single coarse code.
+
+**Sources were tested, not assumed.** Stooq is dead for this purpose — it now serves a
+proof-of-work bot challenge that a Worker cannot pass and that we would not bypass. Yahoo's keyless
+chart endpoint and `api.nasdaq.com` both answer today. Free tiers at Twelve Data, Finnhub, Polygon
+and EODHD all exceed what this needs: with a 24-hour D1 cache the real volume is on the order of
+tens of requests a day.
+
+Two traps were found by measurement and are now guarded:
+
+1. **Yahoo's `meta.chartPreviousClose` is not the previous session's close.** Measured on AAPL: the
+   field read 325.89 while 07-30 closed at 333.43 and 07-31 at 308.91. It is the close before the
+   *requested range* begins, so a seven-day range reports a week-old price. Only the
+   timestamp/close arrays give per-session closes.
+2. **A "previous close" convenience field answers the wrong question here.** A Taipei morning is the
+   previous New York evening: the session the operator means is dated *today* in New York, so
+   Polygon's `/prev` or Finnhub's `pc` would both return the session before it. The implementation
+   takes a daily series and selects the last bar whose session has actually closed
+   (`isCompletedSession`, 16:15 New York, via the runtime's time-zone database so DST is handled).
+
+What was built: a provider chain **Twelve Data → Yahoo → Alpha Vantage**, first success wins, each
+failure carried forward in `providerAttempts` and into the stored diagnostic. One shared validation
+gate for every provider's bars, so a new source cannot introduce a zero or a string price into the
+derived metrics. Per-provider daily budgets, so a fallback cannot spend the primary's allowance. The
+cache key and `source` are provider-independent (`EQUITY_DAILY`), and the payload records which
+provider actually answered — surfaced in the UI, because a price whose source is invisible invites
+the reader to assume it came from wherever they last configured.
+
+The API gains `marketContext.equityDaily`; `marketContext.alphaVantage` remains as a deprecated
+alias because the Worker and the static front end deploy separately.
+
+**Migration `0017` is required and not yet applied** — `source` and `provider` both carry CHECK
+constraints that admit only the old provider names, so the new ones cannot be written without it. It
+copies rows, adds no financial record and deletes nothing.
+
+Verified: typecheck clean, **27 test files / 197 tests**, dry-run build binds the new limits,
+`node --check` on both front-end bundles. New tests pin the session-close rule, the in-progress-bar
+exclusion, the fallback order with recorded attempts, and that a recent failure survives the sweep
+while an old one does not. **Not deployed, and no real symbol has been fetched from a new provider
+in production.**
+
+## First real LINE push was rejected 429 — diagnosis and instrumentation
+
+A real follow-board publication finally happened, so the LINE path ran for the first time. It did
+**not** deliver, and the audit trail shows exactly where it stopped:
+
+```
+06:03:21.917Z  FOLLOW_BOARD_PRODUCT_PUBLISHED  PBZJ / DBS / expires 2026-07-31
+06:03:25.746Z  FOLLOW_BOARD_LINE_PUSHED        {"productCount":1,"status":429,"reason":"HTTP_429"}
+```
+
+**The integration works.** The publication committed, the hook fired 3.8 seconds later, and LINE
+answered with a definitive status. That rules out the whole first tier of suspects: the flag was on,
+the Worker reached the push, the credentials were accepted (a bad token or group id is 401/400, not
+429), and nothing timed out. The publication ran on `5abc0baa`, before that day's performance
+deployment, so none of the deadline work is implicated.
+
+The operator then confirmed with LINE's quota API that the monthly message allowance was **not**
+exhausted — so the obvious explanation for a 429 is wrong, and the remaining causes cannot be told
+apart from a status code alone. **That is a gap in our own instrumentation, not in LINE.** The audit
+recorded the status and deliberately discarded the response body, and LINE's `message` field is the
+only thing that distinguishes a monthly cap from a rate limit.
+
+Two changes followed:
+
+- **`safeProviderMessage` records LINE's explanation.** Only the `message` string from LINE's JSON
+  error object, truncated to 200 characters. A body that is not that shape is dropped rather than
+  stored verbatim, and any LINE identifier inside the message is redacted to `[id]` first — the
+  group id must never reach an audit row, however it arrives. A test pins each of those cases.
+- **A 429 or 5xx is retried once**, honouring `Retry-After` up to a five-second cap. The retry
+  reuses **the same `x-line-retry-key`**, which is what that header is for: if an attempt reached
+  LINE but the response was lost, the retry is de-duplicated instead of delivering twice. A fresh
+  key per attempt would have defeated it. Non-429 4xx responses are not retried — they will fail
+  identically. Before this, a failed push simply lost the message: the publication had already
+  committed and nothing tried again.
+
+The audit now also records `attempts`. Verified: 27 test files / **194 tests**, typecheck clean,
+dry-run build clean. Deployed as Worker **`08adb175-d1b1-44eb-8a97-42588ad669d0`** with every
+variable unchanged (`LINE_PUSH_ENABLED ("1")`, `LINE_WEBHOOK_ENABLED ("0")`,
+`RETENTION_ENABLED ("0")`); post-deploy checks: health 200 on both domains, unauthenticated snapshot
+401, manifest without a PIN 401, LINE webhook 404.
+
+**The cause of the 429 is still unknown.** Nothing here fixes it — the change makes the *next* one
+explain itself. When the next follow-board publication runs, read `providerMessage` on the
+`FOLLOW_BOARD_LINE_PUSHED` event before changing any code:
+
+- a monthly-cap message means the LINE plan is the constraint, not this repository;
+- a rate-limit message means the opposite, and would be surprising at five pushes a day;
+- `attempts: 2` with a success means the retry did its job and no action is needed.
+
+A read-only `GET /v2/bot/info` against the channel may identify it sooner.
+
 ## Current state at a glance
 
 This document is long and append-only: each section records what was true on its own date. **This
@@ -13,9 +178,9 @@ not be edited to match later reality.
 | | |
 |---|---|
 | Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
-| Deployed Worker | code from `ca46deee-da1c-4aab-91e6-17a772181bfd`; a later asset-only republish serves it. **Resolve the live id from `wrangler deployments list`, never from this table** |
-| Remote D1 | migrations applied through `0016` |
-| Verification | 27 test files / 191 tests; typecheck (source + test) and dry-run build clean |
+| Deployed Worker | `7ea7c41e-ae32-4610-92c5-39f879779919`. **Resolve the live id from `wrangler deployments list`, never from this table** |
+| Remote D1 | migrations applied through `0017` |
+| Verification | 27 test files / 197 tests; typecheck (source + test) and dry-run build clean |
 | GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
 | `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
 | `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |
@@ -30,10 +195,9 @@ working tree, so `main` and the live Worker can diverge at any time.
 Distinguish these from bugs. Each is code that passes tests and has been deployed, but has not yet
 run for real:
 
-- **The LINE follow-board push.** No follow-board publication has happened since it was enabled, so
-  no message has been observed reaching the group. The next real publication is the first proof; if
-  nothing arrives, read the HTTP status from the `FOLLOW_BOARD_LINE_PUSHED` audit event — a 4xx
-  points at `LINE_GROUP_ID`, a 401 at the access token.
+- **Delivery to the LINE group.** The push path itself is now proven to run — one real publication
+  reached LINE — but **no message has ever been delivered**: LINE answered 429 and the cause is
+  still unidentified. See the 429 section above.
 - **Both Browser Rendering deadlines and the follow-board render budget.** No render job has run
   since they were added.
 - **The snapshot digest.** No real browser has polled `/snapshot` since the rewrite; it has unit
@@ -1863,7 +2027,7 @@ Results:
 
 - JavaScript syntax: passed.
 - TypeScript source and test checks: passed.
-- Full test suite: **27 files / 191 tests passed**.
+- Full test suite: **27 files / 194 tests passed**.
 - Cloudflare Worker dry-run build: passed with 18 public assets.
 - Current production readback (code deployed as `ca46deee-da1c-4aab-91e6-17a772181bfd`):
   `/api/v1/health` 200 on both `api.` and `app.`; an unauthenticated `/snapshot` 401; the public

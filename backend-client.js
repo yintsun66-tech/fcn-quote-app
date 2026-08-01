@@ -634,10 +634,13 @@ import {
     const host = container.querySelector("[data-market-context]");
     if (!host) return;
     const sec = marketContext?.sec;
-    const alphaVantage = marketContext?.alphaVantage;
+    // The Worker and this file deploy separately, so read the new field but keep accepting the old
+    // one until both sides are known current. The old name is also a lie now: the close may come
+    // from any provider in the chain, which is why `equity.provider` is displayed.
+    const equityDaily = marketContext?.equityDaily ?? marketContext?.alphaVantage;
     const company = sec?.data?.company;
     const filings = Array.isArray(sec?.data?.recentFilings) ? sec.data.recentFilings : [];
-    const equity = alphaVantage?.data;
+    const equity = equityDaily?.data;
     const secContent = company
       ? `<article class="backend-market-context-card">
           <header><div><p class="eyebrow">SEC EDGAR</p><h3>${escapeHtml(company.companyName)}</h3></div><span>${escapeHtml(publicSourceStatus(sec))}</span></header>
@@ -650,9 +653,12 @@ import {
           <small>資料日期 ${escapeHtml(sec.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(sec.fetchedAt))}${sec.isStale ? "｜資料已過期，暫供參考" : ""}</small>
         </article>`
       : `<article class="backend-market-context-card"><header><h3>SEC EDGAR</h3><span>${escapeHtml(publicSourceStatus(sec))}</span></header><p>目前無法取得此標的的 SEC 公司與申報資料。</p></article>`;
+    // Naming the provider matters: the chain can fall back, and a price whose source is invisible
+    // invites the reader to assume it came from wherever they last remember configuring.
+    const providerLabel = String(equity?.provider || "").replace(/_/g, " ") || "收盤價來源";
     const alphaContent = equity
       ? `<article class="backend-market-context-card backend-alpha-card">
-          <header><div><p class="eyebrow">ALPHA VANTAGE</p><h3>${escapeHtml(equity.symbol)} 前一交易日</h3></div><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header>
+          <header><div><p class="eyebrow">${escapeHtml(providerLabel)}</p><h3>${escapeHtml(equity.symbol)} 前一交易日</h3></div><span>${escapeHtml(publicSourceStatus(equityDaily))}</span></header>
           <strong class="backend-market-close">USD ${escapeHtml(marketNumber(equity.closePrice, 4))}</strong>
           <small>交易日 ${escapeHtml(equity.tradingDate)}｜較前收 ${escapeHtml(marketPercent(equity.dailyChangePct))}</small>
           <dl>
@@ -661,9 +667,9 @@ import {
             <div><dt>20日歷史波動</dt><dd>${escapeHtml(marketNumber(equity.realizedVolatility20dPct))}%</dd></div>
             <div><dt>20日高低區間</dt><dd>${escapeHtml(marketNumber(equity.range20dPct))}%</dd></div>
           </dl>
-          <small>資料日期 ${escapeHtml(alphaVantage.sourceAsOf || equity.tradingDate)}｜擷取 ${escapeHtml(formatDateTime(alphaVantage.fetchedAt))}${alphaVantage.isStale ? "｜資料已過期，暫供參考" : ""}</small>
+          <small>資料日期 ${escapeHtml(equityDaily.sourceAsOf || equity.tradingDate)}｜擷取 ${escapeHtml(formatDateTime(equityDaily.fetchedAt))}${equityDaily.isStale ? "｜資料已過期，暫供參考" : ""}</small>
         </article>`
-      : `<article class="backend-market-context-card"><header><h3>Alpha Vantage 前一交易日</h3><span>${escapeHtml(publicSourceStatus(alphaVantage))}</span></header><p>目前無法取得此標的的前一交易日股價。</p></article>`;
+      : `<article class="backend-market-context-card"><header><h3>前一交易日收盤價</h3><span>${escapeHtml(publicSourceStatus(equityDaily))}</span></header><p>目前無法取得此標的的前一交易日股價。</p></article>`;
     host.innerHTML = `<div class="backend-market-context-grid">${secContent}${alphaContent}</div>
       <p class="backend-market-source-note">SEC／Alpha Vantage 資料僅供公開資訊參考。前收可作為上方試算的起始值，但不會寫回詢價條件、正式排名或報價圖。</p>`;
   }
@@ -745,9 +751,9 @@ import {
       try {
         const payload = await marketContextRequest(descriptor);
         if (state.analysisInput !== input) return;
-        const equity = payload.marketContext?.alphaVantage?.data;
+        const equity = (payload.marketContext?.equityDaily ?? payload.marketContext?.alphaVantage)?.data;
         if (!equity || !Number.isFinite(Number(equity.closePrice))) {
-          fields.source.textContent = "Alpha Vantage 暫時無法提供前一交易日收盤價，請手動輸入。";
+          fields.source.textContent = "暫時無法取得前一交易日收盤價，請手動輸入。";
           return;
         }
         if (parseIndicativeSpot(fields.spot?.value) === null) {

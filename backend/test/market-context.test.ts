@@ -4,7 +4,8 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import {
   cleanupExpiredMarketData,
-  fetchAlphaEquityContext,
+  fetchEquityDailyContext,
+  isCompletedSession,
   fetchSecFilings,
   fetchSecInstrument,
   getCachedPublicData,
@@ -86,7 +87,36 @@ function publicDataFetcher(onRequest?: (url: URL) => void): typeof fetch {
         }))
       });
     }
+    if (url.hostname === "api.twelvedata.com") {
+      return jsonResponse({
+        status: "ok",
+        values: Array.from({ length: 25 }, (_, index) => {
+          const date = new Date(Date.UTC(2026, 6, 28 - index)).toISOString().slice(0, 10);
+          const close = 300 - index;
+          return {
+            datetime: date,
+            open: String(close - 1),
+            high: String(close + 2),
+            low: String(close - 3),
+            close: String(close),
+            volume: String(3_000_000 - index * 10_000)
+          };
+        })
+      });
+    }
     return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+}
+
+// Only the hosts named here answer; everything else 404s, so a test can force one provider to fail.
+function equityFetcher(allowed: ("twelve" | "alpha")[]): typeof fetch {
+  const inner = publicDataFetcher();
+  return (async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+    const host = url.hostname;
+    if (host === "api.twelvedata.com" && !allowed.includes("twelve")) return new Response("no", { status: 500 });
+    if (host === "www.alphavantage.co" && !allowed.includes("alpha")) return new Response("no", { status: 500 });
+    return inner(input, init);
   }) as typeof fetch;
 }
 
@@ -167,11 +197,58 @@ describe("official public market context", () => {
     expect(filings.data.recentFilings.every(item => item.officialUrl.startsWith("https://www.sec.gov/Archives/"))).toBe(true);
   });
 
-  it("normalizes Alpha Vantage previous close and derives daily market metrics", async () => {
-    const equity = await fetchAlphaEquityContext(testEnv, "AAPL", publicDataFetcher());
+  // A bar for a session still in progress carries the last traded price in its close field. Using it
+  // as "the previous close" is the failure this rule exists to prevent, and it would be invisible:
+  // the number looks perfectly plausible.
+  it("treats a session as closed only after the New York close", () => {
+    const duringSession = new Date("2026-07-28T18:00:00.000Z"); // 14:00 New York
+    expect(isCompletedSession("2026-07-28", duringSession)).toBe(false);
+    expect(isCompletedSession("2026-07-27", duringSession)).toBe(true);
+
+    const afterClose = new Date("2026-07-28T20:30:00.000Z"); // 16:30 New York
+    expect(isCompletedSession("2026-07-28", afterClose)).toBe(true);
+
+    // A Taipei morning is the previous New York evening: the session that just closed is dated
+    // *today* in New York, which a naive "previous calendar day" rule would skip.
+    const taipeiMorning = new Date("2026-07-29T01:00:00.000Z"); // 09:00 Taipei, 21:00 New York 07-28
+    expect(isCompletedSession("2026-07-28", taipeiMorning)).toBe(true);
+    expect(isCompletedSession("2026-07-29", taipeiMorning)).toBe(false);
+  });
+
+  it("never returns an in-progress session as the previous close", async () => {
+    // "Now" is inside the 2026-07-28 session, so that bar must be dropped and 07-27 used.
+    const equity = await fetchEquityDailyContext(
+      testEnv, "AAPL", equityFetcher(["alpha"]), new Date("2026-07-28T18:00:00.000Z")
+    );
+    expect(equity.data.tradingDate).toBe("2026-07-27");
+    expect(equity.data.closePrice).toBe(199);
+  });
+
+  it("prefers the keyed provider, and records what the others said when it falls back", async () => {
+    // No Twelve Data key is configured in the test environment, so the chain must fall through.
+    const fallback = await fetchEquityDailyContext(testEnv, "AAPL", equityFetcher(["alpha"]));
+    expect(fallback.data.provider).toBe("ALPHA_VANTAGE");
+    expect(fallback.data.closePrice).toBe(200);
+    expect(fallback.data.providerAttempts.join(" ")).toContain("TWELVE_DATA=TWELVE_DATA_NOT_CONFIGURED");
+
+    const keyed = { ...testEnv, TWELVE_DATA_API_KEY: "twelvedatatestkey123" } as unknown as AppEnv;
+    const viaTwelve = await fetchEquityDailyContext(keyed, "AAPL", equityFetcher(["twelve", "alpha"]));
+    expect(viaTwelve.data.provider).toBe("TWELVE_DATA");
+    expect(viaTwelve.data.closePrice).toBe(300);
+    expect(viaTwelve.data.providerAttempts).toEqual([]);
+
+    // Everything down: the caller gets one stable code, and the per-provider detail travels with it
+    // so the stored diagnostic can name each failure instead of only "no price".
+    await expect(fetchEquityDailyContext(testEnv, "AAPL", equityFetcher([])))
+      .rejects.toMatchObject({ code: "EQUITY_DAILY_UNAVAILABLE" });
+  });
+
+  it("normalizes the previous close and derives daily market metrics", async () => {
+    const equity = await fetchEquityDailyContext(testEnv, "AAPL", equityFetcher(["alpha"]));
     expect(equity.sourceAsOf).toBe("2026-07-28");
     expect(equity.data).toMatchObject({
       symbol: "AAPL",
+      provider: "ALPHA_VANTAGE",
       tradingDate: "2026-07-28",
       closePrice: 200,
       priorTradingDate: "2026-07-27",
@@ -184,40 +261,48 @@ describe("official public market context", () => {
     expect(equity.data.range20dPct).toBeGreaterThan(0);
   });
 
-  it("trims a copied Alpha Vantage key and rejects an invalid key before any upstream request", async () => {
+  it("trims a copied provider key and rejects an invalid one before any upstream request", async () => {
     let observedKey = "";
-    const trimmingFetcher = publicDataFetcher(url => {
+    const alphaOnly = equityFetcher(["alpha"]);
+    const trimmingFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
       if (url.hostname === "www.alphavantage.co") observedKey = url.searchParams.get("apikey") ?? "";
-    });
-    await fetchAlphaEquityContext(
-      { ...testEnv, ALPHA_VANTAGE_API_KEY: "  SYNTHETIC12345678\r\n" },
+      return alphaOnly(input, init);
+    }) as typeof fetch;
+    await fetchEquityDailyContext(
+      { ...testEnv, ALPHA_VANTAGE_API_KEY: "  SYNTHETIC12345678\r\n" } as unknown as AppEnv,
       "AAPL",
       trimmingFetcher
     );
     expect(observedKey).toBe("SYNTHETIC12345678");
 
-    let requestCount = 0;
-    await expect(fetchAlphaEquityContext(
-      { ...testEnv, ALPHA_VANTAGE_API_KEY: "not a valid key" },
+    // A malformed key must be rejected without ever being put on the wire. Only the provider's own
+    // host is counted: the chain legitimately calls the earlier providers first.
+    let alphaRequests = 0;
+    await expect(fetchEquityDailyContext(
+      { ...testEnv, ALPHA_VANTAGE_API_KEY: "not a valid key" } as unknown as AppEnv,
       "AAPL",
-      (async () => {
-        requestCount += 1;
+      (async input => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+        if (url.hostname === "www.alphavantage.co") alphaRequests += 1;
         return jsonResponse({});
       }) as typeof fetch
     )).rejects.toMatchObject({
       status: 503,
-      code: "ALPHA_VANTAGE_KEY_INVALID_FORMAT"
+      code: "EQUITY_DAILY_UNAVAILABLE",
+      fieldErrors: { providerAttempts: expect.stringContaining("ALPHA_VANTAGE=ALPHA_VANTAGE_KEY_INVALID_FORMAT") }
     });
-    expect(requestCount).toBe(0);
+    expect(alphaRequests).toBe(0);
   });
 
-  it("treats Alpha Vantage informational quota responses as unavailable data", async () => {
+  it("treats an informational quota response as unavailable data and names the provider", async () => {
     const limitedFetcher = (async () => jsonResponse({
       Information: "Synthetic rate limit response that must not be exposed."
     })) as typeof fetch;
-    await expect(fetchAlphaEquityContext(testEnv, "AAPL", limitedFetcher)).rejects.toMatchObject({
+    await expect(fetchEquityDailyContext(testEnv, "AAPL", limitedFetcher)).rejects.toMatchObject({
       status: 503,
-      code: "ALPHA_VANTAGE_RATE_LIMITED"
+      code: "EQUITY_DAILY_UNAVAILABLE",
+      fieldErrors: { providerAttempts: expect.stringContaining("ALPHA_VANTAGE=ALPHA_VANTAGE_RATE_LIMITED") }
     });
   });
 
@@ -234,8 +319,12 @@ describe("official public market context", () => {
     );
     const firstPayload = await first.json<Record<string, any>>();
     expect(firstPayload.marketContext.sec.status).toBe("FRESH");
-    expect(firstPayload.marketContext.alphaVantage.status).toBe("FRESH");
-    expect(firstPayload.marketContext.alphaVantage.data.closePrice).toBe(200);
+    expect(firstPayload.marketContext.equityDaily.status).toBe("FRESH");
+    // No Twelve Data key is configured in tests, so the chain falls through to the last provider.
+    expect(firstPayload.marketContext.equityDaily.data.provider).toBe("ALPHA_VANTAGE");
+    expect(firstPayload.marketContext.equityDaily.data.closePrice).toBe(200);
+    // The deprecated alias must keep pointing at the same envelope until both sides are current.
+    expect(firstPayload.marketContext.alphaVantage).toEqual(firstPayload.marketContext.equityDaily);
 
     const unavailableFetcher = (async () => {
       throw new Error("network must not be used for a fresh cache hit");
@@ -256,7 +345,7 @@ describe("official public market context", () => {
 
   it("keeps Alpha Vantage available and retains a safe diagnostic when SEC fails", async () => {
     await testEnv.DB.prepare(
-      "DELETE FROM public_data_cache WHERE cache_key IN ('sec:instrument:v1:NVDA', 'alpha-vantage:daily:v1:NVDA')"
+      "DELETE FROM public_data_cache WHERE cache_key IN ('sec:instrument:v1:NVDA', 'equity:daily:v2:NVDA')"
     ).run();
     const delegate = publicDataFetcher();
     let alphaRequests = 0;
@@ -287,8 +376,9 @@ describe("official public market context", () => {
       errorCode: "UPSTREAM_RUNTIME_INVOCATION",
       data: null
     });
-    expect(payload.marketContext.alphaVantage.status).toBe("FRESH");
-    expect(payload.marketContext.alphaVantage.data.symbol).toBe("NVDA");
+    expect(payload.marketContext.equityDaily.status).toBe("FRESH");
+    expect(payload.marketContext.equityDaily.data.symbol).toBe("NVDA");
+    // With no Twelve Data key configured, the chain reaches its last provider exactly once.
     expect(alphaRequests).toBe(1);
 
     const beforeCleanup = await testEnv.DB.prepare(
@@ -400,19 +490,24 @@ describe("official public market context", () => {
          request_count = 2,
          updated_at = excluded.updated_at`
     ).bind(usageDate, new Date().toISOString()).run();
-    let upstreamRequests = 0;
-    await expect(fetchAlphaEquityContext(
+    let alphaRequests = 0;
+    await expect(fetchEquityDailyContext(
       { ...testEnv, ALPHA_VANTAGE_DAILY_REQUEST_LIMIT: "2" } as unknown as AppEnv,
       "AAPL",
-      (async () => {
-        upstreamRequests += 1;
+      (async input => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+        if (url.hostname === "www.alphavantage.co") alphaRequests += 1;
         return jsonResponse({});
       }) as typeof fetch
     )).rejects.toMatchObject({
       status: 503,
-      code: "ALPHA_VANTAGE_DAILY_BUDGET_EXHAUSTED"
+      code: "EQUITY_DAILY_UNAVAILABLE",
+      fieldErrors: {
+        providerAttempts: expect.stringContaining("ALPHA_VANTAGE=ALPHA_VANTAGE_DAILY_BUDGET_EXHAUSTED")
+      }
     });
-    expect(upstreamRequests).toBe(0);
+    // The budget is consulted before the request, so an exhausted day costs no upstream call.
+    expect(alphaRequests).toBe(0);
     await testEnv.DB.prepare(
       "UPDATE market_provider_daily_usage SET request_count = 0 WHERE provider = 'ALPHA_VANTAGE' AND usage_date = ?"
     ).bind(usageDate).run();
@@ -454,24 +549,48 @@ describe("official public market context", () => {
     expect(rawIdentity.results).toEqual([]);
   });
 
-  it("reports safe health counts and removes only expired cache/rate-limit rows", async () => {
+  it("reports safe health counts, and keeps a recent failure while removing an old one", async () => {
     const expired = new Date(Date.now() - 1_200_000).toISOString();
-    await testEnv.DB.prepare(
-      `INSERT INTO public_data_cache
-        (cache_key, source, symbol, data_type, normalized_payload_json, expires_at,
-         stale_until, status, updated_at)
-       VALUES ('test:expired:v1', 'SEC', 'OLD', 'TEST', '{}', ?, ?, 'ERROR', ?)`
-    ).bind(expired, expired, expired).run();
-    await testEnv.DB.prepare(
-      `INSERT INTO market_context_rate_limits
-        (request_key, scope, window_started_at, request_count, updated_at)
-       VALUES ('old-rate-limit', 'IP', ?, 1, ?)`
-    ).bind(expired, expired).run();
+    const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000).toISOString();
+    await testEnv.DB.batch([
+      // A failure recorded twenty minutes ago. Its retry window has passed, so the old sweep would
+      // have deleted it — and that is precisely how a provider could fail for weeks while leaving
+      // nothing to diagnose.
+      testEnv.DB.prepare(
+        `INSERT INTO public_data_cache
+          (cache_key, source, symbol, data_type, normalized_payload_json, expires_at,
+           stale_until, status, last_error_code, updated_at)
+         VALUES ('test:recent-error:v1', 'EQUITY_DAILY', 'NEW', 'TEST', '{}', ?, ?, 'ERROR', 'EQUITY_DAILY_UNAVAILABLE (TWELVE_DATA=TWELVE_DATA_RATE_LIMITED)', ?)`
+      ).bind(expired, expired, expired),
+      // A failure old enough that keeping it serves no one.
+      testEnv.DB.prepare(
+        `INSERT INTO public_data_cache
+          (cache_key, source, symbol, data_type, normalized_payload_json, expires_at,
+           stale_until, status, updated_at)
+         VALUES ('test:expired:v1', 'SEC', 'OLD', 'TEST', '{}', ?, ?, 'ERROR', ?)`
+      ).bind(longAgo, longAgo, longAgo),
+      testEnv.DB.prepare(
+        `INSERT INTO market_context_rate_limits
+          (request_key, scope, window_started_at, request_count, updated_at)
+         VALUES ('old-rate-limit', 'IP', ?, 1, ?)`
+      ).bind(expired, expired)
+    ]);
     const before = await marketContextHealth(testEnv);
     expect(before.expiredRows).toBeGreaterThan(0);
     expect(before.providerUsageToday).toEqual(expect.any(Array));
+
     const cleaned = await cleanupExpiredMarketData(testEnv);
     expect(cleaned.cacheRows).toBeGreaterThan(0);
     expect(cleaned.rateLimitRows).toBeGreaterThan(0);
+
+    const kept = await testEnv.DB.prepare(
+      "SELECT last_error_code FROM public_data_cache WHERE cache_key = 'test:recent-error:v1'"
+    ).first<{ last_error_code: string }>();
+    // The whole point: the reason survives long enough to be read.
+    expect(kept?.last_error_code).toContain("TWELVE_DATA=TWELVE_DATA_RATE_LIMITED");
+    const dropped = await testEnv.DB.prepare(
+      "SELECT cache_key FROM public_data_cache WHERE cache_key = 'test:expired:v1'"
+    ).first();
+    expect(dropped).toBeNull();
   });
 });

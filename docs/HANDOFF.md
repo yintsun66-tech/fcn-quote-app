@@ -4,6 +4,18 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## Merged into `main` (2026-08-01, second merge)
+
+`599a31d` merged as `9346760` (`7ef8cd5..9346760`), 12 files, including migration `0017` which was
+already applied to remote D1. Checked before merging, as before: the `merge-tree` preview produced a
+tree hash identical to the branch tree, `git diff HEAD codex/…` on the merged `main` is empty, the
+`FCN V2-main-sg` worktree was clean beforehand, and the outgoing diff carried no key or credential.
+`main` shows four commits the branch lacks; all four are merge nodes or the two old `app.js` fixes
+already absorbed by content, so nothing was lost.
+
+Re-checked afterwards: GitHub Pages still disabled on this repository (API 404, URL 404 — pushing
+`main` did not re-enable it), `fcnV2` 200, `api.` and `app.yintsun66.com` 200.
+
 ## Previous close is working in production (verified 2026-08-01)
 
 `TWELVE_DATA_API_KEY` was configured and the Worker deployed as
@@ -177,15 +189,22 @@ not be edited to match later reality.
 
 | | |
 |---|---|
-| Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
+| Source | `codex/market-analysis-phase2-4` (`599a31d`) = `main` (`9346760`), both pushed, trees identical |
 | Deployed Worker | `7ea7c41e-ae32-4610-92c5-39f879779919`. **Resolve the live id from `wrangler deployments list`, never from this table** |
 | Remote D1 | migrations applied through `0017` |
 | Verification | 27 test files / 197 tests; typecheck (source + test) and dry-run build clean |
 | GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
+| Previous close | **working** — Twelve Data, verified in production against an independent source |
 | `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
 | `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |
 | `LINE_WEBHOOK_ENABLED` | `"0"` — discovery is done; keep it off |
 | `AUTO_RANK_ONE_IMAGE` | `"0"` — quote images are on demand (ADR 0016) |
+
+Secrets configured: `EMPLOYEE_DATA_KEY`, `EMPLOYEE_LOOKUP_KEY`, `FOLLOW_BOARD_VIEW_PIN`,
+`TWELVE_DATA_API_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `LINE_GROUP_ID`.
+`ALPHA_VANTAGE_API_KEY` and `FRED_API_KEY` are still present but nothing working depends on them —
+Alpha Vantage is last in the equity chain and still failing, FRED was removed from the runtime by
+ADR 0023. Both are harmless; delete during any future secret cleanup.
 
 `main` is **not** a deployment trigger. Cloudflare is published by running `wrangler deploy` from a
 working tree, so `main` and the live Worker can diverge at any time.
@@ -195,9 +214,13 @@ working tree, so `main` and the live Worker can diverge at any time.
 Distinguish these from bugs. Each is code that passes tests and has been deployed, but has not yet
 run for real:
 
-- **Delivery to the LINE group.** The push path itself is now proven to run — one real publication
-  reached LINE — but **no message has ever been delivered**: LINE answered 429 and the cause is
-  still unidentified. See the 429 section above.
+- **Delivery to the LINE group — the one open problem.** The push path is proven to run: one real
+  publication reached LINE, 3.8 seconds after the publication committed. But **no message has ever
+  been delivered.** LINE answered 429, and the obvious readings are eliminated: the monthly quota is
+  `limited/200` with `totalUsage: 0`, the token and message shape both pass LINE's own validator, and
+  a bad token or group id would be 401/400 rather than 429. `chatMode` is `chat`, noted but not
+  established as the cause. The next push records LINE's own `message`, which is the field that
+  separates a monthly cap from a rate limit — read that before changing any code.
 - **Both Browser Rendering deadlines and the follow-board render budget.** No render job has run
   since they were added.
 - **The snapshot digest.** No real browser has polled `/snapshot` since the rewrite; it has unit
@@ -2266,17 +2289,24 @@ that the verified API/static deployment failed.
 
 ## Safe next steps
 
-**Alpha Vantage is no longer a next step.** Earlier revisions of this section made validating an
-Alpha Vantage symbol the highest-value item. The operator has since dropped the provider (see
-"Alpha Vantage abandoned"), so previous-close autofill is an **inactive feature, not an outstanding
-bug**. Do not spend a session chasing it. A replacement quote API will be chosen later.
+**The previous close is no longer a next step — it works.** Earlier revisions of this section made
+validating Alpha Vantage the highest-value item, and a later one called previous-close autofill an
+inactive feature. Both are now out of date: Twelve Data serves it and the result was verified in
+production on 2026-08-01. Alpha Vantage remains last in the chain and still fails; nothing depends
+on it. Do not spend a session on either.
 
 **Highest-value item right now: let one real follow-board publication happen and watch it.** It is
 the single event that proves several unproven paths at once — the LINE push, the server-side card
 render, the 90-second render budget and the 15-second push abort. Nothing needs to be built for it;
-it just needs to occur. If no message reaches the group, read the HTTP status from the
-`FOLLOW_BOARD_LINE_PUSHED` audit event before changing any code: a 4xx points at `LINE_GROUP_ID`, a
-401 at the access token, and `TIMEOUT` at the push abort rather than at credentials.
+it just needs to occur.
+
+If no message reaches the group, read `providerMessage` on the `FOLLOW_BOARD_LINE_PUSHED` audit
+event **before changing any code**. The previous attempt returned 429 with the plausible causes
+already eliminated — quota `limited/200` with `totalUsage: 0`, token and message shape both accepted
+by LINE's own validator — so the recorded message is the only remaining evidence. A monthly-cap
+message means the LINE plan is the constraint rather than this repository; a rate-limit message
+would be surprising at five pushes a day and worth investigating properly; `attempts: 2` with a
+success means the retry handled it and nothing needs doing.
 
 **Second: validate quote-image download on a real phone/tablet.** ADR 0017 moved rasterization
 into the requesting browser and `7f1dca3` fixed a hang that only reproduced on mobile WebKit. The

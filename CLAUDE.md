@@ -30,15 +30,15 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
 - A real RFQ, email-route change, D1 mutation, migration, commit, push, merge, or deployment
   requires explicit user authorization.
 - `feature/subject-branch-correlation` is the previous stable backend ancestor. Production source is
-  `codex/market-analysis-phase2-4`, **merged into `main` on 2026-07-31** (`748f5d9`) with a tree
-  byte-identical to the branch, so `main` now carries the full Cloudflare backend rather than the
+  `codex/market-analysis-phase2-4`, **merged into `main` again on 2026-08-01** (`9346760`) with a
+  tree byte-identical to the branch, so `main` carries the full Cloudflare backend rather than the
   old static-only set. Do not assume the two stay equal: deployment still runs `wrangler deploy`
   from a working tree, not from `main`, so the branch can move ahead again. Resolve what is
   deployed from `wrangler deployments list`, not from a branch name.
-- Production implementation commit `7abde5d` is documented by this handoff and
-  currently served by Worker `ca46deee-da1c-4aab-91e6-17a772181bfd` on 2026-07-31. Resolve the
+- Production implementation commit `599a31d` is documented by this handoff and
+  currently served by Worker `7ea7c41e-ae32-4610-92c5-39f879779919` on 2026-08-01. Resolve the
   current branch HEAD from Git rather than copying a historical handoff hash. The current
-  verification baseline is 27 test files / 191 tests. A deployment record is evidence of
+  verification baseline is 27 test files / 197 tests. A deployment record is evidence of
   Worker/static-asset publication, not evidence that real bank mail was delivered.
 - Retention (ADR 0030) is implemented but **disabled**: `RETENTION_ENABLED="0"`. Enabling it
   deletes production R2 objects and D1 rows irreversibly and requires explicit authorization. Run
@@ -84,14 +84,30 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
   onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded
   SHA-256; `.gitattributes` keeps `vendor/**` byte-exact on checkout.
-- ADR 0023 replaces the FRED runtime path with SEC plus Alpha Vantage end-of-day data; ADR 0024
-  then removes Alpha Vantage movers/rankings and keeps only per-symbol `TIME_SERIES_DAILY`.
-  Migration `0012` and the `ALPHA_VANTAGE_API_KEY` Secret name exist in production. A read-only
-  check on 2026-07-30 found three fresh SEC instrument/filing pairs, no Alpha Vantage cache row,
-  and ten historical Alpha Vantage attempts on 2026-07-29. Treat previous-close data as
-  unavailable until one current symbol produces a normalized payload. `GET /api/v1/market/ideas`
-  no longer exists; do not restore movers or change parser/cache/RFQ/ranking code to work around
-  provider entitlement. Never log, retrieve or commit the Secret value.
+- ADR 0023 replaced the FRED runtime path with SEC plus end-of-day equity data; ADR 0024 removed
+  movers/rankings and kept only a per-symbol daily series. **The previous close works as of
+  2026-08-01** and is served by **Twelve Data** (`TWELVE_DATA_API_KEY`), with Alpha Vantage last in
+  the chain and still failing. Earlier revisions of this file said to treat previous-close data as
+  unavailable; that is no longer true. `GET /api/v1/market/ideas` no longer exists; do not restore
+  movers. Never log, retrieve or commit any provider key.
+- Two rules in the equity path exist because breaking them fails **silently**, with a plausible
+  number rather than an error. Read `docs/backend/contracts.md` before touching it. (1) Take the
+  last bar whose session has actually closed — 16:15 New York, `isCompletedSession`. A Taipei
+  morning is the previous New York evening, so the session the operator means is dated *today* in
+  New York, and any "previous close" convenience field or previous-calendar-day rule returns the
+  session before it. (2) Never use Yahoo's `meta.chartPreviousClose`; it is the close before the
+  requested range begins.
+- **A local `curl` proves nothing about this Worker.** Yahoo's keyless endpoint was shipped as a
+  fallback on the strength of one, and it returns 200 to a residential address and 429 to
+  Cloudflare's shared egress — it failed every production request while passing every developer
+  test. It has been removed. Measure an outbound dependency from the Worker, or from the recorded
+  `last_error_code`, before trusting it.
+- Market refresh failures are kept for seven days (`ERROR_RETENTION_SECONDS`) and
+  `last_error_code` carries per-provider detail. Do not shorten that or let the cleanup delete
+  recent `ERROR` rows: `stale_until` used to gate both the retry and the deletion, so every failure
+  was erased ten minutes after it happened and a provider stayed broken for weeks with nothing to
+  diagnose. The same principle applies to `FOLLOW_BOARD_LINE_PUSHED`, which now records LINE's own
+  message with identifiers redacted.
 - Late replies remain immutable. Normal ranking excludes them; an RFQ owner or ADMIN may create a
   new version through the existing recalculation endpoint, which admits only finite, matched,
   non-rejected late values. Never rewrite the previous ranking version or original quote status.

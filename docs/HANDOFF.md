@@ -4,6 +4,30 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## Previous close is working in production (verified 2026-08-01)
+
+`TWELVE_DATA_API_KEY` was configured and the Worker deployed as
+`7ea7c41e-ae32-4610-92c5-39f879779919`. The operator opened one analysis page, and the cache row was
+then read rather than trusted:
+
+```
+equity:daily:v2:TSM   status=FRESH   last_error_code=null
+provider=TWELVE_DATA  providerAttempts=[]
+tradingDate=2026-07-31  closePrice=404.25  priorTradingDate=2026-07-30
+```
+
+First choice answered with no fallback. The value was **cross-checked against an independent pull of
+the same symbol made earlier in the session from a different provider entirely**, which reported
+2026-07-31 → 404.25 and 2026-07-30 → 403.31. Two unrelated sources agreeing on both the price and
+the session date is what confirms the New York date handling and the completed-session rule — a
+single number in the right shape would not have.
+
+**This closes the manual previous-close entry.** The chain to get here was: the failure could not be
+diagnosed because the evidence self-destructed → fix the retention first → then the recorded reasons
+eliminated Yahoo and Alpha Vantage in one reading → configure the one provider left.
+
+Still true: Alpha Vantage remains last in the chain and is still broken; nothing depends on it now.
+
 ## The diagnostic worked, and it removed Yahoo (2026-08-01)
 
 The first real lookup after the provider chain shipped still produced no price — and for the first
@@ -154,9 +178,9 @@ not be edited to match later reality.
 | | |
 |---|---|
 | Source | `codex/market-analysis-phase2-4` = `main` (`748f5d9`), pushed, trees identical |
-| Deployed Worker | `08adb175-d1b1-44eb-8a97-42588ad669d0`. **Resolve the live id from `wrangler deployments list`, never from this table** |
-| Remote D1 | migrations applied through `0016` |
-| Verification | 27 test files / 194 tests; typecheck (source + test) and dry-run build clean |
+| Deployed Worker | `7ea7c41e-ae32-4610-92c5-39f879779919`. **Resolve the live id from `wrangler deployments list`, never from this table** |
+| Remote D1 | migrations applied through `0017` |
+| Verification | 27 test files / 197 tests; typecheck (source + test) and dry-run build clean |
 | GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
 | `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
 | `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |

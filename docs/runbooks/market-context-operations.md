@@ -4,8 +4,9 @@ This runbook applies only after explicit migration/Secret/deployment authorizati
 used to change RFQ, ranking, mail-routing or ownership data.
 
 Current production baseline (2026-07-31): market migration `0012` and the Secret name are present;
-all repository migrations through `0016` are applied, and Worker
-`ca46deee-da1c-4aab-91e6-17a772181bfd` is deployed. The Alpha Vantage findings below are from a
+all repository migrations through `0017` are applied, and Worker
+`7ea7c41e-ae32-4610-92c5-39f879779919` is deployed. Equity previous closes now come from Twelve
+Data; the Alpha Vantage findings below are from a
 read-only check on 2026-07-30 and have not been re-measured since. That check found three fresh
 SEC instrument/filing pairs, no Alpha Vantage cache row, and ten provider attempts on 2026-07-29.
 Previous-close data is therefore still operationally unavailable. Verify one current symbol and,

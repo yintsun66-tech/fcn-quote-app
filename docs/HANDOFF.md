@@ -4,6 +4,63 @@ Updated: 2026-07-31 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
 
+## Previous close automated: why it was broken, and a provider chain (not deployed, migration pending)
+
+The manual entry of US closing prices was traced before anything was replaced, and the finding
+changes what the fix had to be.
+
+**The provider was not the whole problem — the diagnosis was.** Production D1 showed
+`market_provider_daily_usage` recording Alpha Vantage requests every day, and `public_data_cache`
+holding six SEC rows and **not one Alpha Vantage row of any status, including `ERROR`**. The reason:
+a failed refresh writes an `ERROR` row with `stale_until = now + 10 minutes`, and
+`cleanupExpiredMarketData` — which runs on the **two-minute** cron — deletes any row whose
+`stale_until` has passed. Every failure was therefore erased about ten minutes after it happened.
+`stale_until` was gating both *when to retry* and *when to delete*, which are not the same question.
+That is why the feature could sit broken for weeks with nobody able to say why.
+
+**Swapping providers without fixing that would have reproduced the same blindness**, so it was fixed
+first: an `ERROR` row is now kept for seven days (retry timing unchanged), and `last_error_code`
+carries per-provider detail rather than a single coarse code.
+
+**Sources were tested, not assumed.** Stooq is dead for this purpose — it now serves a
+proof-of-work bot challenge that a Worker cannot pass and that we would not bypass. Yahoo's keyless
+chart endpoint and `api.nasdaq.com` both answer today. Free tiers at Twelve Data, Finnhub, Polygon
+and EODHD all exceed what this needs: with a 24-hour D1 cache the real volume is on the order of
+tens of requests a day.
+
+Two traps were found by measurement and are now guarded:
+
+1. **Yahoo's `meta.chartPreviousClose` is not the previous session's close.** Measured on AAPL: the
+   field read 325.89 while 07-30 closed at 333.43 and 07-31 at 308.91. It is the close before the
+   *requested range* begins, so a seven-day range reports a week-old price. Only the
+   timestamp/close arrays give per-session closes.
+2. **A "previous close" convenience field answers the wrong question here.** A Taipei morning is the
+   previous New York evening: the session the operator means is dated *today* in New York, so
+   Polygon's `/prev` or Finnhub's `pc` would both return the session before it. The implementation
+   takes a daily series and selects the last bar whose session has actually closed
+   (`isCompletedSession`, 16:15 New York, via the runtime's time-zone database so DST is handled).
+
+What was built: a provider chain **Twelve Data → Yahoo → Alpha Vantage**, first success wins, each
+failure carried forward in `providerAttempts` and into the stored diagnostic. One shared validation
+gate for every provider's bars, so a new source cannot introduce a zero or a string price into the
+derived metrics. Per-provider daily budgets, so a fallback cannot spend the primary's allowance. The
+cache key and `source` are provider-independent (`EQUITY_DAILY`), and the payload records which
+provider actually answered — surfaced in the UI, because a price whose source is invisible invites
+the reader to assume it came from wherever they last configured.
+
+The API gains `marketContext.equityDaily`; `marketContext.alphaVantage` remains as a deprecated
+alias because the Worker and the static front end deploy separately.
+
+**Migration `0017` is required and not yet applied** — `source` and `provider` both carry CHECK
+constraints that admit only the old provider names, so the new ones cannot be written without it. It
+copies rows, adds no financial record and deletes nothing.
+
+Verified: typecheck clean, **27 test files / 197 tests**, dry-run build binds the new limits,
+`node --check` on both front-end bundles. New tests pin the session-close rule, the in-progress-bar
+exclusion, the fallback order with recorded attempts, and that a recent failure survives the sweep
+while an old one does not. **Not deployed, and no real symbol has been fetched from a new provider
+in production.**
+
 ## First real LINE push was rejected 429 — diagnosis and instrumentation
 
 A real follow-board publication finally happened, so the LINE path ran for the first time. It did

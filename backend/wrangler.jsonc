@@ -24,6 +24,8 @@
     "MARKET_CONTEXT_RATE_LIMIT_WINDOW_SECONDS": "60",
     "MARKET_CONTEXT_RATE_LIMIT_MAX_REQUESTS": "30",
     "ALPHA_VANTAGE_DAILY_REQUEST_LIMIT": "24",
+    "TWELVE_DATA_DAILY_REQUEST_LIMIT": "700",
+    "YAHOO_DAILY_REQUEST_LIMIT": "500",
     "SEC_USER_AGENT": "FCN Quote App rfq@yintsun66.com",
     // Retention is destructive and irreversible. It stays off until deliberately enabled, so a
     // deployment of the retention code alone deletes nothing.

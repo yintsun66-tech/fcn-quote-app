@@ -8,16 +8,34 @@ const SEC_TICKER_DIRECTORY_URL = "https://www.sec.gov/files/company_tickers_exch
 const SEC_SUBMISSIONS_ORIGIN = "https://data.sec.gov";
 const SEC_ARCHIVES_ORIGIN = "https://www.sec.gov";
 const ALPHA_VANTAGE_ORIGIN = "https://www.alphavantage.co";
+const TWELVE_DATA_ORIGIN = "https://api.twelvedata.com";
+const YAHOO_CHART_ORIGIN = "https://query1.finance.yahoo.com";
 const CACHE_LEASE_SECONDS = 30;
+// How long a failed source waits before it is retried.
 const ERROR_DIAGNOSTIC_SECONDS = 10 * 60;
+// How long a failed source's row is *kept* — a different question from when to retry, and the two
+// were previously the same number. `stale_until` gated both the retry and the deletion, so the
+// two-minute cleanup erased every failure ten minutes after it happened. A provider could then fail
+// for weeks while leaving nothing to diagnose: the usage counter showed requests, and the cache held
+// no row of any status. Keeping the row costs one row per symbol and is the only reason anyone can
+// answer "why is there no price?".
+const ERROR_RETENTION_SECONDS = 7 * 24 * 60 * 60;
 const INSTRUMENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SEC_DIRECTORY_BYTES = 5_000_000;
 const MAX_SEC_SUBMISSIONS_BYTES = 5_000_000;
 const MAX_ALPHA_VANTAGE_BYTES = 3_000_000;
+const MAX_EQUITY_PROVIDER_BYTES = 3_000_000;
 const TRANSIENT_UPSTREAM_STATUSES = new Set([502, 503, 504, 520]);
+// Daily bars are requested for a window, then filtered down to completed sessions. Twenty-one
+// completed sessions are needed for the 20-day derived metrics, so ask for comfortably more.
+const EQUITY_BAR_WINDOW_DAYS = 60;
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type SourceName = "SEC" | "FRED" | "ALPHA_VANTAGE";
+// The logical source stored in the cache. `EQUITY_DAILY` is deliberately provider-independent: the
+// provider that actually answered is recorded in the payload, so swapping providers does not strand
+// cached rows under a name nothing reads.
+type SourceName = "SEC" | "FRED" | "ALPHA_VANTAGE" | "EQUITY_DAILY";
+export type EquityProvider = "TWELVE_DATA" | "YAHOO" | "ALPHA_VANTAGE";
 
 const runtimeFetch: Fetcher = (input, init) => globalThis.fetch(input, init);
 
@@ -97,6 +115,11 @@ interface AlphaDailyPoint {
 
 export interface AlphaEquityContext extends AlphaDailyPoint {
   symbol: string;
+  // Which provider actually answered. The cache row's source is the provider-independent
+  // EQUITY_DAILY, so this is the only place that records it — and a reader must never assume the
+  // price came from the provider they expected.
+  provider: EquityProvider;
+  providerAttempts: string[];
   priorTradingDate: string;
   priorClosePrice: number;
   dailyChangePct: number;
@@ -142,6 +165,18 @@ function safeJson<T>(raw: string): T | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What gets written to `last_error_code`, which is the row an operator actually reads.
+ *
+ * The outward API code stays stable and coarse; this keeps the per-provider detail alongside it, so
+ * "there is no price" is never again the whole of what was recorded.
+ */
+function diagnosticCode(error: unknown): string {
+  const code = errorCode(error);
+  const attempts = error instanceof AppError ? error.fieldErrors?.providerAttempts : undefined;
+  return attempts ? `${code} (${attempts})`.slice(0, 300) : code;
 }
 
 function errorCode(error: unknown): string {
@@ -370,26 +405,35 @@ function alphaVantageKey(env: AppEnv): string {
   return apiKey;
 }
 
-async function consumeAlphaVantageBudget(env: AppEnv): Promise<void> {
+// One counter per provider, so a fallback cannot silently consume the primary's allowance and each
+// provider's own free-tier limit is respected independently.
+async function consumeProviderBudget(
+  env: AppEnv,
+  provider: EquityProvider,
+  maximum: number
+): Promise<void> {
   const now = nowIso();
   const usageDate = now.slice(0, 10);
-  const maximum = positiveInteger(env.ALPHA_VANTAGE_DAILY_REQUEST_LIMIT, 24);
   const result = await env.DB.prepare(
     `INSERT INTO market_provider_daily_usage
       (provider, usage_date, request_count, updated_at)
-     VALUES ('ALPHA_VANTAGE', ?, 1, ?)
+     VALUES (?, ?, 1, ?)
      ON CONFLICT(provider, usage_date) DO UPDATE SET
        request_count = market_provider_daily_usage.request_count + 1,
        updated_at = excluded.updated_at
      WHERE market_provider_daily_usage.request_count < ?`
-  ).bind(usageDate, now, maximum).run();
+  ).bind(provider, usageDate, now, maximum).run();
   if (Number(result.meta.changes ?? 0) !== 1) {
     throw new AppError(
       503,
-      "ALPHA_VANTAGE_DAILY_BUDGET_EXHAUSTED",
+      `${provider}_DAILY_BUDGET_EXHAUSTED`,
       "今日公開股價資料額度已用完，請使用快取資料或稍後再試。 "
     );
   }
+}
+
+async function consumeAlphaVantageBudget(env: AppEnv): Promise<void> {
+  await consumeProviderBudget(env, "ALPHA_VANTAGE", positiveInteger(env.ALPHA_VANTAGE_DAILY_REQUEST_LIMIT, 24));
 }
 
 function alphaVantagePayloadError(payload: AlphaDailyResponse): AppError | null {
@@ -421,6 +465,49 @@ async function fetchAlphaVantageJson<T extends AlphaDailyResponse>(
   const payloadError = alphaVantagePayloadError(data);
   if (payloadError) throw payloadError;
   return data;
+}
+
+/**
+ * One validation gate for every provider. Each returns a different JSON shape, but a bar is only
+ * usable on the same terms: a real date and four positive prices. Sharing the gate means a new
+ * provider cannot quietly introduce a zero, a null or a string price into the derived metrics.
+ */
+function normalizeDailyBar(
+  tradingDateRaw: string,
+  openRaw: unknown,
+  highRaw: unknown,
+  lowRaw: unknown,
+  closeRaw: unknown,
+  volumeRaw: unknown
+): AlphaDailyPoint | null {
+  const tradingDate = validDate(tradingDateRaw);
+  const openPrice = finiteNumber(openRaw);
+  const highPrice = finiteNumber(highRaw);
+  const lowPrice = finiteNumber(lowRaw);
+  const closePrice = finiteNumber(closeRaw);
+  // Volume is optional across providers; a missing volume must not discard an otherwise good bar,
+  // it only makes the volume-derived metrics unavailable.
+  const volume = finiteNumber(volumeRaw) ?? 0;
+  if (
+    !tradingDate
+    || openPrice === null
+    || highPrice === null
+    || lowPrice === null
+    || closePrice === null
+    || openPrice <= 0
+    || highPrice <= 0
+    || lowPrice <= 0
+    || closePrice <= 0
+    || volume < 0
+  ) return null;
+  return {
+    tradingDate,
+    openPrice: rounded(openPrice),
+    highPrice: rounded(highPrice),
+    lowPrice: rounded(lowPrice),
+    closePrice: rounded(closePrice),
+    volume: Math.round(volume)
+  };
 }
 
 function normalizeAlphaDailyPoint(
@@ -460,11 +547,55 @@ function alphaVantageProviderSymbol(symbol: string): string {
   return symbol.replace(/-([A-Z0-9]{1,3})$/u, ".$1");
 }
 
-export async function fetchAlphaEquityContext(
+/**
+ * The New York calendar date and minute-of-day for an instant, via the runtime's own time-zone
+ * database so US daylight saving is handled rather than approximated with a fixed offset.
+ */
+export function easternMoment(instant: Date): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false
+  }).formatToParts(instant);
+  const field = (type: string): string => parts.find(part => part.type === type)?.value ?? "";
+  const hour = Number(field("hour")) % 24;
+  return {
+    date: `${field("year")}-${field("month")}-${field("day")}`,
+    minutes: hour * 60 + Number(field("minute"))
+  };
+}
+
+// 16:00 New York is the close; the extra margin lets the provider settle the final bar before it is
+// treated as final.
+const SESSION_CLOSE_MINUTES = 16 * 60 + 15;
+
+/**
+ * Whether a daily bar represents a session that has actually finished.
+ *
+ * This is the difference between a closing price and a live one. A provider returns a bar for the
+ * session in progress with the last traded price in the close field, so "the most recent bar" is
+ * only a close outside US trading hours. The operator opens this page on a Taipei morning, when the
+ * US session that ended a few hours earlier is the one they mean by 前一天晚上的收盤價 — that bar is
+ * dated *today* in New York, so a naive "previous day" rule would return the session before it.
+ */
+export function isCompletedSession(tradingDate: string, now: Date): boolean {
+  const eastern = easternMoment(now);
+  if (tradingDate < eastern.date) return true;
+  if (tradingDate > eastern.date) return false;
+  return eastern.minutes >= SESSION_CLOSE_MINUTES;
+}
+
+function completedSessions(bars: AlphaDailyPoint[], now: Date): AlphaDailyPoint[] {
+  return bars
+    .filter(bar => isCompletedSession(bar.tradingDate, now))
+    .sort((left, right) => right.tradingDate.localeCompare(left.tradingDate));
+}
+
+async function fetchAlphaVantageBars(
   env: AppEnv,
   symbol: string,
-  fetcher: Fetcher = runtimeFetch
-): Promise<CacheLoadResult<AlphaEquityContext>> {
+  fetcher: Fetcher
+): Promise<AlphaDailyPoint[]> {
   const data = await fetchAlphaVantageJson<AlphaDailyResponse>(
     env,
     {
@@ -474,16 +605,162 @@ export async function fetchAlphaEquityContext(
     },
     fetcher
   );
-  const points = Object.entries(data["Time Series (Daily)"] ?? {})
+  return Object.entries(data["Time Series (Daily)"] ?? {})
     .map(([tradingDate, values]) => normalizeAlphaDailyPoint(tradingDate, values))
-    .filter((point): point is AlphaDailyPoint => point !== null)
-    .sort((left, right) => right.tradingDate.localeCompare(left.tradingDate))
-    .slice(0, 100);
-  const latest = points[0];
-  const prior = points[1];
-  if (!latest || !prior) {
-    throw new AppError(503, "ALPHA_VANTAGE_DAILY_INVALID", "Alpha Vantage 日線資料無法正規化。 ");
+    .filter((point): point is AlphaDailyPoint => point !== null);
+}
+
+function twelveDataProviderSymbol(symbol: string): string {
+  return symbol.replace(/-([A-Z0-9]{1,3})$/u, ".$1");
+}
+
+interface TwelveDataResponse {
+  status?: string;
+  code?: number;
+  message?: string;
+  values?: { datetime?: unknown; open?: unknown; high?: unknown; low?: unknown; close?: unknown; volume?: unknown }[];
+}
+
+async function fetchTwelveDataBars(
+  env: AppEnv,
+  symbol: string,
+  fetcher: Fetcher
+): Promise<AlphaDailyPoint[]> {
+  const apiKey = String(env.TWELVE_DATA_API_KEY ?? "").trim();
+  if (!apiKey) throw new AppError(503, "TWELVE_DATA_NOT_CONFIGURED", "Twelve Data API 尚未設定。 ");
+  if (!/^[A-Za-z0-9]{8,64}$/u.test(apiKey)) {
+    throw new AppError(503, "TWELVE_DATA_KEY_INVALID_FORMAT", "Twelve Data API Key 格式不正確。 ");
   }
+  await consumeProviderBudget(env, "TWELVE_DATA", positiveInteger(env.TWELVE_DATA_DAILY_REQUEST_LIMIT, 700));
+  const url = new URL("/time_series", TWELVE_DATA_ORIGIN);
+  url.searchParams.set("symbol", twelveDataProviderSymbol(symbol));
+  url.searchParams.set("interval", "1day");
+  url.searchParams.set("outputsize", String(EQUITY_BAR_WINDOW_DAYS));
+  url.searchParams.set("timezone", "America/New_York");
+  url.searchParams.set("apikey", apiKey);
+  const { data } = await fetchJson<TwelveDataResponse>(
+    url, MAX_EQUITY_PROVIDER_BYTES, { accept: "application/json" }, fetcher
+  );
+  // Twelve Data answers HTTP 200 with an error object, so the status must be read from the body.
+  if (data.status === "error" || !Array.isArray(data.values)) {
+    const code = Number(data.code);
+    if (code === 429) throw new AppError(503, "TWELVE_DATA_RATE_LIMITED", "Twelve Data 額度或頻率已達限制。 ");
+    if (code === 404) throw new AppError(404, "TWELVE_DATA_SYMBOL_NOT_FOUND", "Twelve Data 找不到此股票代碼。 ");
+    throw new AppError(503, "TWELVE_DATA_UNAVAILABLE", "Twelve Data 目前無法提供資料。 ");
+  }
+  return data.values
+    .map(value => normalizeDailyBar(
+      String(value.datetime ?? "").slice(0, 10),
+      value.open, value.high, value.low, value.close, value.volume
+    ))
+    .filter((point): point is AlphaDailyPoint => point !== null);
+}
+
+interface YahooChartResponse {
+  chart?: {
+    error?: { code?: unknown; description?: unknown } | null;
+    result?: {
+      timestamp?: unknown[];
+      indicators?: { quote?: { open?: unknown[]; high?: unknown[]; low?: unknown[]; close?: unknown[]; volume?: unknown[] }[] };
+    }[];
+  };
+}
+
+/**
+ * Keyless fallback. Deliberately last: this is not a contracted API, so it can change shape or
+ * refuse Cloudflare egress without notice. It exists so a provider outage degrades to a stale or
+ * second-choice price rather than to no price at all.
+ *
+ * The `meta.chartPreviousClose` field is **not** used, and must not be: it is the close before the
+ * requested range begins, so with a multi-day range it reports a price from days earlier. Only the
+ * timestamp/close arrays give per-session closes.
+ */
+async function fetchYahooBars(
+  env: AppEnv,
+  symbol: string,
+  fetcher: Fetcher
+): Promise<AlphaDailyPoint[]> {
+  await consumeProviderBudget(env, "YAHOO", positiveInteger(env.YAHOO_DAILY_REQUEST_LIMIT, 500));
+  const url = new URL(`/v8/finance/chart/${encodeURIComponent(symbol)}`, YAHOO_CHART_ORIGIN);
+  url.searchParams.set("range", "3mo");
+  url.searchParams.set("interval", "1d");
+  const { data } = await fetchJson<YahooChartResponse>(
+    url, MAX_EQUITY_PROVIDER_BYTES, { accept: "application/json" }, fetcher
+  );
+  if (data.chart?.error) throw new AppError(404, "YAHOO_SYMBOL_NOT_FOUND", "找不到此股票代碼。 ");
+  const result = data.chart?.result?.[0];
+  const quote = result?.indicators?.quote?.[0];
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  if (!quote || !timestamps.length) throw new AppError(503, "YAHOO_DAILY_INVALID", "日線資料無法正規化。 ");
+  return timestamps
+    .map((timestamp, index) => {
+      const seconds = finiteNumber(timestamp);
+      if (seconds === null) return null;
+      // The bar's trading date is its New York date, not UTC: a US session stamped at 13:30 UTC
+      // belongs to the previous calendar day in some time zones.
+      const tradingDate = easternMoment(new Date(seconds * 1000)).date;
+      return normalizeDailyBar(
+        tradingDate,
+        quote.open?.[index], quote.high?.[index], quote.low?.[index],
+        quote.close?.[index], quote.volume?.[index]
+      );
+    })
+    .filter((point): point is AlphaDailyPoint => point !== null);
+}
+
+interface EquityProviderAttempt {
+  provider: EquityProvider;
+  errorCode: string;
+}
+
+/**
+ * Fetches daily bars from the first provider that answers.
+ *
+ * Order is deliberate: a contracted, keyed provider first, then the keyless fallback. Every failure
+ * is carried forward in `providerAttempts` so the cache row records what each provider said rather
+ * than only that "there is no price" — the exact blindness that left the previous provider broken
+ * and undiagnosed.
+ */
+export async function fetchEquityDailyContext(
+  env: AppEnv,
+  symbol: string,
+  fetcher: Fetcher = runtimeFetch,
+  now: Date = new Date()
+): Promise<CacheLoadResult<AlphaEquityContext>> {
+  const chain: { provider: EquityProvider; load: () => Promise<AlphaDailyPoint[]> }[] = [
+    { provider: "TWELVE_DATA", load: () => fetchTwelveDataBars(env, symbol, fetcher) },
+    { provider: "YAHOO", load: () => fetchYahooBars(env, symbol, fetcher) },
+    { provider: "ALPHA_VANTAGE", load: () => fetchAlphaVantageBars(env, symbol, fetcher) }
+  ];
+
+  const attempts: EquityProviderAttempt[] = [];
+  let served: { provider: EquityProvider; points: AlphaDailyPoint[] } | null = null;
+  for (const step of chain) {
+    try {
+      const points = completedSessions(await step.load(), now).slice(0, 100);
+      // Fewer than two completed sessions cannot produce a previous close or a change, so this
+      // provider has not actually answered the question and the chain continues.
+      if (points.length < 2) throw new AppError(503, "EQUITY_DAILY_INSUFFICIENT_SESSIONS", "日線資料不足。 ");
+      served = { provider: step.provider, points };
+      break;
+    } catch (error) {
+      attempts.push({ provider: step.provider, errorCode: errorCode(error) });
+    }
+  }
+  if (!served) {
+    throw new AppError(
+      503,
+      "EQUITY_DAILY_UNAVAILABLE",
+      "目前無法取得收盤價，請手動輸入參考現價。 ",
+      // The outward code stays stable for the contract; this carries what each provider actually
+      // said, which is the part that was missing when the previous provider failed silently.
+      { providerAttempts: attempts.map(attempt => `${attempt.provider}=${attempt.errorCode}`).join(", ") }
+    );
+  }
+
+  const points = served.points;
+  const latest = points[0]!;
+  const prior = points[1]!;
 
   const priorVolumes = points.slice(1, 21).map(point => point.volume);
   const averageVolume20d = average(priorVolumes);
@@ -499,6 +776,10 @@ export async function fetchAlphaEquityContext(
   return {
     data: {
       symbol,
+      provider: served.provider,
+      // Non-empty whenever a preferred provider failed. It is kept in the payload so a working but
+      // degraded state is visible instead of looking identical to a healthy one.
+      providerAttempts: attempts.map(attempt => `${attempt.provider}=${attempt.errorCode}`),
       ...latest,
       priorTradingDate: prior.tradingDate,
       priorClosePrice: prior.closePrice,
@@ -639,10 +920,11 @@ async function refreshCache<T>(
     await env.DB.prepare(
       `UPDATE public_data_cache
           SET status = 'ERROR', last_error_code = ?,
+              -- stored with per-provider detail; see diagnosticCode
               stale_until = CASE WHEN fetched_at IS NULL THEN ? ELSE stale_until END,
               refresh_lease_expires_at = ?, updated_at = ?
         WHERE cache_key = ?`
-    ).bind(code, diagnosticUntil, diagnosticUntil, now, options.cacheKey).run();
+    ).bind(diagnosticCode(error), diagnosticUntil, diagnosticUntil, now, options.cacheKey).run();
     console.warn("market_context_refresh", {
       source: options.source,
       dataType: options.dataType,
@@ -804,7 +1086,7 @@ export async function getMarketContext(
   const instrument = await instrumentForSymbol(env, symbol, fetcher);
   const ttlSeconds = positiveInteger(env.MARKET_CACHE_TTL_SECONDS, 86_400);
   const staleSeconds = positiveInteger(env.MARKET_CACHE_STALE_SECONDS, 604_800);
-  const [sec, alphaVantage] = await Promise.all([
+  const [sec, equityDaily] = await Promise.all([
     instrument.data
       ? getCachedPublicData(env, {
         cacheKey: `sec:filings:v1:${instrument.data.cik}`,
@@ -817,18 +1099,21 @@ export async function getMarketContext(
       })
       : Promise.resolve(instrument),
     getCachedPublicData(env, {
-      cacheKey: `alpha-vantage:daily:v1:${symbol}`,
-      source: "ALPHA_VANTAGE",
+      // The key is provider-independent: whichever provider answers, the cached previous close for
+      // a symbol is the same fact, and a provider change must not silently start a second cache.
+      cacheKey: `equity:daily:v2:${symbol}`,
+      source: "EQUITY_DAILY",
       symbol,
       dataType: "DAILY_EQUITY",
       ttlSeconds,
       staleSeconds,
-      loader: () => fetchAlphaEquityContext(env, symbol, fetcher)
+      loader: () => fetchEquityDailyContext(env, symbol, fetcher)
     })
   ]);
   console.info("market_context_served", {
     secStatus: sec.status,
-    alphaVantageStatus: alphaVantage.status
+    equityStatus: equityDaily.status,
+    equityProvider: equityDaily.data?.provider ?? null
   });
 
   return jsonResponse({
@@ -836,7 +1121,11 @@ export async function getMarketContext(
       symbol,
       generatedAt: nowIso(),
       sec,
-      alphaVantage
+      equityDaily,
+      // Deprecated alias. The field is no longer accurate — the data may come from any provider in
+      // the chain — but the Worker and the static front end deploy separately, so removing it
+      // outright would break whichever side updates second. Drop it once both are known current.
+      alphaVantage: equityDaily
     }
   });
 }
@@ -847,11 +1136,18 @@ export async function cleanupExpiredMarketData(env: AppEnv): Promise<{ cacheRows
     Date.now() - positiveInteger(env.MARKET_CONTEXT_RATE_LIMIT_WINDOW_SECONDS, 60) * 10 * 1_000
   ).toISOString();
   const providerUsageCutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+  const errorRetentionCutoff = new Date(Date.now() - ERROR_RETENTION_SECONDS * 1_000).toISOString();
   const [cache, rateLimits] = await env.DB.batch([
     env.DB.prepare(
+      // A recent failure is spared. `stale_until` gates when a source is retried, and it used to
+      // gate deletion too, so every ERROR row was removed ten minutes after it was written — by
+      // this very sweep, which runs every two minutes. The retry timing is unchanged; only the
+      // evidence now survives long enough to be read in the ADMIN health panel.
       `DELETE FROM public_data_cache
-        WHERE stale_until < ? AND (refresh_lease_expires_at IS NULL OR refresh_lease_expires_at < ?)`
-    ).bind(now, now),
+        WHERE stale_until < ?
+          AND (refresh_lease_expires_at IS NULL OR refresh_lease_expires_at < ?)
+          AND NOT (status = 'ERROR' AND updated_at >= ?)`
+    ).bind(now, now, errorRetentionCutoff),
     env.DB.prepare(
       "DELETE FROM market_context_rate_limits WHERE window_started_at < ?"
     ).bind(rateLimitCutoff),

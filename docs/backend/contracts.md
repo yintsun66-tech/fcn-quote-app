@@ -558,6 +558,31 @@ upstream calls per UTC day, which now covers only those per-symbol daily-series 
   provider request count;
 - never returns normalized payloads, symbols, user/IP hashes, Secrets or upstream bodies.
 
+## Equity previous-close contract
+
+`GET /api/v1/market/instruments/:symbol/context` returns `marketContext.equityDaily`, an envelope
+whose `data` carries the last **completed** US session for the symbol.
+
+- `provider` names which source answered: `TWELVE_DATA`, `YAHOO` or `ALPHA_VANTAGE`. They are tried
+  in that order and the chain falls through on any failure, so a reader must never assume the price
+  came from the provider they configured. `providerAttempts` lists what each earlier provider said,
+  and is empty on a clean first-choice answer.
+- `marketContext.alphaVantage` is a **deprecated alias** for the same envelope. It is retained only
+  because the Worker and the static front end deploy separately; the name is no longer accurate.
+- **A session counts as closed only after 16:15 New York.** A provider returns a bar for the session
+  in progress with the last traded price in its close field, so "the most recent bar" is a closing
+  price only outside US trading hours. The operator reads this page on a Taipei morning, when the
+  session that closed a few hours earlier is dated *today* in New York — a "previous calendar day"
+  rule would return the session before the one they mean.
+- Yahoo's `meta.chartPreviousClose` must not be used. It is the close before the requested range
+  begins, so over a multi-day range it reports a price from days earlier. Only the timestamp/close
+  arrays give per-session closes.
+- The cache row's `source` is the provider-independent `EQUITY_DAILY`, so changing providers does
+  not fragment the cache or strand rows under a name nothing reads.
+- Failure is `EQUITY_DAILY_UNAVAILABLE` with the per-provider detail in `fieldErrors.providerAttempts`.
+  The stored `last_error_code` keeps that detail, and an `ERROR` row now survives seven days instead
+  of ten minutes.
+
 ## Error response
 
 Errors use a stable machine code, user-safe message, request ID, and optional field errors. They never include raw mail, stack traces, secrets, password material, correlation tokens, or another user's identifiers.

@@ -2402,9 +2402,9 @@ Production-audit repair order:
      DAC routing/code, and CA latency under the current fifteen-minute reply window plus
      sixty-second grace.
 
-## Mobile trade-entry navigation — local, not committed or deployed (2026-08-02)
+## Mobile trade-entry navigation — deployed (2026-08-02)
 
-The current working tree adds a mobile-only trade navigator to the shared root interface. At
+The shared root interface now includes a mobile-only trade navigator. At
 viewport widths up to 760px, `#1` through `#20` appear in a sticky, horizontally scrollable bar;
 clicking a shortcut scrolls to that trade, and scrolling or focusing a field updates the active
 trade indicator. Adding, removing, restoring, or clearing trades rebuilds the shortcuts from the
@@ -2420,9 +2420,13 @@ Files changed: `index.html`, `app.js`, `styles.css`, and this handoff. No API, D
 Cloudflare binding, dependency, or lockfile changed. Verification completed locally: `node --check
 app.js`; Cloudflare Worker dry-run build; browser checks at 390px (hidden fixed cells retain values,
 three-row add/switch/remove synchronization) and 1280px (navigator hidden, fixed columns visible,
-table layout preserved). Branch remains `codex/market-analysis-phase2-4`; the change is not yet
-committed, pushed, or deployed. Preserve the user-owned untracked `.claude/` and `output/`
-directories.
+table layout preserved). Implementation commit `d81cc5c` was pushed to
+`origin/codex/market-analysis-phase2-4` and deployed as Worker
+`088fb054-3e52-48d0-b409-6b486d2db44f`. Cache-bypassed production checks returned HTTP 200 and
+confirmed the new navigator markup, JavaScript shortcut logic, and CSS; the API health endpoint
+also returned 200. The separate `yintsun66-tech/fcnV2` GitHub Pages snapshot still serves the
+previous UI and was not modified because this task did not authorize syncing or merging its
+separate `main` branch. Preserve the user-owned untracked `.claude/` and `output/` directories.
 
 ## Deployment reminder
 

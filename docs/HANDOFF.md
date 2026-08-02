@@ -1,8 +1,42 @@
 # Project handoff
 
-Updated: 2026-07-31 (Asia/Taipei)
+Updated: 2026-08-01 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
+
+## RFQ acceleration deployed (2026-08-01)
+
+Feature commit `48a3b08` (`feat(rfq): accelerate selective quote workflows`) was pushed to
+`origin/codex/market-analysis-phase2-4` and deployed to Cloudflare as Worker version
+`19765b08-66bd-4d4a-8dbd-634dbe7e07cf`:
+
+- the browser now submits create → validate → send through one additive
+  `POST /api/v1/rfqs/submit` call; deterministic child idempotency keys preserve retry safety and
+  the old three endpoints remain available;
+- provisional ranking, finalized ranking, custom-fifth choices, snapshot quote digest and
+  quote-card authorization now admit only issuers in the immutable `rfq_expected_issuers`
+  snapshot. Unselected BMJB replies remain stored for audit;
+- the issuer picker displays selected institution count and physical mail-batch count; small RFQs
+  (up to three selected issuers) cap unchanged polling at eight seconds and highlight early
+  completion after the seven-minute soft deadline only when each trade has at least
+  `min(2, selected count)` valid quotes;
+- the 15-minute reply period, final 60-second transport grace, D1 schema, bindings, secrets and
+  dependencies are unchanged.
+
+Verification evidence: root `backend-client.js` syntax check passed; backend type generation and TypeScript
+checks completed; all 27 test files / 198 tests passed; Cloudflare Worker dry-run build completed
+after rerunning Wrangler outside the filesystem sandbox. The first sandboxed build attempt could not
+resolve the Worker entry point; this was an execution-environment restriction, not a source failure.
+After deployment, `https://api.yintsun66.com/api/v1/health` and `https://app.yintsun66.com/`
+both returned HTTP 200. The live page references `backend-client.js?v=small-rfq-fast-v1`, and the
+served client contains the new `/rfqs/submit`, issuer batch-count, small-RFQ fast-close and
+eight-second polling logic.
+
+Preserve the user-owned untracked `.claude/` and `output/` directories. The final diff contains no
+secret or lockfile change and passes `git diff --check`. No authenticated production RFQ was sent
+during verification, because that would create real outbound bank email. Smallest next step: have an
+authorized user submit one two- or three-issuer RFQ and confirm the displayed institution/mail-batch
+counts and result timing.
 
 ## Merged into `main` (2026-08-01, second merge)
 

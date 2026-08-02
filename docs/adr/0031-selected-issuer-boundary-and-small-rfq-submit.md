@@ -1,6 +1,6 @@
 # ADR 0031: selected-issuer ranking boundary and accelerated small-RFQ submission
 
-Status: Accepted  
+Status: Accepted
 Date: 2026-08-01
 
 ## Context

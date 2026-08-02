@@ -10,19 +10,63 @@
     <main class="guide-shell">
       <a class="back-link" href="./index.html">← 返回詢價表格</a>
       <h1>FCN / DAC 詢價系統使用說明</h1>
-      <p class="guide-intro">本頁說明詢價條件的填寫方式、價格求值規則及郵件發送流程。</p>
+      <p class="guide-intro">
+        本頁僅說明系統操作：詢價條件的填寫方式、價格求值規則，以及兩種使用模式的流程。
+        <strong>交易規範請依信託處公告及內部書面說明辦理，本頁不涉及。</strong>
+      </p>
 
       <section class="guide-section">
-        <h2>快速操作</h2>
+        <h2>兩種使用模式</h2>
+        <div class="guide-table-scroll"><table class="guide-table">
+          <thead><tr><th>項目</th><th>靜態版</th><th>自動比價版</th></tr></thead>
+          <tbody>
+            <tr><td>是否需要登入</td><td>不需要</td><td>需要（五碼行編）</td></tr>
+            <tr><td>資料存放</td><td>只留在本機瀏覽器</td><td>伺服器保存，可跨裝置回到「我的詢價」</td></tr>
+            <tr><td>寄送方式</td><td>複製表格後自行以郵件程式寄出</td><td>系統自動寄送與收單</td></tr>
+            <tr><td>比價排名</td><td>無</td><td>自動排名，前四名加自選第五名</td></tr>
+            <tr><td>跟單專區</td><td>可檢視（需四位數密碼）</td><td>可檢視（需四位數密碼）</td></tr>
+          </tbody>
+        </table></div>
+        <p>兩種模式的<strong>條件輸入方式與欄位規則完全相同</strong>，差別只在寄送與比價。</p>
+      </section>
+
+      <section class="guide-section">
+        <h2>快速操作：靜態版</h2>
         <ol>
           <li>在表格第一列輸入一筆交易條件。</li>
-          <li>需要多筆詢價時，點選「新增一筆交易」；新列會完整複製第 1 筆交易，可再個別修改。</li>
-          <li>點選「確認所有詢價條件」或「發送詢價條件」進行驗證，再選擇詢價對象。</li>
-          <li>系統會依詢價對象建立對應主旨及欄位順序的 HTML 表格並先複製。手機或已設定郵件程式的電腦可選「使用裝置預設郵件程式」；Edge 已登入 Zimbra 的使用者可貼上一次 Zimbra 網址後選「開啟 Zimbra 新郵件」。</li>
-          <li>開啟郵件後，請在本文貼上已複製的表格並自行寄出。Zimbra 網址只保存在目前瀏覽器；系統無法讀取 Zimbra 登入資料，也不會代替使用者按下寄出。</li>
-          <li>選擇「全部」時，請在完成目前郵件後回到本頁按「這封已完成，準備下一封」；系統會依序準備八封郵件。</li>
+          <li>需要多筆詢價時點選「新增一筆交易」，最多 20 筆；新列會複製第 1 筆，可再個別修改。</li>
+          <li>點選「發送詢價條件」進行驗證，再選擇詢價對象。</li>
+          <li>系統依詢價對象建立對應主旨與欄位順序的 HTML 表格並先複製到剪貼簿。手機或已設定郵件程式的電腦可選「使用裝置預設郵件程式」；已在同一瀏覽器登入 Zimbra 者，可貼上一次 Zimbra 網址後選「開啟 Zimbra 新郵件」。</li>
+          <li>開啟郵件後在本文<strong>貼上</strong>已複製的表格並<strong>自行寄出</strong>。系統無法讀取 Zimbra 登入資料，也不會代替使用者按下寄出；Zimbra 網址只保存在目前瀏覽器。</li>
+          <li>選擇多家時，完成目前郵件後回到本頁按「這封已完成，準備下一封」，系統會依序準備各封郵件，全部完成後按「結束流程」。</li>
           <li>點選「產出報價圖」，選擇發行機構後即可下載 PNG 報價卡；發行機構只會顯示在圖片，不會寫入詢價郵件。</li>
         </ol>
+      </section>
+
+      <section class="guide-section">
+        <h2>快速操作：自動比價版</h2>
+        <ol>
+          <li>以五碼行編登入。首次使用請先申請帳號（填分行名稱、五碼行編、密碼），待管理者核准。</li>
+          <li>輸入交易條件，方式與靜態版相同。</li>
+          <li>勾選要詢價的發行機構。畫面會顯示<strong>選取家數</strong>與<strong>實際寄出封數</strong>；BNP、MS、JPM、巴克萊共用同一種郵件格式，會合併為一封信寄出。</li>
+          <li>送出後系統一次完成建立、驗證與寄送，直接進入詢價流程。</li>
+          <li>回覆期間可看到<strong>暫定排名</strong>，數值仍會變動，不會建立正式排名，也不能產報價圖。</li>
+          <li>回覆期結束後建立<strong>正式排名</strong>：自動顯示前四名，第五名由使用者從其餘有效機構自選。</li>
+          <li>在發行機構旁點選「產出報價圖」；圖片在自己的瀏覽器產生，會先顯示預覽，電腦可另開頁面存檔，手機或平板長按圖片儲存。</li>
+        </ol>
+        <ul>
+          <li><strong>只有勾選的機構會進入比價。</strong>由於部分機構共用同一封信，未勾選者仍可能回信，這類回覆會保留供稽核，但不會進入暫定排名、正式排名、自選第五名或報價圖。<strong>想比價的機構務必勾選。</strong></li>
+          <li><strong>晚到的報價</strong>不會改動已成立的排名；需要納入時可建立新的排名版本，舊版本永久保留。</li>
+          <li>正式排名的前四名或自選第五名，可另開「市場與風險分析」頁。該頁的參考現價欄位若留空，會自動帶入<strong>前一個已收盤美股交易日的收盤價</strong>（非即時報價），並標示資料來源與日期；此數值只存在目前瀏覽器，不會改變排名、寄件內容或報價圖。</li>
+        </ul>
+      </section>
+
+      <section class="guide-section">
+        <h2>手機與平板</h2>
+        <ul>
+          <li>畫面上方會出現「交易導覽列」，可直接跳到第 N 筆交易。</li>
+          <li>固定值欄位（Observation Frequency、OTC、Effective Date Offset、Trade Date）會自動隱藏以縮短畫面，<strong>但送出的內容完全不變</strong>。</li>
+        </ul>
       </section>
 
       <section class="guide-section">
@@ -30,12 +74,12 @@
         <div class="guide-table-scroll"><table class="guide-table">
           <thead><tr><th>欄位</th><th>填寫規則</th></tr></thead>
           <tbody>
-            <tr><td>Product</td><td>選擇 FCN 或 DAC。</td></tr>
-            <tr><td>Currency</td><td>預設 USD；可選 JPY、EUR、HKD、CNH、CAD、GBP、AUD。</td></tr>
+            <tr><td>Product</td><td>選擇 FCN 或 DAC；系統會依詢價對象自動換成該家接受的商品代碼。</td></tr>
+            <tr><td>Currency</td><td>預設 USD；可選 JPY、EUR、HKD、CNH、CAD、GBP、AUD、NZD、ZAR。</td></tr>
             <tr><td>Guaranteed Periods (m)</td><td>預設 1；最小為 1，且不得大於 Tenor。</td></tr>
-            <tr><td>BBG Code 1–5</td><td>至少填一個。輸入美股 ticker 後離開欄位，系統會依交易所檔案自動補上交易所代碼。</td></tr>
+            <tr><td>BBG Code 1–5</td><td>至少填一個，最多五個。輸入美股 ticker 後離開欄位，系統會依交易所檔案自動補上交易所代碼。</td></tr>
             <tr><td>Strike (%)</td><td>可留白求值；若填寫，數值須介於 50 至 100。</td></tr>
-            <tr><td>KO Type</td><td>預設 Daily Memory；可選 Daily、Daily Memory、Period End、Period End Memory。</td></tr>
+            <tr><td>KO Type</td><td>預設 Daily Memory；可選 Daily、Daily Memory、Period End、Period End Memory。Memory 表示含記憶功能。</td></tr>
             <tr><td>KO Barrier (%)、Coupon p.a. (%)</td><td>可留白求值。</td></tr>
             <tr><td>Upfront / NotePrice (%)</td><td>預設 98；可留白求值。</td></tr>
             <tr><td>Tenor (m)</td><td>必填，範圍為 1 至 24。</td></tr>
@@ -45,8 +89,8 @@
             <tr><td>OTC</td><td>固定為 Note。</td></tr>
             <tr><td>Effective Date Offset</td><td>固定為 7 個 Calendar Days。</td></tr>
             <tr><td>Trade Date</td><td>預設為今天，可調整；格式為 DD-MMM-YY，例如 15-Jul-26。</td></tr>
-            <tr><td>詢價對象（寄信時選擇）</td><td>可選 BNP MS JPM 巴克萊、Nomura、UBS、DBS、SG、CITI、GS、CA 或全部。每個對象會使用其 Excel 模板的欄位順序與產品代碼。</td></tr>
-            <tr><td>發行機構（產圖時選擇）</td><td>可選 BNP、BARCLAYS、MS（OBU不得承做）、JPM、Nomura、UBS、DBS、SG、CITI、GS、CA；僅影響報價圖的品牌、配色與發行機構標示。</td></tr>
+            <tr><td>詢價對象（寄信時選擇）</td><td>可選 BNP MS JPM 巴克萊、Nomura、UBS、DBS、SG、CITI、GS、CA。每個對象會使用其模板的欄位順序與產品代碼。</td></tr>
+            <tr><td>發行機構（產圖時選擇）</td><td>可選 BNP、BARCLAYS、MS（OBU 不得承做）、JPM、Nomura、UBS、DBS、SG、CITI、GS、CA；僅影響報價圖的品牌、配色與發行機構標示。</td></tr>
           </tbody>
         </table></div>
       </section>

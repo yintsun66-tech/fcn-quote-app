@@ -1,0 +1,169 @@
+<meta charset="utf-8">
+<title>FCN 詢價工具｜自動比價版使用說明</title>
+<style>
+  @page { size: A4; margin: 12mm 11mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: #16323d; line-height: 1.6;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    font-size: 12pt;
+  }
+  .page { max-width: 188mm; margin: 0 auto; padding: 4mm 0 8mm; }
+  header.hero {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+    padding: 12px 16px; border-radius: 8px; margin-bottom: 14px;
+    background: linear-gradient(120deg, #0a415e, #0b78a5); color: #fff;
+  }
+  header.hero h1 { margin: 0; font-size: 21pt; }
+  header.hero p { margin: 4px 0 0; font-size: 11pt; opacity: .93; }
+  .url { font-family: Consolas, monospace; font-size: 11.5pt; }
+  h2 {
+    margin: 16px 0 8px; padding-left: 9px; font-size: 15pt; color: #0a4d5e;
+    border-left: 5px solid #0b78a5;
+  }
+  p, li { margin: 4px 0; }
+  ul, ol { margin: 5px 0; padding-left: 22px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 11.5pt; }
+  th, td { border: 1px solid #c2d8d8; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #e6f2f8; color: #0a4d5e; }
+  code { background: #eef4f5; padding: 1px 5px; border-radius: 3px; }
+
+  .ban { border: 3px solid #b3261e; border-radius: 8px; padding: 12px 16px; margin: 12px 0; background: #fdf3f2; }
+  .ban h2 { margin: 0 0 6px; padding-left: 0; border-left: 0; color: #8c1d18; font-size: 16pt; }
+  .ban li { margin: 6px 0; }
+  .ban strong { color: #8c1d18; }
+  .warn { border-left: 5px solid #b8860b; background: #fdf8ec; padding: 9px 13px; margin: 10px 0; border-radius: 0 6px 6px 0; }
+  .tip { border-left: 5px solid #0b78a5; background: #eef7fb; padding: 9px 13px; margin: 10px 0; border-radius: 0 6px 6px 0; }
+
+  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 10px 0; }
+  .steps div { border: 1px solid #b9d1d9; border-radius: 6px; padding: 8px 9px; background: #f4fafd; }
+  .steps b { display: block; color: #0b78a5; font-size: 10pt; letter-spacing: .04em; }
+  .steps span { font-size: 11pt; }
+
+  .timeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+  .timeline div { border: 1px solid #b9d1d9; border-radius: 6px; padding: 8px 9px; background: #fff; text-align: center; }
+  .timeline b { display: block; color: #0a415e; font-size: 14pt; }
+  .timeline span { font-size: 10.5pt; color: #48606b; }
+
+  footer { margin-top: 14px; padding-top: 7px; border-top: 1px solid #cfe0e0; font-size: 10pt; color: #5b7581; }
+  .break { break-before: page; }
+  @media print { header.hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+
+<div class="page">
+
+<header class="hero">
+  <div>
+    <h1>FCN／DAC 詢價工具　自動比價版</h1>
+    <p>需登入・系統自動寄送收單・自動排名比價・跟單專區</p>
+  </div>
+  <div style="text-align:right">
+    <p class="url">app.yintsun66.com</p>
+  </div>
+</header>
+
+<div class="ban">
+  <h2>⛔ SN 交易絕對禁忌</h2>
+  <ul>
+    <li><strong>中概股一律不得承作</strong>（<code>BABA</code>、<code>PDD</code>、<code>BIDU</code> 等），不分幣別與機構。</li>
+    <li><strong>日股不可跟單、不可湊單</strong>，須由客人自己單獨成一單，<b>不得放上跟單專區</b>。</li>
+    <li><strong>不可用美元連結日股標的。</strong></li>
+    <li><strong>日股須當天中午前</strong>完成文件簽署與進場。</li>
+    <li><strong>連結單一標的或客戶為 OBU 境外公司，發行機構不得為 MS</strong>（勾選時就要排除）。</li>
+    <li><strong>手收須落在 1%（含）～3%（含）。</strong></li>
+  </ul>
+  <p style="margin:6px 0 0"><b>系統會自動比價，但不會檢查上述規定。排名第一名不代表可以承作。</b></p>
+</div>
+
+<h2>手收與收益控管</h2>
+<table>
+  <tr><th style="width:34%">項目</th><th>規定</th></tr>
+  <tr><td>不保本 FCN／DRA</td><td>當天進場手收 <b>≤ 3%</b>；非當天進場 <b>≤ 3.5%</b></td></tr>
+  <tr><td>機構上限</td><td>花旗、MS <b>≤ 3%</b>；JPM <b>≤ 3.5%</b></td></tr>
+  <tr><td>PGN／CLN &lt; 1.5%<br>不保本 FCN／DRA &lt; 1%</td><td>須經<b>分行經理與本處處長同意用印</b>，並附<b>資產告知書、A085、分行經理陳核檔案</b>。<span style="color:#8c1d18">作業時間長，請預留簽約時程。</span></td></tr>
+  <tr><td>手收 &lt; 1%</td><td>須說明客人是否為<b>特定客人</b>或<b>已與本部討論之名單</b>；<b>UF &lt; 1% 限當天進場</b></td></tr>
+  <tr><td>須陳核分行經理<br>（信託處控管）</td><td>Strike <b>&gt; 85%（不含）</b>的 FCN／DRA｜FCN 收益 <b>&lt; 1%</b>｜PGN 收益 <b>&lt; 1.5%</b><br>特定高風險標的：<b>目前無</b></td></tr>
+</table>
+
+<h2>各幣別門檻（起單／跟單／累加，單位：<span style="color:#b3261e">萬</span>）</h2>
+<table>
+  <tr><th style="width:12%">幣別</th><th style="width:26%">FCN</th><th style="width:26%">PGN</th><th style="width:12%">幣別</th><th style="width:24%">FCN｜PGN</th></tr>
+  <tr><td>USD</td><td>30 / 10 / 1</td><td>50 / 10 / 1</td><td>ZAR</td><td>600/200/10｜1000/200/10</td></tr>
+  <tr><td>EUR</td><td>30 / 10 / 1</td><td>50 / 10 / 1</td><td>GBP</td><td>30/10/1｜50/10/1</td></tr>
+  <tr><td>JPY</td><td>5000 / 1500 / 100</td><td>8000 / 1500 / 100</td><td>NZD</td><td>50/20/1｜80/20/1</td></tr>
+  <tr><td>AUD</td><td>50 / 20 / 1</td><td>80 / 20 / 1</td><td>CAD</td><td>50/20/1｜80/20/1</td></tr>
+  <tr><td>CNH</td><td>240 / 80 / 10</td><td>400 / 80 / 10</td><td>HKD</td><td>240/80/10｜400/80/10</td></tr>
+</table>
+<div class="tip">
+  JPM、DBS、MS、野村的 FCN <b>20 萬即可收單</b>；其他機構<b>要扣點或不收</b>。
+</div>
+
+<div class="break"></div>
+
+<h2>申請帳號</h2>
+<p>開啟 <span class="url">app.yintsun66.com</span> → 填<b>分行名稱、五碼行編、密碼</b> → 由 ADMIN／PS 審核 → 核准後<b>以五碼行編登入</b>。既有帳號沿用原登入名稱。</p>
+
+<h2>操作流程</h2>
+<div class="steps">
+  <div><b>STEP 1</b><span>輸入 1–20 筆條件</span></div>
+  <div><b>STEP 2</b><span>勾選發行機構</span></div>
+  <div><b>STEP 3</b><span>一鍵建立並寄送</span></div>
+  <div><b>STEP 4</b><span>等待與暫定排名</span></div>
+  <div><b>STEP 5</b><span>正式排名與產圖</span></div>
+</div>
+
+<p><b>1. 輸入條件</b>　欄位與靜態版相同（Product、Currency、BBG Code 1–5、Tenor、Guaranteed Periods、Strike、KO Type、KO Barrier、Coupon、Upfront、Barrier Type、KI Barrier）。固定值欄位不需填寫。手機／平板有交易導覽列可跳至第 N 筆，固定值自動隱藏，<b>送出內容不變</b>。</p>
+
+<p><b>2. 勾選發行機構</b>　畫面顯示<b>選取家數</b>與<b>實際寄出封數</b>。BNP、MS、JPM、BARCLAYS 共用格式合併為一封。</p>
+
+<div class="warn">
+  <b>只有勾選的機構會進入比價。</b>因四家共用一封信，<b>未勾選的機構仍可能回信</b>；這類回覆保留供稽核，但<b>不會</b>進入暫定排名、正式排名、自選第五名或報價圖。<br>
+  <b>想比價的機構一定要勾，漏勾等於沒詢到。</b>
+</div>
+
+<p><b>3. 建立並寄送</b>　按送出後系統<b>一次完成建立、驗證與寄送</b>，不需再按其他按鈕。</p>
+
+<p><b>4. 等待與暫定排名</b></p>
+<div class="timeline">
+  <div><b>7 分</b><span>暫定提醒</span></div>
+  <div><b>15 分</b><span>機構回覆期</span></div>
+  <div><b>＋60 秒</b><span>郵件轉送緩衝</span></div>
+  <div><b>≤ 16 分</b><span>建立正式排名</span></div>
+</div>
+<ul>
+  <li>回覆期間顯示<b>暫定前四名與候選</b>，<b>仍會變動</b>，不建立正式排名，也不能產報價圖。</li>
+  <li>最後 60 秒顯示「<b>正在等待最後郵件轉送</b>」，此期間<b>不可提早結束</b>。</li>
+  <li><b>勾選 3 家以內</b>：若每筆都已有足夠有效報價，7 分鐘後畫面提示可<b>提早結束</b>，確認視窗會列出<b>尚未回覆</b>的機構。提早結束由你決定，系統不會自動縮短。</li>
+</ul>
+
+<p><b>5. 正式結果</b></p>
+<ul>
+  <li>自動顯示<b>經濟排名前四名</b>；<b>第五名由你自選</b>（從前四名以外的有效機構挑一家）。</li>
+  <li>按機構旁「<b>產出報價圖</b>」產生 PNG，先顯示預覽：<b>電腦</b>另開頁面存檔，<b>手機／平板長按圖片</b>儲存。前四名與自選第五名皆可。</li>
+  <li><b>晚到報價</b>不改動已成立的排名。需納入時按「<b>納入晚到報價重新排名</b>」建立<b>新版本</b>，舊版本永久保留。</li>
+  <li><b>我的詢價</b>：可回到任何進行中或已完成的詢價，關掉瀏覽器不會遺失。</li>
+</ul>
+
+<h2>市場與風險分析</h2>
+<p>正式排名的前四名或自選第五名可另開此頁：顯示該標的 <b>SEC 公司與最近申報文件</b>；「<b>輸入標的參考現價</b>」空白時自動帶入<b>前一個已收盤美股交易日的收盤價</b>，並標示來源與日期。參考現價只存在你的瀏覽器，<b>不影響</b>排名、寄件與報價圖。</p>
+<div class="warn">
+  自動帶入的是<b>前一交易日收盤價，不是即時報價</b>，僅供試算。需要當下價格請自行確認後手動覆蓋。
+</div>
+
+<h2>跟單專區</h2>
+<ul>
+  <li>獨立頁面，訪客<b>不需註冊</b>，輸入管理者提供的<b>四位數檢視密碼</b>即可查看。</li>
+  <li>商品由授權信箱回覆詢價信後<b>自動上架</b>，到期<b>自動下架</b>並保留稽核資料。</li>
+  <li>公開表格行編<b>一律遮蔽</b>，完整明細限 ADMIN／PS 於後端查看。可登記預計跟單金額並查看當日彙整。</li>
+  <li style="color:#8c1d18"><b>日股不可跟單、不可湊單，請勿放上跟單專區。</b></li>
+</ul>
+
+<h2>其他</h2>
+<ul>
+  <li><b>CLN 跟單</b>：PS 須<b>逐筆</b>填製交易確認給信託處。</li>
+  <li><b>手動貼郵件詢價</b>：自動寄信不便時可改用複製貼上流程，不影響後端自動收單。</li>
+</ul>
+
+<footer>第 1 版・自動比價版・本說明僅供內部作業參考，交易規定以信託處最新公告為準。</footer>
+
+</div>

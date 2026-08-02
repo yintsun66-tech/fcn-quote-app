@@ -36,6 +36,9 @@ import {
   const emailQueueDetail = document.querySelector("#emailQueueDetail");
   const emailClipboardStatus = document.querySelector("#emailClipboardStatus");
   const zimbraUrlInput = document.querySelector("#zimbraUrl");
+  const tradeNavigator = document.querySelector("#tradeNavigator");
+  const tradeShortcuts = document.querySelector("#tradeShortcuts");
+  const activeTradeLabel = document.querySelector("#activeTradeLabel");
   let selectedIssuer = "BNP";
   let issuerDialogMode = "download";
   let emailQueue = [];
@@ -43,6 +46,8 @@ import {
   let emailClipboardFormat = "none";
   let rowChangeTimer = 0;
   let bbgLookupPromise = null;
+  let activeTradeIndex = 0;
+  let tradeScrollFrame = 0;
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
@@ -184,8 +189,75 @@ import {
   }
 
   function renumberRows() {
-    [...tableBody.rows].forEach((row, index) => row.querySelector(".row-number").textContent = index + 1);
+    [...tableBody.rows].forEach((row, index) => {
+      row.id = `trade-row-${index + 1}`;
+      row.querySelector(".row-number").textContent = index + 1;
+    });
     document.querySelector("#quoteCount").textContent = tableBody.rows.length;
+    renderTradeShortcuts();
+  }
+
+  function renderTradeShortcuts() {
+    if (!tradeShortcuts) return;
+    const fragment = document.createDocumentFragment();
+    [...tableBody.rows].forEach((row, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "trade-shortcut";
+      button.dataset.tradeIndex = String(index);
+      button.setAttribute("aria-controls", row.id);
+      button.setAttribute("aria-label", `切換至第 ${index + 1} 筆交易`);
+      button.textContent = `#${index + 1}`;
+      fragment.append(button);
+    });
+    tradeShortcuts.replaceChildren(fragment);
+    setActiveTrade(activeTradeIndex, false);
+  }
+
+  function setActiveTrade(index, revealShortcut = true) {
+    const rows = [...tableBody.rows];
+    if (!rows.length) return;
+    activeTradeIndex = Math.min(Math.max(Number(index) || 0, 0), rows.length - 1);
+    rows.forEach((row, rowIndex) => row.classList.toggle("active-trade", rowIndex === activeTradeIndex));
+
+    const buttons = tradeShortcuts ? [...tradeShortcuts.querySelectorAll(".trade-shortcut")] : [];
+    buttons.forEach((button, buttonIndex) => {
+      const isActive = buttonIndex === activeTradeIndex;
+      button.classList.toggle("is-active", isActive);
+      if (isActive) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    });
+    if (activeTradeLabel) activeTradeLabel.textContent = `目前：第 ${activeTradeIndex + 1} 筆`;
+
+    const activeButton = buttons[activeTradeIndex];
+    if (revealShortcut && activeButton && tradeShortcuts) {
+      const containerRect = tradeShortcuts.getBoundingClientRect();
+      const buttonRect = activeButton.getBoundingClientRect();
+      if (buttonRect.left < containerRect.left || buttonRect.right > containerRect.right) {
+        tradeShortcuts.scrollBy({
+          left: buttonRect.left + buttonRect.width / 2 - containerRect.left - containerRect.width / 2,
+          behavior: "smooth",
+        });
+      }
+    }
+  }
+
+  function syncActiveTradeFromViewport() {
+    tradeScrollFrame = 0;
+    if (!window.matchMedia("(max-width: 760px)").matches || !tradeNavigator) return;
+    const rows = [...tableBody.rows];
+    if (!rows.length) return;
+    const anchor = tradeNavigator.getBoundingClientRect().bottom + 16;
+    let visibleIndex = 0;
+    rows.forEach((row, index) => {
+      if (row.getBoundingClientRect().top <= anchor) visibleIndex = index;
+    });
+    setActiveTrade(visibleIndex);
+  }
+
+  function scheduleTradeViewportSync() {
+    if (tradeScrollFrame) return;
+    tradeScrollFrame = window.requestAnimationFrame(syncActiveTradeFromViewport);
   }
 
   function rowValue(row, name) { return row.querySelector(`[name="${name}"]`).value.trim(); }
@@ -713,8 +785,10 @@ import {
 
   document.querySelector("#addRow").addEventListener("click", () => {
     if (tableBody.rows.length >= MAX_ROWS) return setStatus("最多只能新增 20 筆詢價交易。");
-    createRow(true); saveDraft(); setStatus("已複製第 1 筆交易作為新交易預設值。", true);
-    tableBody.lastElementChild.scrollIntoView({ behavior: "smooth", block: "center" });
+    createRow(true);
+    setActiveTrade(tableBody.rows.length - 1);
+    saveDraft(); setStatus("已複製第 1 筆交易作為新交易預設值。", true);
+    tableBody.lastElementChild.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   document.querySelector("#removeRow").addEventListener("click", () => {
     if (tableBody.rows.length <= 1) return setStatus("至少需保留 1 筆詢價交易。");
@@ -785,6 +859,8 @@ import {
     try { await downloadQuoteImage(); } catch (error) { setStatus(error.message); }
   });
   tableBody.addEventListener("focusin", event => {
+    const row = event.target.closest("tr");
+    if (row) setActiveTrade([...tableBody.rows].indexOf(row));
     if (/^bbgCode[1-5]$/.test(event.target.name)) void ensureBbgLookup();
   });
   tableBody.addEventListener("blur", event => {
@@ -795,6 +871,17 @@ import {
   // Doing that on each keystroke makes typing visibly laggy once the table has many rows and the
   // preview panel is open, so coalesce the work; leaving a field still flushes it immediately.
   ["input", "change"].forEach(eventName => tableBody.addEventListener(eventName, scheduleRowChanges));
+  tradeShortcuts?.addEventListener("click", event => {
+    const button = event.target.closest(".trade-shortcut");
+    if (!button) return;
+    const targetIndex = Number(button.dataset.tradeIndex);
+    const targetRow = tableBody.rows[targetIndex];
+    if (!targetRow) return;
+    setActiveTrade(targetIndex);
+    targetRow.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  window.addEventListener("scroll", scheduleTradeViewportSync, { passive: true });
+  window.addEventListener("resize", scheduleTradeViewportSync, { passive: true });
 
   setupHotlist();
 
@@ -904,4 +991,5 @@ import {
   }
 
   if (!restoreDraft()) createRow();
+  scheduleTradeViewportSync();
 })();

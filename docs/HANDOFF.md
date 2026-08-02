@@ -2402,6 +2402,28 @@ Production-audit repair order:
      DAC routing/code, and CA latency under the current fifteen-minute reply window plus
      sixty-second grace.
 
+## Mobile trade-entry navigation — local, not committed or deployed (2026-08-02)
+
+The current working tree adds a mobile-only trade navigator to the shared root interface. At
+viewport widths up to 760px, `#1` through `#20` appear in a sticky, horizontally scrollable bar;
+clicking a shortcut scrolls to that trade, and scrolling or focusing a field updates the active
+trade indicator. Adding, removing, restoring, or clearing trades rebuilds the shortcuts from the
+current rows.
+
+On the same mobile breakpoint, the three immutable fields are visually hidden to reduce vertical
+input time: Observation Frequency remains `1`, OTC remains `Note`, and Effective Date Offset
+remains `7`. The readonly controls stay in the DOM, so draft storage, validation, outbound email,
+and backend RFQ payloads retain the existing values. Desktop/tablet table behavior at widths above
+760px is unchanged and continues to display those columns.
+
+Files changed: `index.html`, `app.js`, `styles.css`, and this handoff. No API, D1 migration,
+Cloudflare binding, dependency, or lockfile changed. Verification completed locally: `node --check
+app.js`; Cloudflare Worker dry-run build; browser checks at 390px (hidden fixed cells retain values,
+three-row add/switch/remove synchronization) and 1280px (navigator hidden, fixed columns visible,
+table layout preserved). Branch remains `codex/market-analysis-phase2-4`; the change is not yet
+committed, pushed, or deployed. Preserve the user-owned untracked `.claude/` and `output/`
+directories.
+
 ## Deployment reminder
 
 Do not deploy unless explicitly requested. The normal source flow is:

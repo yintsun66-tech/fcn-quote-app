@@ -2424,9 +2424,12 @@ table layout preserved). Implementation commit `d81cc5c` was pushed to
 `origin/codex/market-analysis-phase2-4` and deployed as Worker
 `088fb054-3e52-48d0-b409-6b486d2db44f`. Cache-bypassed production checks returned HTTP 200 and
 confirmed the new navigator markup, JavaScript shortcut logic, and CSS; the API health endpoint
-also returned 200. The separate `yintsun66-tech/fcnV2` GitHub Pages snapshot still serves the
-previous UI and was not modified because this task did not authorize syncing or merging its
-separate `main` branch. Preserve the user-owned untracked `.claude/` and `output/` directories.
+also returned 200. The feature branch was merged into `fcn-quote-app/main` as `a082291` after the
+merged tree passed 27 test files / 198 tests, typecheck, syntax checks, and dry-run build. The
+separate `yintsun66-tech/fcnV2` GitHub Pages snapshot received only allowlisted public assets:
+program commit `debea38` and status-page commit `d2f94ab`. No backend source, D1 data, secret, raw
+mail, or private artifact was copied. Preserve the user-owned untracked `.claude/` and `output/`
+directories.
 
 ## Deployment reminder
 

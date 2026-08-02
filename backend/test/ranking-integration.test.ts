@@ -63,6 +63,19 @@ describe("versioned ranking persistence", () => {
     const coupons = [14, 14, 12, 10, 8, 6, 4];
     const issuers = ["BNP", "JPM", "UBS", "CA", "SG", "CITI", "DBS"];
     const quoteIds = coupons.map(() => `quo_${crypto.randomUUID()}`);
+    for (const issuer of [...issuers, "MS"]) {
+      await testEnv.DB.prepare(
+        `INSERT INTO rfq_expected_issuers
+          (id, rfq_id, issuer, outbound_batch_code, status, snapshot_at)
+         VALUES (?, ?, ?, ?, 'VALID_REPLY', ?)`
+      ).bind(
+        `exp_${crypto.randomUUID()}`,
+        rfqId,
+        issuer,
+        ["BNP", "MS", "JPM", "BARCLAYS"].includes(issuer) ? "BMJB" : issuer,
+        now
+      ).run();
+    }
     for (let index = 0; index < coupons.length; index += 1) {
       const receivedAt = new Date(Date.parse(now) + index * 1000).toISOString();
       await testEnv.DB.prepare(
@@ -78,6 +91,21 @@ describe("versioned ranking persistence", () => {
                  1, 'Note', ?, 'TEST', 'v1', 0, ?, '[]', 'VALID', ?)`
       ).bind(quoteIds[index], rfqId, tradeId, inboundId, issuers[index], issuers[index], coupons[index], receivedAt, index, now).run();
     }
+    // A shared BMJB mail can contain a valid quote from an issuer the user did not select. Keep it
+    // for audit, but never let it enter provisional/final ranking or quote-card authorization.
+    const unselectedQuoteId = `quo_${crypto.randomUUID()}`;
+    await testEnv.DB.prepare(
+      `INSERT INTO issuer_quotes
+        (id, rfq_id, trade_id, inbound_message_id, issuer, issuer_display_name,
+         product, currency, tenor_months, guaranteed_periods_months, underlyings_json,
+         strike_pct, ko_type, ko_barrier_pct, coupon_pa_pct, raw_price_value,
+         raw_price_label, price_semantics, comparable_price_pct, barrier_type,
+         observation_frequency_months, otc, received_at, parser_profile, parser_version,
+         source_table_index, source_row_index, raw_values_json, status, created_at)
+       VALUES (?, ?, ?, ?, 'BARCLAYS', 'BARCLAYS', 'FCN', 'USD', 6, 1, '["AAA UW"]', 80,
+               'Daily Memory', 100, 99, 98, 'NotePrice', 'NOTE_PRICE', 98, 'NONE',
+               1, 'Note', ?, 'TEST', 'v1', 0, 99, '[]', 'VALID', ?)`
+    ).bind(unselectedQuoteId, rfqId, tradeId, inboundId, now, now).run();
     const imageJobs: ImageRenderJob[] = [];
     const appEnv = {
       DB: testEnv.DB,
@@ -134,8 +162,8 @@ describe("versioned ranking persistence", () => {
     await processQuoteRankJob(appEnv, job);
 
     const results = await testEnv.DB.prepare(
-      "SELECT economic_rank, is_image_winner, normalized_value FROM ranking_results WHERE rfq_id = ? ORDER BY display_order"
-    ).bind(rfqId).all<{ economic_rank: number; is_image_winner: number; normalized_value: number }>();
+      "SELECT quote_id, economic_rank, is_image_winner, normalized_value FROM ranking_results WHERE rfq_id = ? ORDER BY display_order"
+    ).bind(rfqId).all<{ quote_id: string; economic_rank: number; is_image_winner: number; normalized_value: number }>();
     expect(results.results.map(row => [row.economic_rank, row.normalized_value])).toEqual([
       [1, 14],
       [1, 14],
@@ -145,6 +173,7 @@ describe("versioned ranking persistence", () => {
       [5, 6]
     ]);
     expect(results.results.filter(row => row.is_image_winner === 1)).toHaveLength(1);
+    expect(results.results.some(row => row.quote_id === unselectedQuoteId)).toBe(false);
     // ADR 0016: rank one is still flagged as the image winner, but no image is rendered
     // automatically. Nothing may reach the Browser Rendering queue until a user asks for it.
     expect(imageJobs).toEqual([]);
@@ -256,6 +285,21 @@ describe("versioned ranking persistence", () => {
       .rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
     await expect(getTradeAnalysisInput(testEnv, session, rfqId, "T01", `quo_${crypto.randomUUID()}`))
       .rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
+    await expect(requestTradeArtifact(
+      new Request(`${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/quotes/${unselectedQuoteId}/artifact`, {
+        method: "POST",
+        headers: {
+          origin: BASE_URL,
+          cookie: `__Host-fcn_csrf=${csrfToken}`,
+          "x-csrf-token": csrfToken
+        }
+      }),
+      appEnv,
+      session,
+      rfqId,
+      "T01",
+      unselectedQuoteId
+    )).rejects.toMatchObject({ code: "RANKED_QUOTE_NOT_FOUND" });
 
     const alternateRequest = new Request(
       `${BASE_URL}/api/v1/rfqs/${rfqId}/trades/T01/quotes/${quoteIds[3]}/artifact`,

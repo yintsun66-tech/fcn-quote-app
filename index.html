@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=zimbra-compose-v1" />
+    <link rel="stylesheet" href="./styles.css?v=mobile-trade-nav-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -76,6 +76,14 @@
             <span class="legend-risk">風險與交割</span>
           </div>
         </header>
+        <nav id="tradeNavigator" class="trade-navigator" aria-label="快速切換交易">
+          <div class="trade-navigator-heading">
+            <strong>快速切換交易</strong>
+            <span id="activeTradeLabel" aria-live="polite">目前：第 1 筆</span>
+          </div>
+          <div id="tradeShortcuts" class="trade-shortcuts"></div>
+          <p>固定條件已自動套用：每月觀察｜OTC Note｜生效日 T+7</p>
+        </nav>
         <div class="table-card">
           <div class="table-scroll">
             <table id="quoteTable">
@@ -212,7 +220,7 @@
     </dialog>
 
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./app.js?v=equity-daily-v1"></script>
-    <script type="module" src="./backend-client.js?v=equity-daily-v1"></script>
+    <script type="module" src="./app.js?v=mobile-trade-nav-v1"></script>
+    <script type="module" src="./backend-client.js?v=small-rfq-fast-v1"></script>
   </body>
 </html>

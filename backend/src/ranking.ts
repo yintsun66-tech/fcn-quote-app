@@ -90,9 +90,15 @@ export async function processQuoteRankJob(env: AppEnv, requested: QuoteRankJob):
     `SELECT id, trade_code, target_field FROM rfq_trades WHERE rfq_id = ? ORDER BY sequence`
   ).bind(job.rfq_id).all<TradeTargetRow>();
   const quotes = await env.DB.prepare(
-    `SELECT id, trade_id, issuer, status, received_at, strike_pct, ko_barrier_pct,
-            coupon_pa_pct, comparable_price_pct, ki_barrier_pct, rejection_reason
-       FROM issuer_quotes WHERE rfq_id = ? ORDER BY received_at, id`
+    `SELECT q.id, q.trade_id, q.issuer, q.status, q.received_at, q.strike_pct, q.ko_barrier_pct,
+            q.coupon_pa_pct, q.comparable_price_pct, q.ki_barrier_pct, q.rejection_reason
+       FROM issuer_quotes q
+      WHERE q.rfq_id = ?
+        AND EXISTS (
+          SELECT 1 FROM rfq_expected_issuers expected
+           WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+        )
+      ORDER BY q.received_at, q.id`
   ).bind(job.rfq_id).all<QuoteRankRow>();
 
   const statements: D1PreparedStatement[] = [];

@@ -1,8 +1,42 @@
 # Project handoff
 
-Updated: 2026-07-31 (Asia/Taipei)
+Updated: 2026-08-01 (Asia/Taipei)
 
 Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
+
+## RFQ acceleration deployed (2026-08-01)
+
+Feature commit `48a3b08` (`feat(rfq): accelerate selective quote workflows`) was pushed to
+`origin/codex/market-analysis-phase2-4` and deployed to Cloudflare as Worker version
+`19765b08-66bd-4d4a-8dbd-634dbe7e07cf`:
+
+- the browser now submits create → validate → send through one additive
+  `POST /api/v1/rfqs/submit` call; deterministic child idempotency keys preserve retry safety and
+  the old three endpoints remain available;
+- provisional ranking, finalized ranking, custom-fifth choices, snapshot quote digest and
+  quote-card authorization now admit only issuers in the immutable `rfq_expected_issuers`
+  snapshot. Unselected BMJB replies remain stored for audit;
+- the issuer picker displays selected institution count and physical mail-batch count; small RFQs
+  (up to three selected issuers) cap unchanged polling at eight seconds and highlight early
+  completion after the seven-minute soft deadline only when each trade has at least
+  `min(2, selected count)` valid quotes;
+- the 15-minute reply period, final 60-second transport grace, D1 schema, bindings, secrets and
+  dependencies are unchanged.
+
+Verification evidence: root `backend-client.js` syntax check passed; backend type generation and TypeScript
+checks completed; all 27 test files / 198 tests passed; Cloudflare Worker dry-run build completed
+after rerunning Wrangler outside the filesystem sandbox. The first sandboxed build attempt could not
+resolve the Worker entry point; this was an execution-environment restriction, not a source failure.
+After deployment, `https://api.yintsun66.com/api/v1/health` and `https://app.yintsun66.com/`
+both returned HTTP 200. The live page references `backend-client.js?v=small-rfq-fast-v1`, and the
+served client contains the new `/rfqs/submit`, issuer batch-count, small-RFQ fast-close and
+eight-second polling logic.
+
+Preserve the user-owned untracked `.claude/` and `output/` directories. The final diff contains no
+secret or lockfile change and passes `git diff --check`. No authenticated production RFQ was sent
+during verification, because that would create real outbound bank email. Smallest next step: have an
+authorized user submit one two- or three-issuer RFQ and confirm the displayed institution/mail-batch
+counts and result timing.
 
 ## Merged into `main` (2026-08-01, second merge)
 
@@ -2367,6 +2401,32 @@ Production-audit repair order:
      confirmation of the DAC/DRA floating-income note on a downloaded production image, Barclays
      DAC routing/code, and CA latency under the current fifteen-minute reply window plus
      sixty-second grace.
+
+## Mobile trade-entry navigation — deployed (2026-08-02)
+
+The shared root interface now includes a mobile-only trade navigator. At
+viewport widths up to 760px, `#1` through `#20` appear in a sticky, horizontally scrollable bar;
+clicking a shortcut scrolls to that trade, and scrolling or focusing a field updates the active
+trade indicator. Adding, removing, restoring, or clearing trades rebuilds the shortcuts from the
+current rows.
+
+On the same mobile breakpoint, the three immutable fields are visually hidden to reduce vertical
+input time: Observation Frequency remains `1`, OTC remains `Note`, and Effective Date Offset
+remains `7`. The readonly controls stay in the DOM, so draft storage, validation, outbound email,
+and backend RFQ payloads retain the existing values. Desktop/tablet table behavior at widths above
+760px is unchanged and continues to display those columns.
+
+Files changed: `index.html`, `app.js`, `styles.css`, and this handoff. No API, D1 migration,
+Cloudflare binding, dependency, or lockfile changed. Verification completed locally: `node --check
+app.js`; Cloudflare Worker dry-run build; browser checks at 390px (hidden fixed cells retain values,
+three-row add/switch/remove synchronization) and 1280px (navigator hidden, fixed columns visible,
+table layout preserved). Implementation commit `d81cc5c` was pushed to
+`origin/codex/market-analysis-phase2-4` and deployed as Worker
+`088fb054-3e52-48d0-b409-6b486d2db44f`. Cache-bypassed production checks returned HTTP 200 and
+confirmed the new navigator markup, JavaScript shortcut logic, and CSS; the API health endpoint
+also returned 200. The separate `yintsun66-tech/fcnV2` GitHub Pages snapshot still serves the
+previous UI and was not modified because this task did not authorize syncing or merging its
+separate `main` branch. Preserve the user-owned untracked `.claude/` and `output/` directories.
 
 ## Deployment reminder
 

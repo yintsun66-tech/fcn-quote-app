@@ -23,6 +23,7 @@ import { ingestInboundEmail } from "./inbound";
 import { consumeInboundEmail } from "./inbound-parser";
 import { consumeOutboundEmail, sendRfq } from "./outbound";
 import { createRfq, getRfq, getRfqListSummary, listRfqs, validateRfq } from "./rfqs";
+import { submitRfq } from "./rfq-submit";
 import { consumeQuoteNormalize } from "./quote-normalize";
 import { consumeQuoteRank } from "./ranking";
 import { consumeImageRender, getTradeCardDocument, requestTradeArtifact } from "./artifacts";
@@ -147,6 +148,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "POST" && deleteMatch?.[1]) return deleteAccountPermanently(request, env, session, deleteMatch[1]);
 
   if (method === "GET" && path === "/api/v1/rfqs/summary") return getRfqListSummary(env, session);
+  if (method === "POST" && path === "/api/v1/rfqs/submit") return submitRfq(request, env, session);
   if (method === "POST" && path === "/api/v1/rfqs") return createRfq(request, env, session);
   if (method === "GET" && path === "/api/v1/rfqs") return listRfqs(request, env, session);
   const validateMatch = /^\/api\/v1\/rfqs\/([^/]+)\/validate$/.exec(path);

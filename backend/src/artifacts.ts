@@ -121,9 +121,15 @@ export async function authorizeCardQuote(
     ).bind(rfqId, tradeCode).first<{ id: string; target_field: TargetField }>();
     if (trade) {
       const quotes = await env.DB.prepare(
-        `SELECT id, trade_id, issuer, status, received_at, strike_pct, ko_barrier_pct,
-                coupon_pa_pct, comparable_price_pct, ki_barrier_pct, rejection_reason
-           FROM issuer_quotes WHERE rfq_id = ? AND trade_id = ? ORDER BY received_at, id`
+        `SELECT q.id, q.trade_id, q.issuer, q.status, q.received_at, q.strike_pct, q.ko_barrier_pct,
+                q.coupon_pa_pct, q.comparable_price_pct, q.ki_barrier_pct, q.rejection_reason
+           FROM issuer_quotes q
+          WHERE q.rfq_id = ? AND q.trade_id = ?
+            AND EXISTS (
+              SELECT 1 FROM rfq_expected_issuers expected
+               WHERE expected.rfq_id = q.rfq_id AND expected.issuer = q.issuer
+            )
+          ORDER BY q.received_at, q.id`
       ).bind(rfqId, trade.id).all<QuoteRankRow>();
       const ranked = rankValidQuotes(quotes.results, trade.target_field, {
         includeLateReplies: currentRun.trigger === "RECALCULATION",

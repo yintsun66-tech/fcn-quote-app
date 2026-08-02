@@ -29,7 +29,12 @@ import {
     pollContext: null,
     latestStatus: null,
     inMailGrace: false,
+    softDeadlineReached: false,
+    expectedIssuerCount: 0,
+    pendingIssuers: [],
+    fastCloseReady: false,
     latestResultsRfq: null,
+    latestResultTrades: [],
     artifactByQuote: {},
     customFifthSelections: {},
     hasRankings: false,
@@ -165,6 +170,8 @@ import {
         <div class="issuer-pick-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:10px 0">
           ${[["BNP", "BNP"], ["MS", "MS（OBU不得承做）"], ["JPM", "JPM"], ["BARCLAYS", "BARCLAYS"], ["NOMURA", "Nomura"], ["UBS", "UBS"], ["DBS", "DBS"], ["SG", "SG"], ["CITI", "CITI"], ["GS", "GS"], ["CA", "CA"]].map(([value, label]) => `<label class="issuer-pick"><input type="checkbox" class="issuer-pick-item" value="${value}" checked> ${label}</label>`).join("")}
         </div>
+        <p id="backendIssuerPickerSummary" class="issuer-picker-summary" role="status"></p>
+        <p id="backendIssuerPickerHint" class="backend-archive-note"></p>
         <p id="backendIssuerPickerError" class="backend-error" role="alert"></p>
         <div class="dialog-actions">
           <button type="button" id="cancelIssuerPicker" class="secondary">取消</button>
@@ -182,6 +189,8 @@ import {
   const issuerPickerForm = document.querySelector("#backendIssuerPickerForm");
   const issuerPickAll = document.querySelector("#issuerPickAll");
   const issuerPickItems = [...document.querySelectorAll(".issuer-pick-item")];
+  const issuerPickerSummary = document.querySelector("#backendIssuerPickerSummary");
+  const issuerPickerHint = document.querySelector("#backendIssuerPickerHint");
   const issuerPickerError = document.querySelector("#backendIssuerPickerError");
   const newRfqButton = document.querySelector("#backendNewRfq");
   const myRfqsButton = document.querySelector("#backendMyRfqs");
@@ -1422,25 +1431,28 @@ import {
     document.querySelector("#backendRankings").innerHTML = "";
     artifactContainer.innerHTML = "";
     try {
-      const created = await request("/rfqs", {
-        method: "POST", headers: { "idempotency-key": idempotency("create") },
-        body: JSON.stringify({ trades: collectTrades() })
+      const submitted = await request("/rfqs/submit", {
+        method: "POST", headers: { "idempotency-key": idempotency("submit") },
+        body: JSON.stringify({
+          trades: collectTrades(),
+          issuers: Array.isArray(issuers) ? issuers : []
+        })
       });
-      const rfqId = created.rfq.id;
-      await request(`/rfqs/${rfqId}/validate`, { method: "POST", body: "{}" });
-      await request(`/rfqs/${rfqId}/send`, {
-        method: "POST", headers: { "idempotency-key": idempotency("send") },
-        body: JSON.stringify({ issuers: Array.isArray(issuers) ? issuers : [] })
-      });
+      const rfqId = submitted.rfq.id;
       state.rfqId = rfqId;
       state.snapshotVersion = null;
       state.pollDelayMs = 4000;
       state.pollContext = null;
       state.latestStatus = null;
       state.latestResultsRfq = null;
+      state.latestResultTrades = [];
       state.artifactByQuote = {};
       state.customFifthSelections = {};
       state.inMailGrace = false;
+      state.softDeadlineReached = false;
+      state.expectedIssuerCount = Array.isArray(issuers) ? issuers.length : 0;
+      state.pendingIssuers = [];
+      state.fastCloseReady = false;
       state.hasRankings = false;
       updateRfqUrl(rfqId);
       statusElement.textContent = `詢價 ${rfqId} 已交由後端寄送，系統會在時限內完成比價。`;
@@ -1471,8 +1483,16 @@ import {
       && ["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus)
     );
     state.inMailGrace = inMailGrace;
-    const softReminder = softDeadline && now >= softDeadline && remaining > 0 && !inMailGrace
-      ? "｜已達 7 分鐘，可查看暫定前四名與自選候選或提早結束"
+    state.softDeadlineReached = Boolean(softDeadline && now >= softDeadline);
+    state.expectedIssuerCount = Array.isArray(payload.issuers) ? payload.issuers.length : 0;
+    state.pendingIssuers = Array.isArray(payload.issuers)
+      ? payload.issuers.filter(item => item.status === "PENDING").map(item => item.issuer)
+      : [];
+    const smallRfq = state.expectedIssuerCount > 0 && state.expectedIssuerCount <= 3;
+    const softReminder = state.softDeadlineReached && remaining > 0 && !inMailGrace
+      ? smallRfq
+        ? "｜已達 7 分鐘，若報價足夠可立即完成比價"
+        : "｜已達 7 分鐘，可查看暫定前四名與自選候選或提早結束"
       : "";
     document.querySelector("#backendCountdown").textContent = ["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       ? `狀態：${payload.rfq.workflowStatus}｜版本 ${payload.rfq.rankingVersion}`
@@ -1487,11 +1507,37 @@ import {
     updateProvisionalBanner();
   }
 
+  function updateFastCloseState() {
+    const expected = state.expectedIssuerCount;
+    const minimum = Math.min(2, expected);
+    state.fastCloseReady = Boolean(
+      expected > 0
+      && expected <= 3
+      && state.softDeadlineReached
+      && !state.inMailGrace
+      && state.latestResultTrades.length > 0
+      && state.latestResultTrades.every(trade => Number(trade.validQuoteCount) >= minimum)
+    );
+    const allFive = Boolean(state.latestResultsRfq?.allTradesHaveFiveValidQuotes);
+    finalizeButton.classList.toggle("attention", allFive || state.fastCloseReady);
+    finalizeButton.textContent = state.fastCloseReady ? "以目前報價完成比價" : "提早結束並比價";
+  }
+
   function updateProvisionalBanner() {
     const banner = document.querySelector("#backendProvisionalBanner");
     if (!banner || !state.latestResultsRfq?.isProvisional) return;
+    updateFastCloseState();
+    const expected = state.expectedIssuerCount;
+    const minimum = Math.min(2, expected);
+    const lowestValidCount = state.latestResultTrades.length
+      ? Math.min(...state.latestResultTrades.map(trade => Number(trade.validQuoteCount) || 0))
+      : 0;
     banner.textContent = state.inMailGrace
       ? "正在等待最後郵件轉送；以下仍為暫定前四名與可自選候選，60 秒緩衝結束後才會建立正式排名與報價圖。"
+      : expected > 0 && expected <= 3
+        ? state.fastCloseReady
+          ? `本次選擇 ${expected} 家，每筆已有至少 ${minimum} 家有效報價；可立即完成比價，尚未回覆者不列入本版本。`
+          : `本次選擇 ${expected} 家，每筆目前至少收到 ${lowestValidCount} 家有效報價；回覆齊全會自動完成，7 分鐘後達 ${minimum} 家即可選擇立即完成。`
       : state.latestResultsRfq.allTradesHaveFiveValidQuotes
         ? "每筆交易均已有至少五家有效報價，可提早結束並產生正式前四名與自選第五名。"
         : "以下為暫定前四名與可自選候選，回覆期間內仍可能變動，不會建立正式排名或報價圖。";
@@ -1531,9 +1577,10 @@ import {
   function renderResults(payload, artifactByQuote = {}) {
     state.hasRankings = payload.trades.some(trade => trade.rankings.length > 0);
     state.latestResultsRfq = payload.rfq;
+    state.latestResultTrades = payload.trades;
     state.artifactByQuote = artifactByQuote;
     const provisional = Boolean(payload.rfq.isProvisional);
-    finalizeButton.classList.toggle("attention", Boolean(payload.rfq.allTradesHaveFiveValidQuotes));
+    updateFastCloseState();
     const banner = provisional
       ? "<p id=\"backendProvisionalBanner\" class=\"backend-provisional\"></p>"
       : "";
@@ -1635,7 +1682,7 @@ import {
       state.pollDelayMs = 4000;
       return state.pollDelayMs;
     }
-    state.pollDelayMs = state.pollDelayMs <= 4000 ? 8000 : 15000;
+    state.pollDelayMs = state.pollDelayMs <= 4000 || Number(context?.expectedIssuerCount) <= 3 ? 8000 : 15000;
     return state.pollDelayMs;
   }
 
@@ -1666,6 +1713,7 @@ import {
         state.pollContext = {
           workflowStatus: status.rfq.workflowStatus,
           deadlineAt: status.rfq.deadlineAt,
+          expectedIssuerCount: Array.isArray(status.issuers) ? status.issuers.length : 0,
           isProvisional: Boolean(results?.rfq?.isProvisional),
           hasPendingArtifacts: artifacts.some(item => item.status === "QUEUED" || item.status === "RENDERING")
         };
@@ -1688,7 +1736,23 @@ import {
     const kiIssue = kiBarrierIssue();
     if (kiIssue) { statusElement.textContent = kiIssue; statusElement.classList.remove("success"); return; }
     issuerPickerError.textContent = "";
+    updateIssuerPickerSummary();
     if (!issuerPickerDialog.open) issuerPickerDialog.showModal();
+  }
+
+  const issuerBatchByName = {
+    BNP: "BMJB", MS: "BMJB", JPM: "BMJB", BARCLAYS: "BMJB",
+    NOMURA: "NOMURA", UBS: "UBS", DBS: "DBS", SG: "SG", CITI: "CITI", GS: "GS", CA: "CA"
+  };
+
+  function updateIssuerPickerSummary() {
+    const selected = issuerPickItems.filter(item => item.checked).map(item => item.value);
+    const batchCount = new Set(selected.map(issuer => issuerBatchByName[issuer]).filter(Boolean)).size;
+    const fastCloseMinimum = Math.min(2, selected.length);
+    issuerPickerSummary.textContent = `已選 ${selected.length} 家發行機構，將寄出 ${batchCount} 封詢價郵件。`;
+    issuerPickerHint.textContent = selected.length > 0 && selected.length <= 3
+      ? `精簡詢價：全部回覆完成時會立即比價；若仍有未回覆，7 分鐘後且每筆至少有 ${fastCloseMinimum} 家有效報價時，可選擇提前完成。`
+      : "系統收到全部回覆會立即完成；否則保留原有 15 分鐘等待與 60 秒郵件轉送緩衝。";
   }
 
   document.addEventListener("click", event => {
@@ -1696,8 +1760,14 @@ import {
       event.preventDefault(); event.stopImmediatePropagation(); openIssuerPicker();
     }
   }, true);
-  issuerPickAll.addEventListener("change", () => { issuerPickItems.forEach(item => { item.checked = issuerPickAll.checked; }); });
-  issuerPickItems.forEach(item => item.addEventListener("change", () => { issuerPickAll.checked = issuerPickItems.every(entry => entry.checked); }));
+  issuerPickAll.addEventListener("change", () => {
+    issuerPickItems.forEach(item => { item.checked = issuerPickAll.checked; });
+    updateIssuerPickerSummary();
+  });
+  issuerPickItems.forEach(item => item.addEventListener("change", () => {
+    issuerPickAll.checked = issuerPickItems.every(entry => entry.checked);
+    updateIssuerPickerSummary();
+  }));
   document.querySelector("#cancelIssuerPicker").addEventListener("click", () => issuerPickerDialog.close());
   issuerPickerForm.addEventListener("submit", event => {
     event.preventDefault();
@@ -2042,7 +2112,8 @@ import {
   });
   finalizeButton.addEventListener("click", async () => {
     if (!state.rfqId) return;
-    if (!window.confirm("確定要提早結束詢價並立即比價嗎？尚未回覆的發行機構將不列入本次排名。")) return;
+    const pending = state.pendingIssuers.length ? ` 尚未回覆：${state.pendingIssuers.join("、")}。` : "";
+    if (!window.confirm(`確定要提早結束詢價並立即比價嗎？尚未回覆的發行機構將不列入本次排名。${pending}`)) return;
     finalizeButton.disabled = true;
     try {
       await request(`/rfqs/${state.rfqId}/finalize`, { method: "POST", body: "{}" });

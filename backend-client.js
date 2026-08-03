@@ -49,14 +49,17 @@ import {
   shell.className = "backend-shell";
   shell.innerHTML = `
     <div class="backend-userbar" hidden>
-      <span id="backendUser"></span>
-      <button id="backendNewRfq" type="button" class="secondary">新增詢價</button>
+      <span id="backendUser" class="backend-mobile-collapsible"></span>
+      <button id="backendNewRfq" type="button" class="secondary backend-mobile-collapsible">新增詢價</button>
       <button id="backendMyRfqs" type="button" class="secondary">我的詢價 <span id="backendRfqBadge" class="backend-rfq-badge" hidden>0</span></button>
-      <button id="backendAdminAccounts" type="button" class="secondary" hidden>所有帳號列表</button>
-      <button id="backendAdminRegistrations" type="button" class="secondary" hidden>使用者申請審核</button>
-      <button id="backendAdminOutbound" type="button" class="secondary" hidden>管理者寄件紀錄</button>
-      <button id="backendAdminTimelines" type="button" class="secondary" hidden>RFQ 處理時間軸</button>
-      <button id="backendLogout" type="button" class="secondary">登出</button>
+      <button id="backendAdminAccounts" type="button" class="secondary backend-mobile-collapsible" hidden>所有帳號列表</button>
+      <button id="backendAdminRegistrations" type="button" class="secondary backend-mobile-collapsible" hidden>使用者申請審核</button>
+      <button id="backendAdminOutbound" type="button" class="secondary backend-mobile-collapsible" hidden>管理者寄件紀錄</button>
+      <button id="backendAdminTimelines" type="button" class="secondary backend-mobile-collapsible" hidden>RFQ 處理時間軸</button>
+      <button id="backendLogout" type="button" class="secondary backend-mobile-collapsible">登出</button>
+      <button id="backendMobileActionsToggle" type="button" class="secondary backend-mobile-menu-toggle" aria-expanded="false" aria-label="展開其他操作">
+        <span id="backendMobileActionsLabel">更多</span><span class="backend-mobile-toggle-icon" aria-hidden="true">⌃</span>
+      </button>
     </div>
     <main id="backendAnalysisView" class="backend-analysis-view" hidden>
       <section class="backend-analysis-shell">
@@ -202,6 +205,9 @@ import {
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
   const userbar = document.querySelector(".backend-userbar");
+  const mobileActionsToggle = document.querySelector("#backendMobileActionsToggle");
+  const mobileActionsLabel = document.querySelector("#backendMobileActionsLabel");
+  const mobileUserbarMedia = matchMedia("(max-width: 760px)");
   const adminRegistrationsButton = document.querySelector("#backendAdminRegistrations");
   const adminRegistrationReviewDialog = document.querySelector("#backendRegistrationReview");
   const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
@@ -236,6 +242,14 @@ import {
   const analysisError = document.querySelector("#backendAnalysisError");
   const analysisBack = document.querySelector("#backendAnalysisBack");
 
+  function setMobileActionsExpanded(expanded) {
+    const next = Boolean(expanded && mobileUserbarMedia.matches && state.user);
+    userbar.classList.toggle("is-expanded", next);
+    mobileActionsToggle.setAttribute("aria-expanded", String(next));
+    mobileActionsToggle.setAttribute("aria-label", next ? "收合其他操作" : "展開其他操作");
+    mobileActionsLabel.textContent = next ? "收合" : "更多";
+  }
+
   function cookie(name) {
     return document.cookie.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) || "";
   }
@@ -268,6 +282,7 @@ import {
 
   function setUser(user) {
     state.user = user;
+    setMobileActionsExpanded(false);
     userbar.hidden = !user;
     const isSupport = !!user && (user.role === "ADMIN" || user.role === "PS");
     adminAccountsButton.hidden = !isSupport;
@@ -2074,6 +2089,28 @@ import {
   });
   document.querySelector("#showRegistration").addEventListener("click", () => { loginForm.hidden = true; registrationForm.hidden = false; });
   document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
+  mobileActionsToggle.addEventListener("click", event => {
+    event.stopPropagation();
+    setMobileActionsExpanded(mobileActionsToggle.getAttribute("aria-expanded") !== "true");
+  });
+  userbar.addEventListener("click", event => {
+    if (!mobileUserbarMedia.matches || event.target.closest("#backendMobileActionsToggle")) return;
+    if (event.target.closest("button")) setMobileActionsExpanded(false);
+  });
+  document.addEventListener("click", event => {
+    if (userbar.classList.contains("is-expanded") && !userbar.contains(event.target)) {
+      setMobileActionsExpanded(false);
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && userbar.classList.contains("is-expanded")) {
+      setMobileActionsExpanded(false);
+      mobileActionsToggle.focus();
+    }
+  });
+  addEventListener("resize", () => {
+    if (!mobileUserbarMedia.matches) setMobileActionsExpanded(false);
+  }, { passive: true });
   newRfqButton.addEventListener("click", () => {
     if (rfqHistoryDialog.open) rfqHistoryDialog.close();
     closeRfqProgress();

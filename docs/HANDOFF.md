@@ -1,8 +1,205 @@
 # Project handoff
 
-Updated: 2026-08-01 (Asia/Taipei)
+Updated: 2026-08-05 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`, merged into `main` on 2026-07-31.
+Current branch: `codex/market-analysis-phase2-4` (`a55991c`), pushed to its remote tracking branch.
+Current `main` is `f11da30`, five commits behind. The feature branch also contains the newer
+internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
+are byte-identical is historical.
+
+Current production Worker: `ec186766-96ed-4b27-8eaa-9c813bf31693`, resolved from
+`wrangler deployments list`, not from a branch name. Verification baseline is now **27 test files /
+202 tests**; the 198 recorded elsewhere is historical.
+
+## Appearance picker and a contrast sweep (committed, pushed and deployed, 2026-08-05)
+
+The quote page has a three-state appearance picker (自動／淺色／深色) at the top of `.app-shell`.
+`自動` is the behaviour the page already had, so an explicit choice can always be handed back to the
+OS. The choice is stored under the single `localStorage` key `fcn-theme` and is honoured by
+`guide.html` and `follow-board.html`, neither of which carries its own picker.
+
+Mechanism, because it matters for future edits: the dark rules were moved **verbatim** out of the
+`@media (prefers-color-scheme: dark)` blocks into `styles-dark.css` and `follow-board-dark.css`,
+which the pages link with `media="(prefers-color-scheme: dark)"`. The picker rewrites that attribute
+to `all` or `not all`. No selector was rewritten, so specificity and cascade position are unchanged,
+and with JavaScript disabled the OS setting still wins. A pre-paint inline script in `<head>` applies
+the stored choice during head parsing; it is deliberately **not** in `app.js`, so the quoting flow
+gains no new failure mode. Both new stylesheets were added to the `backend/scripts/prepare-assets.mjs`
+allowlist. `.follow-hero .back-link` stayed in `follow-board.css` on purpose: it beats the
+`.back-link` rules in the dark sheet on specificity (0,2,0), not on order.
+
+The PNG layouts stay pinned light in **all three** states. The `.download-*` pinning rules travel
+with the dark sheet because they exist only to counteract it; when the picker forces light the sheet
+is off and the card keeps its ordinary light styling. Verified by measuring an injected download
+card in each state — identical every time — and `.quote-sheet` keeps its light ink throughout.
+
+Contrast defects fixed, found by sweeping every state rather than waiting for reports. Each was a
+whole class, not the single element that prompted it:
+
+- `<summary>` and `<label>` in the backend markup kept a hard-coded dark teal and landed near 2:1 on
+  the dark cards; the dark rules had remapped headings only
+- guide table headers set a background but no colour, inheriting the near-black label token (1.8:1);
+  the only table in the repo written that way
+- the trade navigator, which exists only at ≤760 px and so had never appeared in a desktop sweep:
+  heading 2.0:1, current-trade label 3.1:1, hint 3.07:1 in dark
+- both hero gradients (the quote page and the follow board each carry their own copy) were too light
+  at the far stop for white body text at any opacity; light stop darkened to `#0c7e8d`
+- `.backend-rfq-badge` 4.16:1, which only exists once `backend-client.js` activates and so was
+  absent from every `file://` sweep
+- secondary label tokens at 0.6 alpha, 3.3–3.44:1 on light surfaces, in both token tables
+
+Verification: `index.html`, `guide.html` and `follow-board.html`, in all three picker states, at
+desktop and 375 px, with ratios composited against the real backing surface and the WCAG large-text
+allowance applied — no element below its threshold. The live site was swept in backend mode as well,
+which is what surfaced the badge. 27 test files / 202 tests pass.
+
+Two traps worth recording. The first sweeps used a scanner whose ancestor walk stopped **before**
+`<html>`, so pages whose backdrop lives on the root element fell through to a white default and
+produced bogus failures — 8 of 9 findings on `guide.html` were artifacts. Second, flipping a
+`<link media>` attribute recalculates styles asynchronously, so measuring in the same synchronous
+task returns the previous cascade; every theme switch must be followed by a yield before reading
+computed values.
+
+Smallest safe next step: the backend dialogs (login, results, admin, analysis) were verified by
+injecting markup rather than by driving the real UI, and 「下載報價圖」 still has no real-device test.
+
+## Personal LINE destination (committed, pushed and deployed, 2026-08-04)
+
+The follow-board notification route now reads the designated recipient from the Secret
+`LINE_USER_ID` instead of `LINE_GROUP_ID`. The code accepts only a personal LINE identifier
+matching `U` plus 32 hexadecimal characters; group (`C...`) and room (`R...`) values fail closed as
+`NOT_CONFIGURED`, and there is deliberately no fallback to the old group. Message contents, public
+image-token controls, retry de-duplication, timeout behavior and safe audit metadata are unchanged.
+
+ADR 0033 records the delivery-boundary change. No migration, public API, dependency, lockfile or
+message-format change is involved. The operator added the Official Account as a friend and entered
+`LINE_USER_ID` through Wrangler's hidden prompt; only the Secret name was verified afterwards. The
+legacy `LINE_GROUP_ID` Secret still exists for rollback evidence but deployed code never reads it.
+
+Changed source and contract files: `backend/src/line-push.ts`, `backend/src/types.ts`,
+`backend/test/line-push.test.ts`, `backend/wrangler.jsonc`, `docs/backend/contracts.md`,
+`docs/adr/0033-line-personal-delivery.md`, and the ADR index. Preserve the user-owned untracked
+`.claude/` and `output/` directories and the unrelated outstanding documentation edits.
+
+Verification: the focused LINE suite passed 13/13, including invalid group destinations and an
+explicit proof that a legacy `LINE_GROUP_ID` cannot be used as fallback; both source and test
+TypeScript checks passed; all 27 test files / 202 tests passed; and the Worker dry-run build passed
+after rerunning outside the filesystem sandbox. No real LINE push or follow-board publication was
+performed. Commit `7a69fad`
+(`feat(line): deliver follow-board alerts to personal chat`) is on
+`origin/codex/market-analysis-phase2-4` and was deployed as Cloudflare Worker
+`cb579ede-df31-4c01-9e88-cbf23819603a`. Post-deploy health returned HTTP 200 / `{ "status": "ok" }`
+and the disabled webhook remained HTTP 404. The next real follow-board publication is the first
+end-to-end proof of personal delivery. Smallest safe next step: publish one genuine follow-board
+product, confirm that the designated person receives both the quote image and Flex text, inspect
+the redacted `FOLLOW_BOARD_LINE_PUSHED` audit result, and only then delete the old
+`LINE_GROUP_ID` Secret.
+
+## Early-finalize browser confirmation fix (committed, pushed and deployed, 2026-08-04)
+
+Read-only production D1 evidence showed that the owner-scoped backend endpoint and ranking queue
+remain healthy: multiple RFQs finalized successfully after user requests made 6–13 minutes after
+send, normally completing ranking in about 3–6 seconds. The reported current failure had valid
+quotes but no `RFQ_EARLY_FINALIZE_REQUESTED` audit event and no rank job, proving that the request
+never left the browser. The only client-side gate before `fetch` was the native `window.confirm`
+shown on top of the existing modal progress dialog; that prompt can be suppressed or appear
+unresponsive in some Edge/mobile dialog combinations.
+
+The progress page now uses an inline, focusable confirmation panel instead of the native prompt.
+It lists pending issuers, offers explicit `繼續等待` and `確認提前結束並比價` actions, disables
+duplicate submission while the request is in flight, clears the snapshot version after acceptance,
+and refreshes stale `RFQ_NOT_WAITING`/mail-grace states. The server endpoint, CSRF/ownership checks,
+seven-minute soft reminder, fifteen-minute reply window and final sixty-second mail grace are
+unchanged.
+
+Verification: root JavaScript syntax passed; all 27 backend test files / 202 tests passed; backend
+typecheck and Worker dry-run build passed. A same-origin local browser harness using the real client
+confirmed that at eight minutes the first click opens the inline warning without sending, cancel
+sends nothing, confirmation sends exactly one `POST /finalize`, and the page moves to `FINALIZING`.
+At 390 px the panel and both full-width actions remain inside the viewport. No real RFQ, email or
+production mutation was created. No migration, binding, Secret, dependency or lockfile changed.
+
+Release evidence: commit `e071d09` (`fix(rfq): make early finalization confirmation reliable`) is
+on `origin/codex/market-analysis-phase2-4`. Cloudflare Worker version
+`19f16b25-bc25-4b42-b133-7a3f6d4c87f9` was deployed to `api.yintsun66.com` and
+`app.yintsun66.com`. Cache-busted production checks returned HTTP 200 / `{ "status": "ok" }`,
+loaded the `early-finalize-v1` page token, the inline confirmation client code and responsive CSS,
+and confirmed that the old native early-finalize prompt is absent.
+
+## DAC/DRA market analysis (committed, pushed and deployed, 2026-08-04)
+
+The completed-RFQ analysis flow now accepts `DAC`, `DRA`, `WRA` and `Range Accrual`, normalizes
+those aliases to canonical product `DAC`, and exposes the same owner-scoped analysis action used by
+FCN. The existing `authorizeCardQuote` boundary, completed-ranking requirement and rank 1–4/custom
+fifth eligibility are unchanged. Unsupported products still fail closed.
+
+DAC-family analysis adds a prominent product warning and a scenario column stating that, after the
+guaranteed-interest period, **all** linked underlyings must be strictly above Strike for that period
+to meet the interest condition. The selected-quote panel replaces the visible `Note Price` tile
+with the linked-underlying list; the API still returns `upfrontOrNotePricePct` for compatibility.
+ADR 0032 records this product-scope decision and supersedes only the FCN-only scope in ADR 0020.
+
+Verification completed locally: root JavaScript syntax checks passed; targeted market-analysis and
+ranking integration tests passed (10/10); backend typecheck passed; all 27 test files / 202 tests
+passed; the Worker dry-run build passed; and browser checks at 390 px and 1280 px confirmed no page
+overflow, the full DAC warning, linked underlyings, and absence of the `Note Price` label. The linked
+production RFQ could not be inspected while signed out, so no authenticated production data was
+changed and no real RFQ or email was created. There is no migration, binding, Secret, dependency or
+lockfile change. Feature commit `e485394` was pushed to
+`origin/codex/market-analysis-phase2-4` and deployed as Worker
+`9c104c67-2474-4ba3-9612-ef3ecc01d72a`. Cache-bypassed production checks returned HTTP 200 for the
+health endpoint, homepage, client module, analysis module and stylesheet; the served assets contain
+the DAC link gate, linked-underlying tile, strict `indexPct > strikePct` rule and product-warning
+styles. No authenticated production RFQ or outbound email was created during verification.
+
+## Mobile userbar collapse (committed, pushed and deployed, 2026-08-03)
+
+The signed-in mobile action bar no longer covers as much of the RFQ form by default. At viewports
+up to 760 px it now keeps only `我的詢價` and a compact `更多` disclosure button visible. User
+identity, new-RFQ, ADMIN/PS controls and logout remain available after explicit expansion. The menu
+collapses after choosing an action, tapping outside, pressing Escape, signing out/in, or returning
+to a wider viewport. Desktop and tablet-width layouts above 760 px retain the complete action bar.
+
+The implementation is limited to root `backend-client.js`, `styles.css`, and the corresponding
+cache tokens in `index.html`; it does not change authentication, APIs, D1, Cloudflare bindings,
+dependencies or email behavior. Root JavaScript syntax checks passed. Backend typecheck passed, all
+27 test files / 198 tests passed, and the Worker dry-run build passed. A local responsive browser
+check confirmed that 390 px shows only `我的詢價` plus `更多`, expands within the viewport, and
+collapses with Escape; 1280 px continues to show the full bar. Implementation commit `073593e` is
+pushed and was deployed from a clean detached worktree as Worker
+`a0b746bf-980f-481c-9b60-877bd654b2ed`. Post-deploy checks returned health HTTP 200 with
+`{"status":"ok"}`; cache-bypassed reads of the homepage, client and stylesheet all returned HTTP
+200 and contained the `mobile-userbar-v1` token and new collapse selectors. No production login,
+RFQ or email was created. Preserve the unrelated pre-existing documentation edits and the
+user-owned untracked `.claude/` and `output/` directories.
+
+The same three allowlisted public assets were independently synced to the sanctioned
+`yintsun66-tech/fcnV2` GitHub Pages repository as program commit `648a1c8`; status-page commit
+`01bc94e` records source commit `073593e`, static program commit `648a1c8`, and Worker
+`a0b746bf-980f-481c-9b60-877bd654b2ed`. Cache-bypassed public reads returned HTTP 200 and confirmed
+the `mobile-userbar-v1` token, collapse JavaScript/CSS markers, and all three version identifiers.
+No backend source, D1 migration, Secret, private data or generated Worker asset was copied.
+
+## Mobile entry, main integration and static release (2026-08-02)
+
+The latest shared entry UI keeps the desktop/tablet one-trade-per-row table, while viewports up to
+760 px hide fixed-value fields without removing their submitted values and expose a sticky
+transaction navigator for rapid switching among 1–20 trades. Feature commit `d81cc5c` was deployed
+from the state recorded by `283dfe5`; the live Worker is
+`088fb054-3e52-48d0-b409-6b486d2db44f`. The feature branch is now `8165539`, and `main` is
+`f11da30` after the functional merge `a082291` and the deployment-status merge. Their current file
+trees are identical.
+
+The sanctioned static snapshot at `https://yintsun66-tech.github.io/fcnV2/` carries the same public
+entry assets: program commit `debea38`, followed by status-document commit `d2f94ab`. The
+`fcn-quote-app` repository's own GitHub Pages remains disabled. The static repository does not
+receive Worker source, D1 migrations, Secrets, private fixtures or backend data.
+
+Verification for this release: root JavaScript syntax checks passed; backend typecheck passed;
+all 27 test files / 198 tests passed; dry-run build passed; 390 px and 1280 px browser checks passed;
+and both Cloudflare and GitHub Pages assets returned the expected cache versions over HTTP. No real
+RFQ or bank email was created by these checks. Preserve the user-owned untracked `.claude/` and
+`output/` directories.
 
 ## RFQ acceleration deployed (2026-08-01)
 
@@ -218,16 +415,17 @@ A read-only `GET /v2/bot/info` against the channel may identify it sooner.
 ## Current state at a glance
 
 This document is long and append-only: each section records what was true on its own date. **This
-block is the only one that claims to describe the present.** Everything below it is history and must
-not be edited to match later reality.
+block and the dated release sections above it describe the present baseline.** Everything below it
+is history and must not be edited to match later reality.
 
 | | |
 |---|---|
-| Source | `codex/market-analysis-phase2-4` (`599a31d`) = `main` (`9346760`), both pushed, trees identical |
-| Deployed Worker | `7ea7c41e-ae32-4610-92c5-39f879779919`. **Resolve the live id from `wrangler deployments list`, never from this table** |
-| Remote D1 | migrations applied through `0017` |
-| Verification | 27 test files / 197 tests; typecheck (source + test) and dry-run build clean |
-| GitHub Pages | **disabled** on `fcn-quote-app`; the only sanctioned static site is `fcnV2` |
+| Source | feature `8165539` = `main` `f11da30`; both pushed and trees identical on 2026-08-02 |
+| Deployed Worker | `088fb054-3e52-48d0-b409-6b486d2db44f` (source state recorded by `283dfe5`). **Resolve the live id from `wrangler deployments list`, never from this table** |
+| Remote D1 | no pending migration on 2026-08-02; local migration set ends at `0017` |
+| Verification | 27 test files / 198 tests; root JS syntax, typecheck and dry-run build clean; 390 px / 1280 px UI checks passed |
+| GitHub Pages | **disabled** on `fcn-quote-app`; sanctioned `fcnV2` snapshot is program `debea38`, status HEAD `d2f94ab` |
+| Entry UI | ≤760 px hides fixed fields but preserves values and shows the trade navigator; larger viewports keep the row table |
 | Previous close | **working** — Twelve Data, verified in production against an independent source |
 | `RETENTION_ENABLED` | `"0"` — deletion is irreversible and needs separate authorization |
 | `LINE_PUSH_ENABLED` | `"1"` — live, but never observed delivering |

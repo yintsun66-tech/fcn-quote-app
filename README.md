@@ -2,6 +2,9 @@
 
 ## 兩種執行模式
 
+- **Cloudflare 正式版**：有登入、自動寄信、回信解析、排名、報價圖、管理功能與市場資料。
+- **GitHub Pages 靜態版**：免登入、以手動郵件流程詢價，並共用公開首頁、操作說明與 PIN 跟單頁。
+
 ## 跟單專區
 
 `follow-board.html` 是靜態相容模式與 Cloudflare 應用共用的獨立跟單頁。訪客不需註冊，
@@ -53,10 +56,14 @@ Cloudflare 正式模式的「手動貼郵件詢價」也共用此備援流程，
 新帳號申請只需分行名稱、五碼行編與密碼；核准後以五碼行編登入。既有帳號仍沿用
 原本的登入名稱，不會被自動改名。
 
+手機寬度（760px 以下）會隱藏 OTC、觀察頻率、T+7 等固定值欄位，但值仍會保留在
+詢價資料及郵件中；畫面上方的交易快捷列可直接切換第 1～20 筆。平板與桌機仍使用
+同一筆交易一列的表格模式。這套輸入介面同時存在於正式版與靜態版。
+
 API 位於 `https://api.yintsun66.com`。後端程式、D1 migrations、Queue consumers、
 Durable Object、R2 與測試位於 `backend/`。
 
-完成詢價後，FCN 正式排名中的前四名或自選第五名可另開「市場與風險分析」頁。
+完成詢價後，FCN 或 DAC／DRA 正式排名中的前四名或自選第五名可另開「市場與風險分析」頁。
 Phase 1 只使用該筆經後端授權的單一發行機構報價；參考現價由使用者手動輸入並只
 保存在目前瀏覽器，不會改變排名、寄件、報價圖或 D1。Phase 2 已加入使用者同意後才
 載入的 TradingView 單一圖表，以及 Yahoo Finance、Google
@@ -82,26 +89,26 @@ Alpha Vantage 仍失敗但已無人依賴；不得恢復已移除的 movers API�
 
 ## 目前正式環境基線
 
-- 正式後端來源分支為 `codex/market-analysis-phase2-4`，已於 2026-08-01 再次合併進 `main`
-  （merge commit `9346760`，合併後 tree 與分支逐位元組相同）。`main` 現在包含完整
+- 正式後端來源分支為 `codex/market-analysis-phase2-4`（`8165539`），已合併進 `main`
+  （目前 `main` 為 `f11da30`，功能合併節點為 `a082291`；2026-08-02 核對兩者 tree
+  逐位元組相同）。`main` 現在包含完整
   Cloudflare 後端，不再只是純靜態檔案。但部署仍是從工作樹執行 `wrangler deploy`、
   不是從 `main` 觸發，所以兩者日後仍可能分歧。
-- 正式功能程式基線為 `599a31d`；實際最新分支 HEAD
-  仍應以 Git history 與 [HANDOFF](docs/HANDOFF.md) 為準。
-- 最新正式 Worker 版本為 `7ea7c41e-ae32-4610-92c5-39f879779919`（2026-08-01
-  部署，程式來自 commit `599a31d`）。Cloudflare 每次部署都會整包取代 Worker，
+- 最新正式 Worker 版本為 `088fb054-3e52-48d0-b409-6b486d2db44f`（2026-08-02
+  部署，來源狀態記錄於 `283dfe5`）。Cloudflare 每次部署都會整包取代 Worker，
   因此**只上傳一個資產的部署同樣在服務程式**。若之後只重新發布狀態頁，
   線上版本編號會比上面這一組高而程式內容相同；以 `wrangler deployments list` 為準。
-- 跟單商品發布後會推播到一個私密 LINE 群組（`LINE_PUSH_ENABLED="1"`，2026-07-31
-  啟用）。推播在發布交易 commit **之後**才執行且不會拋出例外，LINE 中斷或憑證失效
+- 跟單商品發布後會推播到一位指定使用者的 LINE 私訊（`LINE_PUSH_ENABLED="1"`；
+  `LINE_USER_ID` 已設定）。推播在發布交易 commit **之後**才執行且不會拋出例外，LINE 中斷或憑證失效
   都不會導致發布失敗或回滾。輸出刻意拆成兩則：商品條件圖走公開 URL，因此**手收
-  絕不入圖**；**手收與交易日期只出現在群組訊息本文**。`LINE_CHANNEL_ACCESS_TOKEN`
-  與 `LINE_GROUP_ID` 是 Secret 而非 var，稽核記錄筆數、HTTP 狀態碼與 LINE 自己的
+  絕不入圖**；**手收與交易日期只出現在指定個人的私訊本文**。`LINE_CHANNEL_ACCESS_TOKEN`
+  與 `LINE_USER_ID` 是 Secret 而非 var；收件者必須是 `U...` 個人 ID，`C...` 群組或
+  `R...` 聊天室 ID 會安全停止且不會退回舊群組。稽核記錄筆數、HTTP 狀態碼與 LINE 自己的
   錯誤訊息（識別碼會先遮蔽）。429／5xx 會沿用同一組 retry key 重試一次。
   **推播路徑已證實會執行，但從未成功投遞過** —— 2026-07-31 的第一次真實發布
   在 3.8 秒後收到 LINE 回覆 429，原因至今未確定。
-- `POST /api/v1/public/line/webhook` 僅用於取得 LINE group id（LINE 不以其他方式
-  提供），取得後已關閉：`LINE_WEBHOOK_ENABLED="0"` 時一律回 404。
+- `POST /api/v1/public/line/webhook` 是既有的 group id 探索端點，已不屬於個人推送
+  路徑且維持關閉：`LINE_WEBHOOK_ENABLED="0"` 時一律回 404。
 - 報價圖為**隨選產生**，不再自動產圖（ADR 0016）。圖片在使用者自己的瀏覽器
   光柵化（ADR 0017），不佔用 Cloudflare Browser Rendering 額度、也不寫入 R2；
   本機產圖失敗時會自動退回伺服器產圖。`AUTO_RANK_ONE_IMAGE="1"` 可恢復舊的
@@ -138,7 +145,7 @@ Alpha Vantage 仍失敗但已無人依賴；不得恢復已移除的 movers API�
   主機，與 `fcnV2` 站是**同一個 origin**，等於多出一份不受 `prepare-assets.mjs`
   白名單控制、又會隨 `main` 漂移的前端。
 - GitHub Pages 靜態相容版位於 `https://yintsun66-tech.github.io/fcnV2/`，repository
-  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `7af6b6d`（狀態文件 HEAD `cdafc8a`）。它只包含公開前端，
+  `yintsun66-tech/fcnV2` 的目前靜態程式 commit 為 `debea38`（狀態文件 HEAD `d2f94ab`）。它只包含公開前端，
   不包含 Cloudflare 後端、登入、D1、郵件、排名或私人報價圖服務。
 
 接手前應以 [HANDOFF](docs/HANDOFF.md) 的正式環境證據、已知缺口與下一步為準。
@@ -154,4 +161,4 @@ Alpha Vantage 仍失敗但已無人依賴；不得恢復已移除的 movers API�
 - [API 合約](docs/backend/contracts.md)
 - [部署操作手冊](docs/runbooks/deploy.md)
 - [管理者操作手冊](docs/runbooks/admin.md)
-- [SEC／Alpha Vantage 公開資料操作手冊](docs/runbooks/market-context-operations.md)
+- [SEC／Twelve Data 公開資料操作手冊](docs/runbooks/market-context-operations.md)

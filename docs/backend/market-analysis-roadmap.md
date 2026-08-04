@@ -1,16 +1,17 @@
 # FCN market analysis roadmap — Phases 2 to 4
 
-Status: Phases 2–3 deployed; Phase 4 partially implemented; Alpha Vantage payload validation pending
+Status: Phases 2–3 deployed; Phase 4 hardening remains partial; Twelve Data previous-close path is operational
 Baseline: Phase 1 in `codex/market-analysis-phase1`; Phase 2 work in `codex/market-analysis-phase2-4`
-Updated: 2026-07-30 (Asia/Taipei)
+Updated: 2026-08-02 (Asia/Taipei)
 
 > **ADR 0024 amendment.** Market-idea/hot-list content is no longer an Alpha Vantage feature. It is
 > on the **homepage** (`index.html`). Five TradingView ranking links are available for both US and
 > Japan markets; only the US market additionally supports the embedded hotlists widget with its
 > built-in active/gainers/losers tabs. Japan is deliberately link-only because every tested Japan
 > widget configuration either failed or silently returned US stocks. The embedded frame remains
-> behind explicit consent. Alpha Vantage is now used **only** for the per-symbol previous close
-> and daily statistics that fill 「輸入標的參考現價」. `GET /api/v1/market/ideas`, the
+> behind explicit consent. The Worker uses **Twelve Data first** for the per-symbol previous close
+> and daily statistics that fill 「輸入標的參考現價」; Alpha Vantage remains a last fallback but
+> has not produced a usable production response. `GET /api/v1/market/ideas`, the
 > `TOP_GAINERS_LOSERS` fetch, the cached-universe rankings and the composite heat score are
 > removed. The sections below describe the resulting current implementation rather than the
 > superseded proposal.
@@ -91,9 +92,11 @@ examples are historical research examples, not current production API contracts:
 - `pytrends` relies on an unofficial Google Trends interface. Google's official Trends API is
   currently limited to approved alpha testers. Google Trends is therefore link-only until this
   project receives official API access.
-- Alpha Vantage has a documented key-based end-of-day API and is used for the approved limited
-  proof-of-concept underlying pool. Its institutional/multi-user licence still requires written
-  confirmation before broader production use.
+- Alpha Vantage has a documented key-based end-of-day API, but the configured fallback has only
+  returned an `Information` envelope in production and is not relied upon.
+- Twelve Data is the operational primary source for the approved limited proof-of-concept
+  underlying pool. Its production use and limits must still be reviewed before materially broader
+  institutional or multi-user use.
 - SEC EDGAR provides keyless JSON APIs and remains suitable for Phase 3 under SEC fair-access
   requirements.
 
@@ -110,7 +113,7 @@ Primary references:
 - Yahoo developer APIs: <https://developer.yahoo.com/api/>
 - Google Trends API alpha: <https://developers.google.com/search/apis/trends>
 
-## Phase 3 — Worker-normalized SEC and Alpha Vantage context
+## Phase 3 — Worker-normalized SEC and end-of-day equity context
 
 ### Goal
 
@@ -120,23 +123,23 @@ quotes. Market ideas are supplied separately by the homepage TradingView links/w
 
 ### Approved release boundary
 
-The user approved migrations `0011` and `0012`, the Alpha Vantage Secret/configuration boundary,
+The user approved migrations `0011`, `0012` and `0017`, provider Secret/configuration boundaries,
 cache retention, monitoring, cleanup, a 50-user concurrent test and the following currently
 implemented fields:
 
 - SEC company identity: CIK, legal name, exchange and ticker;
 - SEC recent filings: latest five 10-K, 10-Q and 8-K filings with filing date and official link;
-- Alpha Vantage: latest completed daily OHLCV, prior close, daily change, 20-day historical
-  volatility, relative volume and 20-day high/low range;
+- provider-independent equity daily context: latest completed daily OHLCV, prior close, daily
+  change, 20-day historical volatility, relative volume and 20-day high/low range;
 - no Yahoo Finance or Google Trends values in the Worker response until approved official access
   exists.
 
-The Alpha Vantage key is obtained separately and is not stored in the repository. The production
-Secret name exists and was entered through Cloudflare Secret management. A read-only production
-check on 2026-07-30 found three fresh SEC instrument/filing pairs, no Alpha Vantage cache row and
-ten provider attempts recorded on 2026-07-29. The key's activation, entitlement and successful
-`TIME_SERIES_DAILY` normalization still require one current-symbol verification before this
-integration is called operational.
+Provider keys are obtained separately and are never stored in the repository. `TWELVE_DATA_API_KEY`
+was entered through Cloudflare Secret management. Production verification on 2026-08-01 observed a
+fresh Twelve Data row for TSM (`2026-07-31`, close `404.25`) with no fallback and matched it to an
+independent source for the same session. Alpha Vantage remains the final fallback but is still
+unusable; the application does not depend on it. Yahoo was removed after production proved that its
+endpoint returns 429 from Cloudflare shared egress even when a residential request succeeds.
 
 ### Implemented data model
 
@@ -222,13 +225,13 @@ Implemented TTL:
 
 - instrument mapping: 30 days;
 - SEC filing index and normalized company identity: 24 hours;
-- Alpha Vantage daily equity: 24 hours.
+- provider-independent daily equity: 24 hours.
 - stale fallback: no more than 7 days and always labelled stale.
 
 ### Security and operating controls
 
-- Store `ALPHA_VANTAGE_API_KEY` only as a Cloudflare Secret.
-- Enforce a shared daily attempted-request budget, defaulting to 24, before calling the provider.
+- Store `TWELVE_DATA_API_KEY` and the optional `ALPHA_VANTAGE_API_KEY` only as Cloudflare Secrets.
+- Enforce separate daily attempted-request budgets per provider before any upstream call.
 - Identify the SEC client according to SEC fair-access guidance.
 - Bind upstream hosts exactly; reject arbitrary proxy URLs.
 - Apply per-user and per-IP rate limits.
@@ -239,15 +242,16 @@ Implemented TTL:
 ### Verification
 
 - Synthetic tests cover fresh-cache reuse, stale fallback, upstream failure, strict symbol
-  normalization, SEC filing filtering, Alpha Vantage daily-series normalization and daily-budget
+  normalization, SEC filing filtering, provider-chain daily-series normalization and daily-budget
   exhaustion, ADMIN authorization, cleanup, same-key miss coalescing and 50 simultaneous users.
 - The complete repository suite, typecheck and dry-run build remain mandatory before handoff.
-- Migration/Secret/deployment are complete. SEC has current production cache evidence; successful
-  Alpha Vantage payload and upstream latency evidence remain unverified.
+- Migrations, Twelve Data Secret and deployment are complete. SEC and Twelve Data both have current
+  production cache evidence; Alpha Vantage remains an unneeded, unverified fallback.
 
 Primary references:
 
 - SEC EDGAR APIs: <https://www.sec.gov/search-filings/edgar-application-programming-interfaces>
+- Twelve Data API documentation: <https://twelvedata.com/docs>
 - Alpha Vantage API: <https://www.alphavantage.co/documentation/>
 - Alpha Vantage support/limits: <https://www.alphavantage.co/support/>
 
@@ -270,12 +274,12 @@ This sample must be re-measured before completing Phase 4. Its rough density (ab
 trade across the whole application) implies that 10,000 trades could add roughly 330 MB before
 indexes/retention variation. Therefore a 500 MB free D1 database is not a safe long-term 365-day
 store at that volume. Existing email, quote and audit records are a larger capacity driver than
-the Phase 1 browser-only calculations or a shared SEC/Alpha Vantage cache.
+the Phase 1 browser-only calculations or a shared SEC/equity-daily cache.
 
 ### Monitoring dashboard
 
 Track D1 size/growth, rows read/written, cache hit/miss/stale rates, upstream success/latency,
-analysis-input API traffic/latency/errors, Alpha Vantage daily usage, active users and cache
+analysis-input API traffic/latency/errors, per-provider daily usage, active users and cache
 cleanup failures.
 
 The implemented first step is an ADMIN-only safe cache-health panel plus structured Worker error
@@ -318,9 +322,8 @@ polling or automatic load.
 
 ## Remaining implementation order
 
-1. Validate one existing analysis symbol against Alpha Vantage without creating or sending a real
-   RFQ. If it still returns an `Information` envelope, verify provider activation/entitlement;
-   never expose the Secret or retry aggressively.
+1. Monitor Twelve Data cache success, request usage, provider latency and retained failure
+   diagnostics. Do not spend a release trying to revive the unused Alpha Vantage fallback.
 2. Re-measure current D1 size, query/write volume and market-cache growth; the 2026-07-28 sample is
    historical.
 3. Run the production-like mixed RFQ/result/analysis/public-context load test in an explicitly

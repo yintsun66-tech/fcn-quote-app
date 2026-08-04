@@ -29,17 +29,16 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `backend/worker-configuration.d.ts`.
 - A real RFQ, email-route change, D1 mutation, migration, commit, push, merge, or deployment
   requires explicit user authorization.
-- `feature/subject-branch-correlation` is the previous stable backend ancestor. Production source is
-  `codex/market-analysis-phase2-4`, **merged into `main` again on 2026-08-01** (`9346760`) with a
-  tree byte-identical to the branch, so `main` carries the full Cloudflare backend rather than the
-  old static-only set. Do not assume the two stay equal: deployment still runs `wrangler deploy`
-  from a working tree, not from `main`, so the branch can move ahead again. Resolve what is
-  deployed from `wrangler deployments list`, not from a branch name.
-- Production implementation commit `599a31d` is documented by this handoff and
-  currently served by Worker `7ea7c41e-ae32-4610-92c5-39f879779919` on 2026-08-01. Resolve the
-  current branch HEAD from Git rather than copying a historical handoff hash. The current
-  verification baseline is 27 test files / 197 tests. A deployment record is evidence of
-  Worker/static-asset publication, not evidence that real bank mail was delivered.
+- `feature/subject-branch-correlation` is the previous stable backend ancestor. The current feature
+  source is `codex/market-analysis-phase2-4` at `8165539`; it is merged into `main`, whose current
+  HEAD is `f11da30`. Their trees were compared on 2026-08-02 and are byte-identical. Do not assume
+  they remain equal: deployment still runs `wrangler deploy` from a working tree, not from `main`,
+  so either branch can move independently. Resolve what is deployed from
+  `wrangler deployments list`, not from a branch name.
+- The current production Worker is `ec186766-96ed-4b27-8eaa-9c813bf31693`, deployed on
+  2026-08-05 from feature-branch state recorded by `a55991c`. The current verification baseline is
+  27 test files / 202 tests, plus root JavaScript syntax checks, typecheck and dry-run build. A
+  deployment record proves Worker/static-asset publication, not that real bank mail was delivered.
 - Retention (ADR 0030) is implemented but **disabled**: `RETENTION_ENABLED="0"`. Enabling it
   deletes production R2 objects and D1 rows irreversibly and requires explicit authorization. Run
   `applyRetention(env, true)` for a dry-run count first. Never clear
@@ -55,12 +54,14 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   drift with `main` and bypass the `prepare-assets.mjs` allowlist entirely.
 - `yintsun66-tech/fcnV2` is a separate public static snapshot repository. Its `main` branch is
   published from the repository root to `https://yintsun66-tech.github.io/fcnV2/`; current static
-  program commit `7af6b6d` (status-document HEAD `cdafc8a`) mirrors the approved public asset set
+  program commit `debea38` (status-document HEAD `d2f94ab`) mirrors the approved public asset set
   with ZAR, market hot lists, the Zimbra manual-mail fallback, the PIN-gated follow-board page with
-  API fallback, and the front-end performance fixes. It contains no Cloudflare
-  backend or data. Future static syncs must copy only the allowlisted files from
-  `backend/scripts/prepare-assets.mjs`, plus the public status/README documents; never mirror the
-  whole backend directory. Compare the two sites over HTTP, not by hashing working-tree files:
+  API fallback, the mobile trade navigator and the front-end performance fixes. It contains no
+  Cloudflare backend or private data. Future static syncs must copy only the allowlisted files from
+  `backend/scripts/prepare-assets.mjs`, plus explicitly reviewed public status documents; never
+  mirror the whole backend directory. Keep the static repository's purpose-built README and update
+  it separately instead of overwriting it with this repository's internal README. Compare the two
+  sites over HTTP, not by hashing working-tree files:
   Cloudflare serves the Windows working copy (CRLF for files nobody has rewritten) while GitHub
   Pages serves the git-normalized LF blob, and Cloudflare injects a ~359-byte Web Analytics beacon
   into every HTML response. Normalize line endings and ignore that beacon before calling a
@@ -73,6 +74,10 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   BMJB replies from unselected issuers remain auditable but must never enter provisional/final
   results, custom-fifth choices or images. `POST /api/v1/rfqs/submit` is the one-round-trip wrapper;
   keep the individual create/validate/send endpoints compatible.
+- On viewports up to 760 px, the shared trade-entry UI hides fixed-value fields from the visible
+  form while preserving their submitted values, and exposes a sticky trade navigator for 1–20
+  trades. Tablet/desktop keep the single-row table layout. Do not remove fixed values from the
+  model or outbound mail merely because they are hidden on mobile.
 - Public results show economic ranks 1–4 plus a server-returned custom fifth issuer outside those
   ranks. The database still persists the first five economic ranks for compatibility/audit.
   Never authorize an arbitrary quote ID only because the browser submitted it.
@@ -84,6 +89,18 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   browser-time budget), so do not reintroduce automatic rendering without re-measuring capacity.
   Client rasterization must keep its per-step timeouts: every await there can stall on mobile
   WebKit, and an unguarded one leaves the button stuck on 「產圖中…」 forever.
+- The light/dark appearance is user-selectable. `styles-dark.css` and `follow-board-dark.css` hold
+  the dark rules verbatim and are linked with `media="(prefers-color-scheme: dark)"`; a pre-paint
+  inline script rewrites that attribute from the `fcn-theme` `localStorage` key. **Do not fold them
+  back into `@media (prefers-color-scheme: dark)` blocks** — that silently removes the picker while
+  leaving the page looking correct on whichever appearance you happen to be testing. Do not move the
+  theme script into `app.js`; it must run during head parsing, and the quoting flow must not gain a
+  failure mode from it. The `.download-*` and `.quote-sheet` pinning rules live inside the dark
+  sheets deliberately: they exist only to counteract the dark rules, so when the picker forces light
+  the sheet is off and the layout is already light. Any new stylesheet must be added to the
+  `backend/scripts/prepare-assets.mjs` allowlist or it will 404 in production. When changing any
+  stylesheet, bump the `?v=` token in every page that links it — content changes without a token
+  bump reach the edge but not the browser.
 - `vendor/` holds self-hosted third-party browser assets (html2canvas). Do not edit them, and do
   not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
   onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded
@@ -141,7 +158,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   the current ADMIN. ADMIN/PS accounts are protected by SQL `WHERE` guards. The ADMIN-only
   `POST /admin/accounts/lookup` must never log the queried 行編, and `register()` stays silent to
   the applicant on duplicates (anti-enumeration). Remote D1 migrations are applied through
-  `0015`; migration `0010` remains the role/account-management boundary.
+  `0017`; migration `0010` remains the role/account-management boundary.
 
 ## Handback checklist
 

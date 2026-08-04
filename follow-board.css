@@ -216,3 +216,39 @@ th { background: #eaf5f5; color: #245a6c; }
   .tile-actions { flex-direction: column; }
   .interest-panel, .daily-panel, .admin-panel { padding: 18px 14px; }
 }
+
+/* ================================ Dark appearance ================================
+   Same rule as the quote card: .download-* is rasterised by html2canvas from what is on screen,
+   so it is pinned light. A viewer in dark mode must still hand the client a light product image. */
+:root { color-scheme: light dark; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ffffff; --muted: #ebebf599;
+    --accent: #3ab3c4; --accent-strong: #5cc9d8; --accent-soft: #3ab3c422;
+    --blue: #4aa8d0; --green: #35b892;
+    --line: #38383a; --soft: #000000; --paper: #1c1c1e;
+    --shadow-1: 0 1px 2px #00000059; --shadow-2: 0 4px 12px #0000006b;
+  }
+  .pin-gate form, .product-tile, .interest-panel, .daily-panel, .admin-panel {
+    background: var(--paper); border-color: var(--line); color: var(--ink);
+  }
+  input { background: #2c2c2e; border-color: var(--line); color: var(--ink); }
+  th { background: var(--accent); color: #08262b; }
+  th, td { border-color: var(--line); }
+  /* Filled controls take dark text on the lifted accent, as on the quote page. */
+  button { color: #08262b; }
+  button.secondary, .back-link { background: var(--accent-soft); color: var(--accent-strong); }
+  .official-board-link { color: var(--accent-strong); }
+  .form-error { color: #ff8b85; }
+
+  /* ---- Pinned light: rasterised into the product PNG. ---- */
+  .capture-host, .download-card, .download-card * { color-scheme: light; }
+  .download-card { background: linear-gradient(160deg,#f6fafb,#edf5f6) !important; color: #153445 !important; }
+  .download-card article { background: #fff !important; border-color: #b8d3da !important; }
+  .download-pair > div + div { border-left-color: #bdd7de !important; }
+  .download-pair small, .download-underlyings > small { color: #286174 !important; }
+  .download-summary { border-bottom-color: #bdd7de !important; }
+  .download-underlyings { border-bottom-color: #c8dce1 !important; }
+  .product-card-frame, .product-card-frame * { color-scheme: light; }
+}

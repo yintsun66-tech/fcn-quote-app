@@ -35,8 +35,12 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   they remain equal: deployment still runs `wrangler deploy` from a working tree, not from `main`,
   so either branch can move independently. Resolve what is deployed from
   `wrangler deployments list`, not from a branch name.
-- The current production Worker is `ec186766-96ed-4b27-8eaa-9c813bf31693`, deployed on
-  2026-08-05 from feature-branch state recorded by `a55991c`. The current verification baseline is
+- The current production Worker is `59de2931-6b1a-4d10-87f2-1ceb48299d4c`, deployed on
+  2026-08-05 from feature-branch state recorded by `d88559d`. Note that every `wrangler deploy`
+  mints a new version ID even when only static assets changed, so any ID written here goes stale on
+  the next deploy — `wrangler deployments list` is the authority, and `version-status.html`
+  deliberately records no ID at all because correcting it would itself require a deploy. The
+  current verification baseline is
   27 test files / 202 tests, plus root JavaScript syntax checks, typecheck and dry-run build. A
   deployment record proves Worker/static-asset publication, not that real bank mail was delivered.
 - Retention (ADR 0030) is implemented but **disabled**: `RETENTION_ENABLED="0"`. Enabling it

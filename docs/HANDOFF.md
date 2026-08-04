@@ -7,9 +7,13 @@ Current `main` is `f11da30`, five commits behind. The feature branch also contai
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `ec186766-96ed-4b27-8eaa-9c813bf31693`, resolved from
-`wrangler deployments list`, not from a branch name. Verification baseline is now **27 test files /
-202 tests**; the 198 recorded elsewhere is historical.
+Current production Worker: `59de2931-6b1a-4d10-87f2-1ceb48299d4c`, resolved from
+`wrangler deployments list`, not from a branch name. Every `wrangler deploy` mints a new version ID
+even for an asset-only change, so this ID is stale the moment anyone deploys again; treat the
+command as the authority. `version-status.html` now records the source commit and no version ID,
+because keeping an ID current there would require a deploy to fix the number that the deploy itself
+invalidates. Verification baseline is now **27 test files / 202 tests**; the 198 recorded elsewhere
+is historical.
 
 ## Appearance picker and a contrast sweep (committed, pushed and deployed, 2026-08-05)
 

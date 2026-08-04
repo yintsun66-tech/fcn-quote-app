@@ -375,3 +375,25 @@ dialog button.primary:hover { background:var(--accent-strong); }
   .backend-rfq-progress span { background: linear-gradient(90deg, #3ab3c4, #4aa8d0); }
   .artifact-link, .backend-card-preview .artifact-link { background: var(--accent); color: #08262b; }
 }
+
+@media (prefers-color-scheme: dark) {
+  /* Correction to the earlier dark rules: filled controls used near-black text on a bright teal to
+     satisfy AA. Separating the two roles is better — a deeper teal for FILLS keeps white text at
+     4.9:1, while the bright accent stays for TEXT and borders on dark surfaces. No black-on-teal. */
+  .primary, dialog button.primary, .dialog-actions button.primary {
+    background: #0a7c8a; color: #fff;
+  }
+  .primary:hover, dialog button.primary:hover { background: #0e93a3; color: #fff; }
+  .quote-image-button { background: #146382; color: #fff; }
+  .quote-image-button:hover { background: #1b7fa8; color: #fff; }
+  #quoteTable .row-number { background: #0a7c8a; color: #fff; }
+  #quoteTable th { background: #146382; color: #fff; }
+  #quoteTable th:nth-child(n+6):nth-child(-n+10) { background: #0e6e54; }
+  #quoteTable th:nth-child(n+11):nth-child(-n+16) { background: #0a7c8a; }
+  #quoteTable th:nth-child(n+17) { background: #22585f; }
+  #quoteTable th:first-child { background: #06626e; }
+  .artifact-link, .backend-card-preview .artifact-link { background: #0a7c8a; color: #fff; }
+  .ranking-card th, .backend-registration-list th, .backend-accounts-list th,
+  .backend-archive-list th, .backend-analysis-table-wrap th { background: #0a7c8a; color: #fff; }
+  .backend-rfq-progress span { background: linear-gradient(90deg, #0a7c8a, #146382); }
+}

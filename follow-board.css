@@ -48,7 +48,10 @@ button:hover { background: var(--accent-strong); }
 button:active, .back-link:active { transform: scale(.97); }
 button:disabled { cursor: wait; opacity: .5; }
 button.secondary, .back-link {
-  border: 0;
+  /* The tint alone measures 1.03:1 against the grouped page background — the text is readable but
+     the control has no visible edge. A hairline border is what makes it read as a button, on the
+     page and on a white card alike. */
+  border: 1px solid #c3dde1;
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
@@ -234,10 +237,12 @@ th { background: #eaf5f5; color: #245a6c; }
     background: var(--paper); border-color: var(--line); color: var(--ink);
   }
   input { background: #2c2c2e; border-color: var(--line); color: var(--ink); }
-  th { background: var(--accent); color: #08262b; }
+  th { background: #0a7c8a; color: #fff; }
   th, td { border-color: var(--line); }
-  /* Filled controls take dark text on the lifted accent, as on the quote page. */
-  button { color: #08262b; }
+  /* Filled surfaces use a deeper teal so white text still passes AA (4.92:1), instead of putting
+     near-black text on a bright fill. The bright accent stays for text and borders on dark. */
+  button { background: #0a7c8a; color: #fff; }
+  button:hover { background: #0e93a3; color: #fff; }
   button.secondary, .back-link { background: var(--accent-soft); color: var(--accent-strong); }
   .official-board-link { color: var(--accent-strong); }
   .form-error { color: #ff8b85; }
@@ -251,4 +256,38 @@ th { background: #eaf5f5; color: #245a6c; }
   .download-summary { border-bottom-color: #bdd7de !important; }
   .download-underlyings { border-bottom-color: #c8dce1 !important; }
   .product-card-frame, .product-card-frame * { color-scheme: light; }
+}
+
+/* The back link sits on the teal hero, not on the page background, so the tinted treatment the
+   other secondary buttons use disappears into it — worst in dark mode, where the tint and the
+   hero are nearly the same colour. On a coloured header iOS uses a translucent white chip, which
+   holds its contrast in both appearances because the hero is always teal.
+   Specificity (0,2,0) keeps this ahead of the .back-link rules in both the base and dark blocks. */
+.follow-hero .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #06626e;
+  border: 0;
+  font-weight: 600;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 3px #0000001f;
+}
+.follow-hero .back-link::before { content: "‹"; font-size: 1.25em; line-height: 1; margin-top: -2px; }
+.follow-hero .back-link:hover { background: #eaf6f7; color: #06626e; }
+.follow-hero .back-link:focus-visible { outline: 2.5px solid #fff; outline-offset: 3px; }
+
+@media (prefers-color-scheme: dark) {
+  /* Secondary buttons kept excellent text contrast (9.3:1) but their surface sat at 1.16:1 against
+     the black page — legible, yet not readable as a control. iOS gives dark-mode secondary buttons
+     a grey fill rather than a tint; the border keeps them delineated on the elevated panels too,
+     where a fill alone would nearly match the card behind it. */
+  button.secondary {
+    background: #2c2c2e;
+    border: 1px solid #48484a;
+    color: var(--accent-strong);
+  }
+  button.secondary:hover { background: #3a3a3c; border-color: #5a5a5e; }
 }

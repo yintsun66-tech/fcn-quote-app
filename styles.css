@@ -32,7 +32,7 @@
 body { margin:0; min-width:320px; }
 button,input,select { font:inherit; }
 .app-shell { max-width:1440px; margin:auto; padding:28px; }
-.hero { display:flex; justify-content:space-between; gap:24px; align-items:center; position:relative; overflow:hidden; color:#fff; background:linear-gradient(135deg,#0b6b7a,#0a7c8a 55%,#12909a); padding:30px 32px; border:0; border-radius:var(--r-sheet); box-shadow:var(--shadow-2); }.hero::after { content:""; position:absolute; width:280px; height:280px; right:-100px; top:-160px; border:44px solid #ffffff1a; border-radius:50%; }.hero > * { position:relative; z-index:1; }.hero h1 { margin:4px 0 8px; font-size:clamp(1.75rem,3vw,2.5rem); font-weight:700; letter-spacing:-.02em; line-height:1.15; }.hero p { max-width:620px; margin:0; color:#ffffffd9; line-height:1.55; }/* Used on both the dark hero and light cards, so the base colour must stay legible on white and
+.hero { display:flex; justify-content:space-between; gap:24px; align-items:center; position:relative; overflow:hidden; color:#fff; background:linear-gradient(135deg,#0b6b7a,#0a7c8a 55%,#0c7e8d); padding:30px 32px; border:0; border-radius:var(--r-sheet); box-shadow:var(--shadow-2); }.hero::after { content:""; position:absolute; width:280px; height:280px; right:-100px; top:-160px; border:44px solid #ffffff1a; border-radius:50%; }.hero > * { position:relative; z-index:1; }.hero h1 { margin:4px 0 8px; font-size:clamp(1.75rem,3vw,2.5rem); font-weight:700; letter-spacing:-.02em; line-height:1.15; }.hero p { max-width:620px; margin:0; color:#fff; line-height:1.55; }/* Used on both the dark hero and light cards, so the base colour must stay legible on white and
    only the hero overrides it. Getting this wrong makes the label vanish rather than look wrong. */
 .eyebrow { color:var(--label-2); font-size:.7rem; letter-spacing:.08em; font-weight:600; text-transform:uppercase; }.hero .eyebrow { color:#ffffffb8; }.quote-count { white-space:nowrap; padding:13px 19px; border:0; border-radius:var(--r-card); background:#ffffff26; backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); }.quote-count strong { font-size:1.5rem; }
 .notice { margin:16px 0; padding:13px 16px; background:var(--bg-elevated); border:0; border-left:4px solid var(--accent); border-radius:var(--r-card); color:var(--label); line-height:1.55; box-shadow:var(--shadow-1); }.link-button { border:0; background:none; color:var(--accent); text-decoration:none; cursor:pointer; padding:0 3px; font-weight:600; }.link-button:hover { text-decoration:underline; }
@@ -396,4 +396,31 @@ dialog button.primary:hover { background:var(--accent-strong); }
   .ranking-card th, .backend-registration-list th, .backend-accounts-list th,
   .backend-archive-list th, .backend-analysis-table-wrap th { background: #0a7c8a; color: #fff; }
   .backend-rfq-progress span { background: linear-gradient(90deg, #0a7c8a, #146382); }
+
+  /* The dark rules above remapped headings but not the other two text roles that carry a
+     hard-coded dark ink in the backend markup: <summary> (#0b5570) and <label> (#315c68/#174d62).
+     Both landed at ~2:1 on the dark cards. Fixed as a class, not per-report — every disclosure
+     title and form label on these surfaces, including the ones inside dialogs that are not in
+     the DOM until opened. */
+  .hotlist-panel > details > summary,
+  .backend-market-resources > summary,
+  .issuer-picker-summary,
+  .backend-panel label,
+  .hotlist-controls label,
+  .hotlist-consent label,
+  .backend-market-controls label,
+  .backend-market-consent label,
+  .backend-analysis-spot-card label,
+  .backend-account-lookup label { color: var(--label); }
+
+  /* The lookup box keeps a hard-coded mint fill that no dark rule ever darkened, so it survived as
+     a light panel inside a dark dialog — and the white label above would have been invisible on it.
+     Darken the surface rather than exempting the label. */
+  .backend-account-lookup { background: var(--bg-inset); border-color: var(--separator-solid); }
+  .backend-account-lookup-result { color: var(--label); }
+
+  /* Same defect, chip form: a light fill with dark ink reads as a hole punched in the dark card. */
+  .backend-analysis-terms > span,
+  .backend-market-context-card dl > div { background: #ffffff14; color: var(--label-2); }
+  .backend-analysis-terms b, .backend-market-context-card dd { color: var(--label); }
 }

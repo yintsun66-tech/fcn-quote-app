@@ -187,3 +187,69 @@ dialog button.primary:hover { background:var(--accent-strong); }
     animation-iteration-count: infinite !important;
   }
 }
+
+/* ---- Cloudflare-mode surfaces (rendered by backend-client.js) ----
+   Same design language as the static page. Only visual properties are set: every class name and
+   the DOM that backend-client.js builds are untouched, so login, submission, ranking and the quote
+   image behave exactly as before. Placed last so these win over the rules above without !important. */
+.backend-dialog { border-radius: var(--r-sheet); box-shadow: var(--shadow-3); }
+.backend-dialog::backdrop { background: #00000052; backdrop-filter: blur(12px) saturate(140%); -webkit-backdrop-filter: blur(12px) saturate(140%); }
+.backend-panel { padding: 26px; background: var(--bg-elevated); }
+.backend-panel label { color: var(--label-2); font-weight: 600; }
+.backend-panel input,
+.backend-analysis-spot-card input,
+.backend-account-lookup input {
+  min-height: 44px; padding: 11px 13px; border: 1px solid var(--separator-solid);
+  border-radius: var(--r-control); background: var(--bg-elevated); color: var(--label);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.backend-panel input:focus,
+.backend-analysis-spot-card input:focus,
+.backend-account-lookup input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3.5px #0a7c8a2e; }
+.backend-error { color: var(--tint-red); }
+
+/* Cards and panels: one elevation, one radius, no competing borders. */
+.backend-userbar { border: 0; border-radius: var(--r-card); background: #ffffffeb; backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); box-shadow: var(--shadow-2); color: var(--label); }
+.ranking-card,
+.backend-timeline-card,
+.backend-rfq-card,
+.backend-market-context-card,
+.backend-analysis-section,
+.backend-artifact-preview-card,
+.backend-health-grid article { border: 0; border-radius: var(--r-card); background: var(--bg-elevated); box-shadow: var(--shadow-1); }
+.backend-rfq-card { border-left: 4px solid var(--accent); }
+.backend-rfq-card.status-completed { border-left-color: var(--teal-green); }
+.backend-rfq-card.status-no_valid_quote,
+.backend-rfq-card.status-failed,
+.backend-rfq-card.status-cancelled { border-left-color: var(--tint-red); }
+
+/* Table headers across the backend panels share the quote table's teal. */
+.ranking-card th,
+.backend-registration-list th,
+.backend-accounts-list th,
+.backend-archive-list th,
+.backend-analysis-table-wrap th { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* Status chips and pills. */
+.issuer-state { border: 0; border-radius: var(--r-control); background: var(--bg-inset); color: var(--label-2); }
+.status-valid_reply { border: 0; background: #128a6a1f; color: #0e6e54; }
+.status-timeout, .status-parse_error { border: 0; background: #d1352b14; color: #a82a22; }
+.backend-rfq-meta span,
+.backend-timeline-metrics span,
+.backend-analysis-metrics span { border-radius: var(--r-pill); background: var(--bg-inset); color: var(--label-2); }
+
+/* Every backend control reaches the same 44px target as the static page. */
+.backend-panel button,
+.backend-userbar button,
+.artifact-request,
+.backend-registration-actions button,
+.backend-rfq-card footer button { min-height: 44px; border-radius: var(--r-control); font-weight: 600; }
+.backend-registration-actions button,
+.artifact-request { min-height: 38px; }
+
+/* The analysis view is a full-screen sheet; give it the grouped background rather than a gradient. */
+.backend-analysis-view { background: var(--bg-grouped); }
+.backend-analysis-shell { border: 0; border-radius: var(--r-sheet); background: var(--bg-elevated); box-shadow: var(--shadow-1); }
+.backend-analysis-hero { border-radius: var(--r-card); background: linear-gradient(135deg, #0b6b7a, #0a7c8a 55%, #12909a); }
+.backend-analysis-terms > span { border-radius: var(--r-control); background: var(--bg-inset); color: var(--label-2); }
+.backend-analysis-terms b { color: var(--label); }

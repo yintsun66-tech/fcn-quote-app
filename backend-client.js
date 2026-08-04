@@ -94,6 +94,14 @@ import {
     <dialog id="backendProgress" class="backend-dialog backend-results-dialog">
       <section class="backend-panel">
         <div class="backend-results-heading"><div><p class="eyebrow">AUTOMATED RFQ</p><h2>詢價進度與比價結果</h2></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="backendFinalizeNow" type="button" class="secondary" hidden>提早結束並比價</button><button id="backendRecalculate" type="button" class="secondary" hidden>納入晚到報價重新排名</button><button id="backendBackToRfqs" type="button" class="secondary">我的詢價</button><button id="closeBackendProgress" type="button" class="secondary">返回輸入</button></div></div>
+        <section id="backendFinalizeConfirm" class="backend-finalize-confirm" role="alertdialog" aria-labelledby="backendFinalizeConfirmTitle" hidden>
+          <strong id="backendFinalizeConfirmTitle">確認提前結束詢價</strong>
+          <p id="backendFinalizeConfirmMessage"></p>
+          <div class="dialog-actions">
+            <button id="backendFinalizeCancel" type="button" class="secondary">繼續等待</button>
+            <button id="backendFinalizeConfirmAction" type="button" class="primary">確認提前結束並比價</button>
+          </div>
+        </section>
         <p id="backendCountdown" class="backend-countdown"></p>
         <div id="backendIssuerStates" class="backend-issuer-grid"></div>
         <div id="backendRankings" class="backend-rankings"></div>
@@ -187,6 +195,10 @@ import {
   const authDialog = document.querySelector("#backendAuth");
   const progressDialog = document.querySelector("#backendProgress");
   const finalizeButton = document.querySelector("#backendFinalizeNow");
+  const finalizeConfirmPanel = document.querySelector("#backendFinalizeConfirm");
+  const finalizeConfirmMessage = document.querySelector("#backendFinalizeConfirmMessage");
+  const finalizeCancelButton = document.querySelector("#backendFinalizeCancel");
+  const finalizeConfirmAction = document.querySelector("#backendFinalizeConfirmAction");
   const recalculateButton = document.querySelector("#backendRecalculate");
   const issuerPickerDialog = document.querySelector("#backendIssuerPicker");
   const issuerPickerForm = document.querySelector("#backendIssuerPickerForm");
@@ -988,6 +1000,7 @@ import {
     state.artifactByQuote = {};
     state.customFifthSelections = {};
     state.inMailGrace = false;
+    hideFinalizeConfirmation();
     if (rfqHistoryDialog.open) rfqHistoryDialog.close();
     state.rfqId = rfqId;
     state.hasRankings = false;
@@ -1011,6 +1024,7 @@ import {
     state.artifactByQuote = {};
     state.customFifthSelections = {};
     state.inMailGrace = false;
+    hideFinalizeConfirmation();
     if (progressDialog.open) progressDialog.close();
     if (updateUrl) updateRfqUrl(null);
     void refreshRfqBadge();
@@ -1454,6 +1468,7 @@ import {
     // Open the progress dialog immediately so the user gets instant feedback while the
     // create/validate/send round trips run, instead of a frozen button.
     if (!progressDialog.open) progressDialog.showModal();
+    hideFinalizeConfirmation();
     document.querySelector("#backendCountdown").textContent = "正在建立並寄送詢價…";
     document.querySelector("#backendIssuerStates").innerHTML = "";
     document.querySelector("#backendRankings").innerHTML = "";
@@ -1497,6 +1512,21 @@ import {
     }
   }
 
+  function hideFinalizeConfirmation({ focusTrigger = false } = {}) {
+    finalizeConfirmPanel.hidden = true;
+    finalizeConfirmMessage.textContent = "";
+    if (focusTrigger && !finalizeButton.hidden) finalizeButton.focus();
+  }
+
+  function showFinalizeConfirmation() {
+    const pending = state.pendingIssuers.length
+      ? `尚待回覆：${state.pendingIssuers.join("、")}。`
+      : "目前沒有仍在等待的發行機構狀態。";
+    finalizeConfirmMessage.textContent = `系統會立即以目前已收到的有效報價完成排名；之後才抵達的報價不會自動改寫本次結果。${pending}`;
+    finalizeConfirmPanel.hidden = false;
+    finalizeConfirmAction.focus();
+  }
+
   function renderStatus(payload) {
     const deadline = payload.rfq.deadlineAt ? Date.parse(payload.rfq.deadlineAt) : null;
     const softDeadline = payload.rfq.softDeadlineAt ? Date.parse(payload.rfq.softDeadlineAt) : null;
@@ -1530,6 +1560,7 @@ import {
     document.querySelector("#backendIssuerStates").innerHTML = payload.issuers.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${item.issuer}</b>${item.status}</span>`).join("");
     // Do not offer an early close during the final transport grace period.
     finalizeButton.hidden = !["WAITING", "PARTIAL"].includes(payload.rfq.workflowStatus) || inMailGrace;
+    if (finalizeButton.hidden) hideFinalizeConfirmation();
     recalculateButton.hidden = !["COMPLETED", "NO_VALID_QUOTE"].includes(payload.rfq.workflowStatus)
       || !payload.rfq.hasUnrankedLateReplies;
     updateProvisionalBanner();
@@ -2161,20 +2192,39 @@ import {
     event.preventDefault();
     closeRfqProgress();
   });
-  finalizeButton.addEventListener("click", async () => {
+  finalizeButton.addEventListener("click", () => {
     if (!state.rfqId) return;
-    const pending = state.pendingIssuers.length ? ` 尚未回覆：${state.pendingIssuers.join("、")}。` : "";
-    if (!window.confirm(`確定要提早結束詢價並立即比價嗎？尚未回覆的發行機構將不列入本次排名。${pending}`)) return;
+    showFinalizeConfirmation();
+  });
+  finalizeCancelButton.addEventListener("click", () => hideFinalizeConfirmation({ focusTrigger: true }));
+  finalizeConfirmAction.addEventListener("click", async () => {
+    const rfqId = state.rfqId;
+    if (!rfqId) { hideFinalizeConfirmation(); return; }
     finalizeButton.disabled = true;
+    finalizeCancelButton.disabled = true;
+    finalizeConfirmAction.disabled = true;
+    document.querySelector("#backendCountdown").textContent = "正在送出提前結束要求…";
     try {
-      await request(`/rfqs/${state.rfqId}/finalize`, { method: "POST", body: "{}" });
+      await request(`/rfqs/${rfqId}/finalize`, { method: "POST", body: "{}" });
+      if (state.rfqId !== rfqId) return;
+      hideFinalizeConfirmation();
       finalizeButton.hidden = true;
+      state.snapshotVersion = null;
       document.querySelector("#backendCountdown").textContent = "已要求提早結束，正在比價…";
       await refreshResults();
     } catch (error) {
-      document.querySelector("#backendCountdown").textContent = error.message;
+      if (state.rfqId === rfqId) {
+        hideFinalizeConfirmation();
+        document.querySelector("#backendCountdown").textContent = error.message;
+        if (["RFQ_NOT_WAITING", "RFQ_MAIL_GRACE_ACTIVE"].includes(error.code)) {
+          state.snapshotVersion = null;
+          await refreshResults();
+        }
+      }
     } finally {
       finalizeButton.disabled = false;
+      finalizeCancelButton.disabled = false;
+      finalizeConfirmAction.disabled = false;
     }
   });
   recalculateButton.addEventListener("click", async () => {

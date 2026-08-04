@@ -1,0 +1,58 @@
+/* Follow board, dark appearance.
+
+   Moved verbatim out of the two @media (prefers-color-scheme: dark) blocks in follow-board.css so
+   the appearance picker on the quote page can drive this page too: the page links this file with
+   media="(prefers-color-scheme: dark)" and the stored choice rewrites that attribute.
+
+   The .follow-hero .back-link rules stayed behind in follow-board.css. They beat the .back-link
+   rules here on specificity (0,2,0) rather than on order, so splitting the file does not change
+   which one wins.
+
+   The .download-* and .capture-host rules below pin the PNG layout to its light appearance. They
+   belong with the dark rules because they exist only to counteract them: html2canvas rasterises
+   what is on screen, so without them a viewer in dark mode would hand a client a black card. When
+   the picker forces light this whole sheet is off and the card keeps its normal light styling, so
+   the PNG is light in every state. They reference no shared token, deliberately, so that token
+   edits elsewhere cannot reach the printed layout. */
+
+:root {
+  --ink: #ffffff; --muted: #ebebf599;
+  --accent: #3ab3c4; --accent-strong: #5cc9d8; --accent-soft: #3ab3c422;
+  --blue: #4aa8d0; --green: #35b892;
+  --line: #38383a; --soft: #000000; --paper: #1c1c1e;
+  --shadow-1: 0 1px 2px #00000059; --shadow-2: 0 4px 12px #0000006b;
+}
+.pin-gate form, .product-tile, .interest-panel, .daily-panel, .admin-panel {
+  background: var(--paper); border-color: var(--line); color: var(--ink);
+}
+input { background: #2c2c2e; border-color: var(--line); color: var(--ink); }
+th { background: #0a7c8a; color: #fff; }
+th, td { border-color: var(--line); }
+/* Filled surfaces use a deeper teal so white text still passes AA (4.92:1), instead of putting
+   near-black text on a bright fill. The bright accent stays for text and borders on dark. */
+button { background: #0a7c8a; color: #fff; }
+button:hover { background: #0e93a3; color: #fff; }
+button.secondary, .back-link { background: var(--accent-soft); color: var(--accent-strong); }
+.official-board-link { color: var(--accent-strong); }
+.form-error { color: #ff8b85; }
+
+/* ---- Pinned light: rasterised into the product PNG. ---- */
+.capture-host, .download-card, .download-card * { color-scheme: light; }
+.download-card { background: linear-gradient(160deg,#f6fafb,#edf5f6) !important; color: #153445 !important; }
+.download-card article { background: #fff !important; border-color: #b8d3da !important; }
+.download-pair > div + div { border-left-color: #bdd7de !important; }
+.download-pair small, .download-underlyings > small { color: #286174 !important; }
+.download-summary { border-bottom-color: #bdd7de !important; }
+.download-underlyings { border-bottom-color: #c8dce1 !important; }
+.product-card-frame, .product-card-frame * { color-scheme: light; }
+
+/* Secondary buttons kept excellent text contrast (9.3:1) but their surface sat at 1.16:1 against
+   the black page — legible, yet not readable as a control. iOS gives dark-mode secondary buttons
+   a grey fill rather than a tint; the border keeps them delineated on the elevated panels too,
+   where a fill alone would nearly match the card behind it. */
+button.secondary {
+  background: #2c2c2e;
+  border: 1px solid #48484a;
+  color: var(--accent-strong);
+}
+button.secondary:hover { background: #3a3a3c; border-color: #5a5a5e; }

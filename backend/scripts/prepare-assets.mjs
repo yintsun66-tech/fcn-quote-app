@@ -16,6 +16,7 @@ const assets = [
   "market-resources.mjs",
   "follow-board.html",
   "follow-board.css",
+  "follow-board-dark.css",
   "follow-board.mjs",
   "guide.html",
   "version-status.html",

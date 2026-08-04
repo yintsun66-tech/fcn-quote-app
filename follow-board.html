@@ -5,7 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#075985" />
     <title>FCN / DAC 跟單專區</title>
-    <link rel="stylesheet" href="./follow-board.css?v=follow-board-v6" />
+    <link rel="stylesheet" href="./follow-board.css?v=follow-board-v7" />
+    <link
+      id="darkSheet"
+      rel="stylesheet"
+      href="./follow-board-dark.css?v=follow-board-v7"
+      media="(prefers-color-scheme: dark)"
+    />
+    <script>
+      /* Honours the appearance chosen on the quote page. Runs during head parsing so the page never
+         flashes the other theme. No picker here — this page is reached from the quote page. */
+      (function () {
+        try {
+          var stored = localStorage.getItem("fcn-theme");
+          if (stored !== "light" && stored !== "dark") return;
+          document.documentElement.dataset.theme = stored;
+          document.getElementById("darkSheet").media = stored === "dark" ? "all" : "not all";
+          document.documentElement.style.colorScheme = stored;
+        } catch (err) {
+          /* OS setting stays in charge. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <main class="follow-shell">

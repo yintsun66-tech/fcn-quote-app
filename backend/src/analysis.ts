@@ -73,6 +73,13 @@ function unknownArray(value: string): unknown[] {
   }
 }
 
+function analysisProduct(value: string | null): "FCN" | "DAC" | null {
+  const normalized = String(value ?? "").normalize("NFKC").trim().replace(/\s+/gu, " ").toUpperCase();
+  if (normalized === "FCN") return "FCN";
+  if (["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(normalized)) return "DAC";
+  return null;
+}
+
 export async function getTradeAnalysisInput(
   env: AppEnv,
   session: SessionContext,
@@ -121,9 +128,9 @@ export async function getTradeAnalysisInput(
   ).bind(rfqId, session.user.id, tradeCode, authorized.quote_id).first<AnalysisInputRow>();
   if (!row) throw new AppError(404, "ANALYSIS_INPUT_NOT_FOUND", "找不到此報價的分析資料。 ");
 
-  const product = (row.quote_product ?? row.requested_product).toUpperCase();
-  if (product !== "FCN") {
-    throw new AppError(422, "ANALYSIS_PRODUCT_UNSUPPORTED", "市場與風險分析 Phase 1 目前僅支援 FCN。 ");
+  const product = analysisProduct(row.quote_product ?? row.requested_product);
+  if (!product) {
+    throw new AppError(422, "ANALYSIS_PRODUCT_UNSUPPORTED", "市場與風險分析僅支援 FCN、DAC／DRA。 ");
   }
 
   const quoteUnderlyings = stringArray(row.quote_underlyings_json);

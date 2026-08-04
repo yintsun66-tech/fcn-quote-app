@@ -12,7 +12,7 @@ const baseTerms = {
   kiBarrierPct: null
 };
 
-describe("FCN market analysis model", () => {
+describe("FCN / DAC market analysis model", () => {
   it("calculates reference prices and fixed worst-of scenarios without treating blank KI as zero", () => {
     const analysis = buildFcnAnalysis(baseTerms, { "AAPL UW": 200 });
     expect(analysis.referenceLevels[0]).toEqual({
@@ -70,8 +70,38 @@ describe("FCN market analysis model", () => {
       .not.toBe(spotStorageKey("rfq_1", "T02", "AAPL UW"));
   });
 
-  it("refuses DAC/DRA in Phase 1", () => {
-    expect(() => buildFcnAnalysis({ ...baseTerms, product: "DAC" }, { "AAPL UW": 100 }))
-      .toThrow("Phase 1 僅支援 FCN");
+  it.each(["DAC", "DRA", "WRA", "Range Accrual"])(
+    "supports the DAC-family alias %s and applies the all-underlyings-above-strike interest rule",
+    product => {
+      const analysis = buildFcnAnalysis({
+        ...baseTerms,
+        product,
+        guaranteedPeriodsMonths: 3
+      }, { "AAPL UW": 100 });
+      expect(analysis.product).toBe("DAC");
+      expect(analysis.dacAccrualCondition).toMatchObject({
+        guaranteedPeriodsMonths: 3,
+        strikePct: 85,
+        rule: "ALL_UNDERLYINGS_ABOVE_STRIKE"
+      });
+      expect(analysis.dacAccrualCondition?.description)
+        .toContain("所有連結標的必須全部大於執行價，才會有利息");
+      expect(analysis.scenarios.find((row: { changePct: number }) => row.changePct === -10)?.accrualAssessment)
+        .toContain("均高於執行價");
+      expect(analysis.scenarios.find((row: { changePct: number }) => row.changePct === -20)?.accrualAssessment)
+        .toContain("不符合利息條件");
+      const exactlyAtStrike = buildFcnAnalysis({
+        ...baseTerms,
+        product,
+        guaranteedPeriodsMonths: 3
+      }, { "AAPL UW": 100 }, [-15]);
+      expect(exactlyAtStrike.scenarios[0]?.accrualAssessment)
+        .toContain("不符合利息條件");
+    }
+  );
+
+  it("still rejects unsupported products", () => {
+    expect(() => buildFcnAnalysis({ ...baseTerms, product: "BEN" }, { "AAPL UW": 100 }))
+      .toThrow("僅支援 FCN、DAC／DRA");
   });
 });

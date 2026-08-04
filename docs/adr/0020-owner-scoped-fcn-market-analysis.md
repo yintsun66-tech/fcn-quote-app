@@ -1,6 +1,6 @@
 # ADR 0020: Owner-scoped FCN market and risk analysis
 
-Status: Accepted
+Status: Accepted; Decision 4 superseded by ADR 0032
 Date: 2026-07-28
 
 ## Context
@@ -41,6 +41,9 @@ an official fixing, a valuation, or exact contractual cash flow.
     directional and repeatedly defer final cash flow to the formal term sheet.
 11. Changing the selected issuer loads another independently authorized quote. Analysis never
     changes ranking, quote status, artifacts or the quote-card model.
+
+ADR 0032 later extends the product scope to DAC/DRA while preserving every authorization,
+local-storage, market-data and non-advice constraint in this ADR.
 
 ## Consequences
 

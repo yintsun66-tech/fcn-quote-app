@@ -264,6 +264,29 @@ describe("versioned ranking persistence", () => {
       quote: { id: quoteIds[3], issuer: "CA" },
       terms: { couponPaPct: 10 }
     });
+    await testEnv.DB.prepare(
+      "UPDATE rfq_trades SET product = 'DAC', guaranteed_periods_months = 3 WHERE id = ?"
+    ).bind(tradeId).run();
+    await testEnv.DB.prepare(
+      "UPDATE issuer_quotes SET product = 'DRA', guaranteed_periods_months = 3 WHERE id = ?"
+    ).bind(quoteIds[0]).run();
+    const dacAnalysis = await (await getTradeAnalysisInput(
+      testEnv,
+      session,
+      rfqId,
+      "T01",
+      quoteIds[0]!
+    )).json<{ analysisInput: { terms: { product: string; guaranteedPeriodsMonths: number } } }>();
+    expect(dacAnalysis.analysisInput.terms).toMatchObject({
+      product: "DAC",
+      guaranteedPeriodsMonths: 3
+    });
+    await testEnv.DB.prepare(
+      "UPDATE rfq_trades SET product = 'FCN', guaranteed_periods_months = 1 WHERE id = ?"
+    ).bind(tradeId).run();
+    await testEnv.DB.prepare(
+      "UPDATE issuer_quotes SET product = 'FCN', guaranteed_periods_months = 1 WHERE id = ?"
+    ).bind(quoteIds[0]).run();
     expect(await testEnv.DB.prepare(
       "SELECT COUNT(*) AS result_count FROM ranking_results WHERE rfq_id = ?"
     ).bind(rfqId).first<{ result_count: number }>()).toEqual({ result_count: 6 });

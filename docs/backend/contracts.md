@@ -53,7 +53,7 @@ Returns `{ card: { tradeCode, quoteId, issuer, rankingVersion, renderProfileVers
 
 Authorization is identical to the artifact endpoints and is enforced by the shared `authorizeCardQuote`: the caller must own the RFQ, the RFQ must be `COMPLETED` with a current ranking run, and the quote must be ranked 1–4 by the server or be a custom-fifth candidate. A quote id supplied by the browser is never trusted on its own. The document is returned inside JSON rather than as `text/html` so the API origin never serves renderable markup.
 
-### FCN market-analysis input (ADR 0020)
+### FCN / DAC market-analysis input (ADR 0020, extended by ADR 0032)
 
 - `GET /api/v1/rfqs/:rfqId/trades/:tradeCode/quotes/:quoteId/analysis-input`
 
@@ -83,8 +83,9 @@ Returns:
 
 This read endpoint reuses `authorizeCardQuote`; ownership, completed-RFQ status, current ranking
 version and rank 1–4/custom-fifth eligibility are server-enforced. A missing non-target quote term
-may fall back only to the immutable requested trade, never to another issuer. Phase 1 accepts FCN
-only and returns `422 ANALYSIS_PRODUCT_UNSUPPORTED` for DAC/DRA.
+may fall back only to the immutable requested trade, never to another issuer. The endpoint accepts
+FCN plus DAC-family aliases (`DAC`, `DRA`, `WRA`, `Range Accrual`) and returns canonical `DAC` for
+the latter. Other products return `422 ANALYSIS_PRODUCT_UNSUPPORTED`.
 
 The browser performs all spot/scenario calculations. User-entered indicative spots and timestamps
 are stored only in browser `localStorage`; this endpoint does not write D1, change a ranking or

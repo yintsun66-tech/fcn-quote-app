@@ -23,7 +23,7 @@ const PROVIDER_MESSAGE_MAX = 200;
 //
 // The image intentionally carries product conditions only. `renderQuoteCardHtml` contains no 手收
 // (that line is added by the follow-board frontend under ADR 0029), so the sales fee never reaches
-// a public URL — it is sent as text inside the private LINE group instead.
+// a public URL — it is sent as text inside the designated user's private LINE chat instead.
 export const FOLLOW_BOARD_IMAGE_PREFIX = "follow-board-images/v1/";
 
 export async function followBoardImageToken(env: AppEnv, productCode: string): Promise<string> {
@@ -304,7 +304,7 @@ export async function handleLineWebhook(request: Request, env: AppEnv): Promise<
  * monthly-cap 429 from a rate-limit 429. A status code alone does not.
  *
  * Only the `message` string is kept, never the whole body, and any LINE identifier inside it is
- * redacted first: the group id must never reach an audit row, however it arrives.
+ * redacted first: the destination user id must never reach an audit row, however it arrives.
  */
 export function safeProviderMessage(body: string): string | undefined {
   let message: string;
@@ -332,14 +332,15 @@ function retryDelayMs(response: { headers: { get(name: string): string | null } 
   return RETRY_DELAY_MS;
 }
 
-function configured(env: AppEnv): { token: string; groupId: string } | null {
+function configured(env: AppEnv): { token: string; userId: string } | null {
   const token = String(env.LINE_CHANNEL_ACCESS_TOKEN ?? "").trim();
-  const groupId = String(env.LINE_GROUP_ID ?? "").trim();
-  return token && groupId ? { token, groupId } : null;
+  const userId = String(env.LINE_USER_ID ?? "").trim();
+  // Fail closed on a group (C...) or room (R...) id. This route is intentionally personal-only.
+  return token && /^U[0-9a-f]{32}$/i.test(userId) ? { token, userId } : null;
 }
 
 /**
- * Pushes newly published follow-board products to the configured LINE group.
+ * Pushes newly published follow-board products to one configured LINE user's private chat.
  *
  * Never throws: publication has already succeeded and committed by the time this runs, so a LINE
  * outage, a revoked token or a rate limit must not fail or roll back the publication.
@@ -359,7 +360,7 @@ export async function pushFollowBoardProducts(
 
   // Product-conditions images first, then one Flex message carrying the trade date and 手收.
   // Keeping the sales fee out of the image is deliberate: the image sits behind a public URL for
-  // LINE to fetch, while the text stays inside the private group.
+  // LINE to fetch, while the text stays inside the private one-to-one chat.
   // The renders stay sequential on purpose — Browser Rendering concurrency is the documented
   // constraint — but they share one budget rather than getting a fresh timeout each. Four products
   // with a per-render timeout could otherwise hold this invocation for four times that number,
@@ -400,7 +401,7 @@ export async function pushFollowBoardProducts(
           "content-type": "application/json",
           "x-line-retry-key": retryKey
         },
-        body: JSON.stringify({ to: credentials.groupId, messages }),
+        body: JSON.stringify({ to: credentials.userId, messages }),
         signal: AbortSignal.timeout(LINE_PUSH_TIMEOUT_MS)
       });
       status = response.status;
@@ -422,7 +423,7 @@ export async function pushFollowBoardProducts(
     if (attempt < MAX_PUSH_ATTEMPTS) await sleep(delayMs);
   }
 
-  // Counts, a safe status and LINE's own explanation. Never the token, group id, quote value or any
+  // Counts, a safe status and LINE's own explanation. Never the token, user id, quote value or any
   // RFQ identifier — `safeProviderMessage` redacts an identifier even if LINE echoes one back.
   await insertAudit(env, "FOLLOW_BOARD_LINE_PUSHED", "FOLLOW_BOARD_PRODUCT", null, null, `line:${nowIso()}`, {
     productCount: products.length,

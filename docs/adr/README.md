@@ -65,5 +65,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0030: Scheduled retention for mail, images and structured results](0030-scheduled-retention.md)
 - [ADR 0031: Selected-issuer ranking boundary and accelerated small-RFQ submission](0031-selected-issuer-boundary-and-small-rfq-submit.md)
 - [ADR 0032: Extend owner-scoped market analysis to DAC/DRA](0032-dac-dra-market-analysis.md)
+- [ADR 0033: Deliver follow-board LINE pushes to one personal chat](0033-line-personal-delivery.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

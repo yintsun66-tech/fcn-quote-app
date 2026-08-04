@@ -36,12 +36,14 @@ const PRODUCT = {
   kiBarrierPct: null
 };
 
+const PERSONAL_LINE_USER_ID = `U${"a".repeat(32)}`;
+
 function lineEnv(overrides: Record<string, unknown> = {}): AppEnv {
   return {
     ...testEnv,
     LINE_PUSH_ENABLED: "1",
     LINE_CHANNEL_ACCESS_TOKEN: "test-token-must-never-be-logged",
-    LINE_GROUP_ID: "Cgroup123",
+    LINE_USER_ID: PERSONAL_LINE_USER_ID,
     ...overrides
   } as unknown as AppEnv;
 }
@@ -55,8 +57,14 @@ describe("LINE follow-board push", () => {
       .toMatchObject({ sent: false, reason: "DISABLED" });
     expect(await pushFollowBoardProducts(lineEnv({ LINE_CHANNEL_ACCESS_TOKEN: "" }), [PRODUCT], spy))
       .toMatchObject({ sent: false, reason: "NOT_CONFIGURED" });
-    expect(await pushFollowBoardProducts(lineEnv({ LINE_GROUP_ID: "" }), [PRODUCT], spy))
+    expect(await pushFollowBoardProducts(lineEnv({ LINE_USER_ID: "" }), [PRODUCT], spy))
       .toMatchObject({ sent: false, reason: "NOT_CONFIGURED" });
+    expect(await pushFollowBoardProducts(lineEnv({ LINE_USER_ID: `C${"b".repeat(32)}` }), [PRODUCT], spy))
+      .toMatchObject({ sent: false, reason: "NOT_CONFIGURED" });
+    expect(await pushFollowBoardProducts(lineEnv({
+      LINE_USER_ID: undefined,
+      LINE_GROUP_ID: `C${"c".repeat(32)}`
+    }), [PRODUCT], spy)).toMatchObject({ sent: false, reason: "NOT_CONFIGURED" });
     expect(called).toBe(false);
   });
 
@@ -74,7 +82,7 @@ describe("LINE follow-board push", () => {
     expect(headers.authorization).toBe("Bearer test-token-must-never-be-logged");
     expect(headers["x-line-retry-key"]).toMatch(/^[0-9a-f-]{36}$/);
     const body = JSON.parse(String(seen!.init.body));
-    expect(body.to).toBe("Cgroup123");
+    expect(body.to).toBe(PERSONAL_LINE_USER_ID);
     expect(body.messages).toHaveLength(1);
     const rendered = JSON.stringify(body.messages[0]);
     expect(rendered).toContain("PBZL");
@@ -102,7 +110,7 @@ describe("LINE follow-board push", () => {
     expect(audits.results.length).toBeGreaterThan(0);
     for (const audit of audits.results) {
       expect(audit.safe_metadata_json).not.toContain("test-token-must-never-be-logged");
-      expect(audit.safe_metadata_json).not.toContain("Cgroup123");
+      expect(audit.safe_metadata_json).not.toContain(PERSONAL_LINE_USER_ID);
     }
   });
 
@@ -262,7 +270,7 @@ describe("LINE follow-board push", () => {
     expect(body.messages[0].originalContentUrl).toMatch(
       /^https:\/\/api\.yintsun66\.com\/api\/v1\/public\/follow-board\/images\/[A-Za-z0-9_-]{32,128}\.png$/
     );
-    // 手收 travels only inside the private group message.
+    // 手收 travels only inside the private one-to-one message.
     expect(JSON.stringify(body.messages[1])).toContain("手收");
 
     // The public URL must not leak the product code or any identifier.

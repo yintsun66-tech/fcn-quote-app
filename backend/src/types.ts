@@ -5,7 +5,7 @@ export interface AppEnv extends Env {
   FOLLOW_BOARD_VIEW_PIN: string;
   // Optional: the follow-board LINE push stays inert when either is absent.
   LINE_CHANNEL_ACCESS_TOKEN?: string;
-  LINE_GROUP_ID?: string;
+  LINE_USER_ID?: string;
   LINE_CHANNEL_SECRET?: string;
   // Optional. Primary equity daily-bar provider; the chain falls through to the keyless one.
   TWELVE_DATA_API_KEY?: string;

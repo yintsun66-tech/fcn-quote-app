@@ -32,8 +32,8 @@
     "RETENTION_RAW_MAIL_DAYS": "10",
     "RETENTION_IMAGE_DAYS": "10",
     "RETENTION_RESULT_DAYS": "30",
-    // Live. LINE_CHANNEL_ACCESS_TOKEN and LINE_GROUP_ID are Secrets; the push is skipped with
-    // reason NOT_CONFIGURED if either is missing, and never fails a publication.
+    // LINE_CHANNEL_ACCESS_TOKEN and LINE_USER_ID are Secrets; LINE_USER_ID must be a personal
+    // U... id. The push is skipped with reason NOT_CONFIGURED if either is missing or invalid.
     "LINE_PUSH_ENABLED": "1",
     // Group-id discovery, already done. Stays off; turning it on opens a signature-gated endpoint.
     "LINE_WEBHOOK_ENABLED": "0",

@@ -672,14 +672,18 @@ Publication email contract:
 
 ## LINE push contract
 
-When `LINE_PUSH_ENABLED="1"`, a completed follow-board publication is pushed to one private LINE
-group through `POST https://api.line.me/v2/bot/message/push`.
+When `LINE_PUSH_ENABLED="1"`, a completed follow-board publication is pushed to one designated
+LINE user's private one-to-one chat through `POST https://api.line.me/v2/bot/message/push`.
 
 - Runs **after** the publication batch has committed and never throws. A LINE outage, a revoked
   token or a rate limit cannot fail or roll back a publication.
 - Two outputs per publication, split on purpose. The image sits behind a public URL, so 手收 must
-  not be in it; **手收 and 交易日期 travel only in the Flex message text**, inside the private group.
-- `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_GROUP_ID` are Secrets, not vars — the group id names a
-  private chat. The `FOLLOW_BOARD_LINE_PUSHED` audit event records message counts and HTTP status
-  only; neither value is ever logged.
+  not be in it; **手收 and 交易日期 travel only in the Flex message text**, inside the private
+  one-to-one chat.
+- `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` are Secrets, not vars. `LINE_USER_ID` must match
+  LINE's personal-user format (`U` plus 32 hexadecimal characters); group (`C...`) and room
+  (`R...`) identifiers fail closed as `NOT_CONFIGURED`, with no fallback to the former group route.
+  The designated user must have added and not blocked the LINE Official Account.
+- The `FOLLOW_BOARD_LINE_PUSHED` audit event records message counts and HTTP status only; neither
+  Secret is ever logged.
 - No RFQ id, correlation token, requester or employee data may travel to LINE.

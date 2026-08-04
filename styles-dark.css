@@ -1,0 +1,186 @@
+/* Dark appearance.
+
+   These rules used to live in three @media (prefers-color-scheme: dark) blocks at the end of
+   styles.css. They were moved here verbatim so the appearance can be switched manually: the page
+   links this file with media="(prefers-color-scheme: dark)" and the picker rewrites that attribute
+   to "all" or "not all". Nothing about the selectors or their order changed, so specificity and
+   cascade position are identical to before, and with JavaScript off the OS setting still wins.
+
+   .quote-sheet stays pinned to its light appearance below. html2canvas rasterises what is on
+   screen, so letting it follow the theme would hand a client a black quote card. */
+
+:root {
+  --bg-grouped: #000000; --bg-elevated: #1c1c1e; --bg-inset: #2c2c2e;
+  --label: #ffffff; --label-2: #ebebf599; --label-3: #ebebf54d;
+  --separator: #54545899; --separator-solid: #38383a;
+  /* Lifted so the teal keeps AA contrast on a dark surface; the light-mode value would not. */
+  --accent: #3ab3c4; --accent-strong: #5cc9d8; --accent-soft: #3ab3c422;
+  --teal-blue: #4aa8d0; --teal-green: #35b892; --teal-core: #3ab3c4; --teal-deep: #6fa8b0;
+  --tint-red: #ff6961;
+  --shadow-1: 0 1px 2px #00000059; --shadow-2: 0 4px 12px #0000006b;
+  --shadow-3: 0 12px 32px #00000080;
+}
+
+/* Elevated surfaces. Everything here was a literal white or near-white. */
+.toolbar, .notice, .entry-workspace, dialog, .backend-panel,
+#quoteTable tr, .ranking-card, .backend-timeline-card, .backend-rfq-card,
+.backend-market-context-card, .backend-analysis-section, .backend-analysis-shell,
+.backend-artifact-preview-card, .backend-health-grid article, .issuer-state,
+.guide-section, .backend-archive-preview, .backend-market-links article,
+.backend-market-idea-card, .backend-market-consent, .hotlist-consent,
+.backend-registration-list, .backend-accounts-list, .backend-archive-list,
+.hotlist-panel > details, .backend-market-resources, .backend-analysis-paths article,
+.quote-preview-panel, .table-card, .backend-artifact-viewer, .backend-health-panel,
+.backend-analysis-spot-card, .backend-rfq-empty, .trade-navigator, .backend-userbar {
+  background: var(--bg-elevated) !important;
+  border-color: var(--separator-solid);
+  color: var(--label);
+}
+.backend-analysis-view, .backend-analysis-paths { background: var(--bg-grouped); }
+
+/* Headings and emphasis inside those surfaces were literal navy/teal. */
+:is(.backend-panel, .ranking-card, .backend-timeline-card, .backend-rfq-card,
+    .backend-market-context-card, .backend-analysis-section, .backend-analysis-shell,
+    .guide-section, .backend-health-panel, .backend-market-links, .backend-market-idea-card,
+    .backend-artifact-viewer, .backend-archive-preview, .entry-workspace, .hotlist-panel)
+  :is(h1, h2, h3, h4) { color: var(--label); }
+.guide-shell h1, .backend-analysis-header h1, .entry-workspace-header h2 { color: var(--label); }
+.backend-health-grid strong, .backend-analysis-terms b, .backend-market-context-card dd,
+.backend-rfq-card header strong, .backend-rfq-underlyings { color: var(--label); }
+.notice, .backend-analysis-note, .guide-intro, .hotlist-note { color: var(--label-2); }
+
+/* Inputs: dark field, light text, same focus ring hue. */
+#quoteTable input, #quoteTable select, .backend-panel input, .issuer-dialog select,
+.backend-analysis-spot-card input, .backend-account-lookup input, .hotlist-controls select,
+.backend-market-controls select, .backend-artifact-toolbar select, .custom-fifth-row select,
+.backend-analysis-hero select {
+  background: var(--bg-inset); border-color: var(--separator-solid); color: var(--label);
+}
+#quoteTable input[readonly] { background: #0000004d; color: var(--label-2); }
+
+/* Tinted field groups: the same hues at an alpha that reads on black. */
+#quoteTable .field-label { background: #4aa8d017; }
+#quoteTable .group-underlying .field-label { background: #35b89217; }
+#quoteTable .group-payoff .field-label { background: #3ab3c417; }
+#quoteTable .group-risk .field-label { background: #6fa8b017; }
+#quoteTable td.group-basic { background: #4aa8d00d; }
+#quoteTable td.group-underlying { background: #35b8920d; }
+#quoteTable td.group-payoff { background: #3ab3c40d; }
+#quoteTable td.group-risk { background: #6fa8b00d; }
+#quoteTable tbody tr:hover td:not(.row-number) { background: #ffffff0f; }
+
+/* Chips, pills and helper blocks. */
+.field-group-legend span, .backend-rfq-meta span, .backend-timeline-metrics span,
+.backend-analysis-metrics span, .hotlist-exchanges, .backend-market-links a,
+.hotlist-screens a { background: #ffffff14; color: var(--accent-strong); }
+.dialog-hint { background: var(--accent-soft); color: var(--accent-strong); }
+.issuer-warning { background: #ff696114; color: #ff8b85; }
+.status.success { color: #4fd39a; }
+.backend-provisional, .issuer-picker-summary { background: #3ab3c414; color: var(--accent-strong); border-color: var(--separator-solid); }
+
+/* Separators inside data tables. */
+.guide-table td, .guide-table th, .ranking-card th, .ranking-card td,
+.backend-registration-list th, .backend-registration-list td,
+.backend-accounts-list th, .backend-accounts-list td,
+.backend-analysis-table-wrap th, .backend-analysis-table-wrap td { border-color: var(--separator-solid); }
+.guide-table td:first-child { background: var(--bg-inset); }
+.backend-analysis-table-wrap tbody tr:nth-child(even) { background: #ffffff08; }
+
+/* ---- Pinned light: rasterised into a PNG a client receives. ---- */
+.quote-sheet, .quote-sheet * { color-scheme: light; }
+.quote-sheet { background: linear-gradient(145deg,#edf9f8 0,#ffffff 32%,#eff7fb 100%) !important; color: #16313d !important; }
+.quote-sheet .quote-card { background: #fff !important; border-color: #b9d8df !important; }
+.quote-sheet .quote-card-summary { background: var(--issuer-soft) !important; }
+.quote-sheet .quote-detail { border-color: #d4e7e9 !important; }
+.quote-sheet .quote-detail li { background: #e4f2f4 !important; color: #155066 !important; }
+.quote-sheet .quote-card-footer { background: #eaf4f6 !important; color: #236074 !important; }
+.quote-sheet :is(.quote-card-summary span, .quote-detail > span) { color: #286174 !important; }
+.quote-sheet :is(h2, strong, b) { color: inherit; }
+.quote-sheet .quote-sheet-header h2 { color: var(--issuer-color) !important; }
+.quote-sheet .quote-highlight, .quote-sheet .quote-detail em { color: var(--issuer-color) !important; }
+.quote-sheet .quote-sheet-disclaimer, .quote-sheet .quote-sheet-header p { color: #246075 !important; }
+.quote-capture-scroll { background: #fff; }
+
+/* The accent is lifted in dark mode so it reads against black — which makes white-on-accent fail
+   AA (2.5:1 measured). Filled controls therefore take dark text on the bright fill, the way iOS
+   does, giving ~6.4:1. Tinted and plain controls already pass and keep the light accent. */
+.primary, .quote-image-button, dialog button.primary, .dialog-actions button.primary,
+.follow-hero + * .primary { color: #08262b; }
+.primary:hover, dialog button.primary:hover { background: var(--accent-strong); color: #08262b; }
+.quote-image-button:hover { background: #6fc3e0; color: #08262b; }
+.manual-email-button { background: #4aa8d022; color: #7cc7e6; }
+.manual-email-button:hover { background: #4aa8d033; }
+.danger { background: #ff696117; color: #ff8b85; }
+.danger:hover { background: #ff696126; }
+#quoteTable .row-number { background: var(--accent); color: #08262b; }
+.backend-userbar { background: #1c1c1eeb !important; }
+/* Queue/progress bars and any remaining accent fills carry dark text for the same reason. */
+.backend-rfq-progress span { background: linear-gradient(90deg, #3ab3c4, #4aa8d0); }
+.artifact-link, .backend-card-preview .artifact-link { background: var(--accent); color: #08262b; }
+
+/* Correction to the earlier dark rules: filled controls used near-black text on a bright teal to
+   satisfy AA. Separating the two roles is better — a deeper teal for FILLS keeps white text at
+   4.9:1, while the bright accent stays for TEXT and borders on dark surfaces. No black-on-teal. */
+.primary, dialog button.primary, .dialog-actions button.primary {
+  background: #0a7c8a; color: #fff;
+}
+.primary:hover, dialog button.primary:hover { background: #0e93a3; color: #fff; }
+.quote-image-button { background: #146382; color: #fff; }
+.quote-image-button:hover { background: #1b7fa8; color: #fff; }
+#quoteTable .row-number { background: #0a7c8a; color: #fff; }
+#quoteTable th { background: #146382; color: #fff; }
+#quoteTable th:nth-child(n+6):nth-child(-n+10) { background: #0e6e54; }
+#quoteTable th:nth-child(n+11):nth-child(-n+16) { background: #0a7c8a; }
+#quoteTable th:nth-child(n+17) { background: #22585f; }
+#quoteTable th:first-child { background: #06626e; }
+.artifact-link, .backend-card-preview .artifact-link { background: #0a7c8a; color: #fff; }
+.ranking-card th, .backend-registration-list th, .backend-accounts-list th,
+.backend-archive-list th, .backend-analysis-table-wrap th { background: #0a7c8a; color: #fff; }
+.backend-rfq-progress span { background: linear-gradient(90deg, #0a7c8a, #146382); }
+
+/* The dark rules above remapped headings but not the other two text roles that carry a
+   hard-coded dark ink in the backend markup: <summary> (#0b5570) and <label> (#315c68/#174d62).
+   Both landed at ~2:1 on the dark cards. Fixed as a class, not per-report — every disclosure
+   title and form label on these surfaces, including the ones inside dialogs that are not in
+   the DOM until opened. */
+.hotlist-panel > details > summary,
+.backend-market-resources > summary,
+.issuer-picker-summary,
+.backend-panel label,
+.hotlist-controls label,
+.hotlist-consent label,
+.backend-market-controls label,
+.backend-market-consent label,
+.backend-analysis-spot-card label,
+.backend-account-lookup label { color: var(--label); }
+
+/* The lookup box keeps a hard-coded mint fill that no dark rule ever darkened, so it survived as
+   a light panel inside a dark dialog — and the white label above would have been invisible on it.
+   Darken the surface rather than exempting the label. */
+.backend-account-lookup { background: var(--bg-inset); border-color: var(--separator-solid); }
+.backend-account-lookup-result { color: var(--label); }
+
+/* Plain back link on the guide page: #075c8a sits on the page backdrop, not on a card, so no
+   surface rule ever reached it (2.91:1). The follow board's equivalent got a solid pill because
+   it sits on a coloured hero; here the page background is enough. */
+.back-link { color: var(--accent-strong); }
+
+/* Same defect, chip form: a light fill with dark ink reads as a hole punched in the dark card. */
+.backend-analysis-terms > span,
+.backend-market-context-card dl > div { background: #ffffff14; color: var(--label-2); }
+.backend-analysis-terms b, .backend-market-context-card dd { color: var(--label); }
+
+/* Appearance picker: the track needs more lift on black than the light track needs on white, and
+   the selected segment uses a raised grey rather than the elevated surface token, which is too
+   close to the track to read as selected. */
+/* Trade navigator. It only exists at <=760px, so it never appeared in a desktop sweep: the surface
+   rules darkened its card but nothing remapped the text inside it, leaving the heading at 2:1. */
+.trade-navigator-heading { color: var(--label); }
+.trade-navigator-heading span { color: var(--accent-strong); }
+.trade-navigator p { color: var(--label-2); }
+.trade-shortcut { background: var(--bg-inset); border-color: var(--separator-solid); color: var(--accent-strong); }
+
+.theme-switch { background:#7676803d; }
+.theme-switch button { color:var(--label-2); }
+.theme-switch button:hover { color:var(--label); }
+.theme-switch button[aria-pressed="true"] { background:#48484a; color:var(--label); box-shadow:none; }

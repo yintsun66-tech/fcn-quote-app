@@ -5,10 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b4a6f" />
     <title>FCN / DAC 詢價條件</title>
-    <link rel="stylesheet" href="./styles.css?v=ui-dark-v3" />
+    <link rel="stylesheet" href="./styles.css?v=ui-theme-v1" />
+    <link
+      id="darkSheet"
+      rel="stylesheet"
+      href="./styles-dark.css?v=ui-theme-v1"
+      media="(prefers-color-scheme: dark)"
+    />
+    <script>
+      /* Runs before first paint so a stored choice never shows as a flash of the other theme.
+         Deliberately not in app.js: the quoting flow must not gain a new failure mode, and this
+         has to execute during head parsing, before the module scripts load. */
+      (function () {
+        try {
+          var stored = localStorage.getItem("fcn-theme");
+          if (stored !== "light" && stored !== "dark") stored = "auto";
+          document.documentElement.dataset.theme = stored;
+          if (stored !== "auto") {
+            document.getElementById("darkSheet").media = stored === "dark" ? "all" : "not all";
+            document.documentElement.style.colorScheme = stored;
+          }
+        } catch (err) {
+          /* Private mode can throw on localStorage; the OS setting stays in charge. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <main class="app-shell">
+      <div class="theme-bar">
+        <span>外觀</span>
+        <div class="theme-switch" role="group" aria-label="外觀模式">
+          <button type="button" data-theme-choice="auto" aria-pressed="true">自動</button>
+          <button type="button" data-theme-choice="light" aria-pressed="false">淺色</button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false">深色</button>
+        </div>
+      </div>
+
       <header class="hero">
         <div>
           <h1>FCN / DAC 詢價條件</h1>
@@ -222,5 +255,34 @@
     <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
     <script type="module" src="./app.js?v=mobile-trade-nav-v1"></script>
     <script type="module" src="./backend-client.js?v=early-finalize-v1"></script>
+    <script>
+      /* Picker wiring. Touches nothing but the stylesheet's media attribute, the root dataset and
+         one localStorage key, so no path through the quoting flow can be affected. */
+      (function () {
+        var sheet = document.getElementById("darkSheet");
+        var buttons = document.querySelectorAll(".theme-switch [data-theme-choice]");
+        function apply(choice) {
+          document.documentElement.dataset.theme = choice;
+          sheet.media = choice === "auto" ? "(prefers-color-scheme: dark)" : choice === "dark" ? "all" : "not all";
+          document.documentElement.style.colorScheme = choice === "auto" ? "" : choice;
+          buttons.forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.themeChoice === choice));
+          });
+        }
+        buttons.forEach(function (b) {
+          b.addEventListener("click", function () {
+            var choice = b.dataset.themeChoice;
+            apply(choice);
+            try {
+              if (choice === "auto") localStorage.removeItem("fcn-theme");
+              else localStorage.setItem("fcn-theme", choice);
+            } catch (err) {
+              /* Choice still applies for this page view. */
+            }
+          });
+        });
+        apply(document.documentElement.dataset.theme || "auto");
+      })();
+    </script>
   </body>
 </html>

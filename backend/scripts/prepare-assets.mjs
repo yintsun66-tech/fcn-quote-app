@@ -8,6 +8,7 @@ const outputDirectory = resolve(backendDirectory, "public");
 const assets = [
   "index.html",
   "styles.css",
+  "styles-dark.css",
   "app.js",
   "mail-compose.mjs",
   "backend-client.js",

@@ -4,7 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FCN / DAC 詢價系統使用說明</title>
-    <link rel="stylesheet" href="./styles.css?v=ui-dark-v3" />
+    <link rel="stylesheet" href="./styles.css?v=ui-theme-v1" />
+    <link
+      id="darkSheet"
+      rel="stylesheet"
+      href="./styles-dark.css?v=ui-theme-v1"
+      media="(prefers-color-scheme: dark)"
+    />
+    <script>
+      /* Honours the choice made on the quote page. No picker here — one place to set it is enough,
+         and this page is reached from that one. */
+      (function () {
+        try {
+          var stored = localStorage.getItem("fcn-theme");
+          if (stored !== "light" && stored !== "dark") return;
+          document.documentElement.dataset.theme = stored;
+          document.getElementById("darkSheet").media = stored === "dark" ? "all" : "not all";
+          document.documentElement.style.colorScheme = stored;
+        } catch (err) {
+          /* OS setting stays in charge. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <main class="guide-shell">

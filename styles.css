@@ -15,7 +15,7 @@
   --tint-red: #d1352b;
   /* Grouped-background hierarchy: the page sits behind, cards sit on top. */
   --bg-grouped: #f2f2f7; --bg-elevated: #ffffff; --bg-inset: #f7f7fa;
-  --label: #1c1c1e; --label-2: #3c3c4399; --label-3: #3c3c434d;
+  --label: #1c1c1e; --label-2: #3c3c43bf; --label-3: #3c3c434d;
   --separator: #3c3c432e; --separator-solid: #d8d8dd;
   /* Apple's radii grow with the surface: controls 10, cards 14, sheets 20. */
   --r-control: 10px; --r-card: 14px; --r-sheet: 20px; --r-pill: 999px;
@@ -61,7 +61,7 @@ dialog button.primary:hover { background:var(--accent-strong); }
 .issuer-dialog { max-width:430px; }.issuer-dialog label { display:block; margin:14px 0 6px; font-weight:600; color:var(--label-2); }.issuer-dialog select { width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--separator-solid); border-radius:var(--r-control); background:var(--bg-elevated); color:var(--label); }.issuer-warning { margin:12px 0 0; padding:11px 13px; border-radius:var(--r-control); background:#d1352b14; color:#a82a22; font-weight:600; }.dialog-hint { margin:12px 0 0; padding:11px 13px; border-radius:var(--r-control); background:var(--accent-soft); color:var(--accent-strong); font-size:.92rem; }.dialog-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; }.dialog-actions button { min-height:44px; border-radius:var(--r-control); border:0; padding:10px 18px; cursor:pointer; font-weight:600; background:var(--accent-soft); color:var(--accent-strong); transition:background .2s var(--ease),transform .12s var(--ease); }.dialog-actions button:active { transform:scale(.97); }.dialog-actions button.primary { background:var(--accent); color:#fff; }
 .email-clipboard-status { margin:12px 0; padding:10px; border-radius:7px; background:#e8f7f2; color:#12664f; font-weight:700; }.email-clipboard-status[data-state="none"],.email-clipboard-status[data-state="error"] { background:#fff1ed; color:#a3361d; }.email-compose-actions { display:grid; gap:10px; margin-top:14px; }.email-compose-actions label { margin:2px 0 0; }.email-compose-actions input { width:100%; min-height:42px; }.email-compose-actions small { color:#526778; line-height:1.55; }.email-compose-actions button { min-height:42px; border-radius:8px; padding:8px 14px; cursor:pointer; font-weight:bold; }
 .quote-preview-panel { margin-top:26px; padding:22px; border:1px solid #d5e1e7; border-radius:14px; background:#e9f1f5; }.preview-heading { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:16px; }.preview-heading h2 { margin:2px 0 0; color:#073b5c; }.preview-heading p { margin:0; color:#52616b; }.preview-actions { display:flex; align-items:center; justify-content:flex-end; gap:14px; }.preview-issuer-button { min-height:42px; padding:9px 14px; border-radius:8px; cursor:pointer; font-weight:bold; white-space:nowrap; }.quote-capture-scroll { overflow:auto; border-radius:10px; box-shadow:0 8px 22px #173c5020; }.quote-sheet { --issuer-color:#00776d; --issuer-accent:#0a6ea8; --issuer-soft:#eaf8f5; width:1400px; min-height:750px; padding:38px; background:linear-gradient(145deg,#edf9f8 0,#ffffff 32%,#eff7fb 100%); color:#16313d; font-family:Arial,"Microsoft JhengHei",sans-serif; }.quote-sheet.theme-bnp { --issuer-color:#008a4b; --issuer-accent:#0875a8; --issuer-soft:#e7f8ef; }.quote-sheet.theme-barclays { --issuer-color:#0077a8; --issuer-accent:#008b73; --issuer-soft:#e7f6fb; }.quote-sheet.theme-ms { --issuer-color:#006f80; --issuer-accent:#00855d; --issuer-soft:#e5f7f6; }.quote-sheet.theme-jpm { --issuer-color:#174d85; --issuer-accent:#00806c; --issuer-soft:#e8f3fb; }.quote-sheet.theme-nomura { --issuer-color:#b51f36; --issuer-accent:#7d1730; --issuer-soft:#fbecee; }.quote-sheet.theme-ubs { --issuer-color:#d71920; --issuer-accent:#8b1d33; --issuer-soft:#fcebed; }.quote-sheet.theme-dbs { --issuer-color:#d31245; --issuer-accent:#9e1638; --issuer-soft:#fbe9ef; }.quote-sheet.theme-sg { --issuer-color:#0875b9; --issuer-accent:#008a73; --issuer-soft:#e8f5fb; }.quote-sheet.theme-citi { --issuer-color:#056dae; --issuer-accent:#d23449; --issuer-soft:#e9f4fb; }.quote-sheet.theme-gs { --issuer-color:#1f6fb2; --issuer-accent:#16866c; --issuer-soft:#e9f4fb; }.quote-sheet.theme-ca { --issuer-color:#1b5aa6; --issuer-accent:#168064; --issuer-soft:#e9f1fb; }.quote-sheet-header { display:flex; align-items:center; justify-content:space-between; padding:0 0 24px; border-bottom:5px solid var(--issuer-color); }.quote-sheet-header p { margin:0 0 5px; color:#246075; font-size:14px; font-weight:bold; letter-spacing:.12em; }.quote-sheet-header h2 { margin:0; color:var(--issuer-color); font-size:38px; letter-spacing:.02em; }.quote-sheet-header-note { display:flex; align-items:baseline; gap:9px; color:#256075; font-size:17px; }.quote-sheet-header-note strong { color:var(--issuer-accent); font-size:36px; }.quote-card-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:17px; padding-top:26px; }.quote-card { overflow:hidden; border:1px solid #b9d8df; border-radius:10px; background:#fff; box-shadow:0 3px 9px #0a67801f; }.quote-card-header { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:66px; padding:13px 15px; color:#fff; background:linear-gradient(125deg,var(--issuer-color),var(--issuer-accent)); }.quote-card-header strong { display:block; font-size:24px; }.quote-card-header small { font-size:15px; opacity:.92; }.quote-card-number { display:inline-block; margin-right:5px; font-size:14px; font-weight:bold; opacity:.8; }.quote-card-issuer { max-width:96px; text-align:right; font-size:15px; font-weight:bold; letter-spacing:.03em; }.quote-card-summary { display:grid; grid-template-columns:1fr 1fr; background:var(--issuer-soft); }.quote-card-summary div { padding:13px 15px; }.quote-card-summary div + div { border-left:1px solid #b9d8df; }.quote-card-summary span, .quote-detail > span { display:block; color:#286174; font-size:15px; }.quote-card-summary strong { display:block; margin-top:4px; font-size:24px; }.quote-highlight { color:var(--issuer-color); }.quote-card-details { display:grid; grid-template-columns:1fr 1fr; }.quote-detail { min-height:76px; padding:13px 15px; border-top:1px solid #d4e7e9; }.quote-detail:nth-child(odd) { border-right:1px solid #d4e7e9; }.quote-detail strong { display:inline-block; margin-top:5px; font-size:20px; }.quote-detail em { display:block; margin-top:3px; color:var(--issuer-color); font-size:14px; font-style:normal; }.quote-detail.underlyings { grid-column:1 / -1; min-height:102px; }.quote-detail ul { display:flex; flex-wrap:wrap; gap:7px 10px; padding:0; margin:8px 0 0; list-style:none; }.quote-detail li { padding:5px 9px; border-radius:4px; background:#e4f2f4; color:#155066; font-size:18px; font-weight:bold; }.quote-dac-note { margin:5px 0 0; color:#1b7180; font-size:13px; line-height:1.35; }.quote-card-footer { display:flex; justify-content:space-between; gap:8px; padding:11px 15px; background:#eaf4f6; color:#236074; font-size:13px; }.quote-sheet-disclaimer { margin-top:24px; color:#286174; font-size:13px; text-align:right; }
-.guide-shell { max-width:1040px; margin:0 auto; padding:32px 24px 48px; }.guide-shell h1 { color:#073b5c; margin:20px 0 8px; }.guide-intro { color:#52616b; }.back-link { color:#075c8a; font-weight:bold; }.guide-section { margin-top:24px; padding:22px; background:#fff; border:1px solid #d5e1e7; border-radius:12px; line-height:1.6; }.guide-section h2 { margin-top:0; color:#0b4a6f; }.guide-table-scroll { overflow:auto; }.guide-table { min-width:650px; width:100%; border-collapse:collapse; }.guide-table th { position:static; background:#0b4a6f; }.guide-table td, .guide-table th { border:1px solid #d5e1e7; padding:10px; text-align:left; vertical-align:top; }.guide-table td:first-child { position:static; min-width:190px; background:#eef5f8; text-align:left; }
+.guide-shell { max-width:1040px; margin:0 auto; padding:32px 24px 48px; }.guide-shell h1 { color:#073b5c; margin:20px 0 8px; }.guide-intro { color:#52616b; }.back-link { color:#075c8a; font-weight:bold; }.guide-section { margin-top:24px; padding:22px; background:#fff; border:1px solid #d5e1e7; border-radius:12px; line-height:1.6; }.guide-section h2 { margin-top:0; color:#0b4a6f; }.guide-table-scroll { overflow:auto; }.guide-table { min-width:650px; width:100%; border-collapse:collapse; }.guide-table th { position:static; background:#0b4a6f; color:#fff; }.guide-table td, .guide-table th { border:1px solid #d5e1e7; padding:10px; text-align:left; vertical-align:top; }.guide-table td:first-child { position:static; min-width:190px; background:#eef5f8; text-align:left; }
 @media (min-width:761px) {
   .app-shell { max-width:1920px; padding:20px; }
   .entry-workspace { padding:14px; }
@@ -74,7 +74,7 @@ dialog button.primary:hover { background:var(--accent-strong); }
   #quoteTable th,
   #quoteTable td { display:table-cell; min-width:0; padding:5px 4px; border:0; border-right:1px solid #d8e6e8; border-bottom:1px solid #d8e6e8; vertical-align:middle; }
   #quoteTable th { position:sticky; top:0; z-index:3; height:54px; padding:7px 5px; background:#1b7fa8; color:#fff; font-size:.74rem; font-weight:600; line-height:1.15; text-align:center; white-space:normal; }
-  #quoteTable th:nth-child(n+6):nth-child(-n+10) { background:#128a6a; }
+  #quoteTable th:nth-child(n+6):nth-child(-n+10) { background:#0f8163; }
   #quoteTable th:nth-child(n+11):nth-child(-n+16) { background:#0a7c8a; }
   #quoteTable th:nth-child(n+17) { background:#2a6f78; }
   #quoteTable th:first-child { left:0; z-index:4; background:#06626e; }
@@ -128,7 +128,7 @@ dialog button.primary:hover { background:var(--accent-strong); }
   .trade-navigator-heading span { color:#087763; font-weight:800; }
   .trade-shortcuts { display:flex; gap:8px; overflow-x:auto; padding:1px 1px 7px; scroll-snap-type:x proximity; scrollbar-width:thin; scrollbar-color:#83c9bd transparent; -webkit-overflow-scrolling:touch; }
   .trade-shortcut { flex:0 0 46px; min-height:42px; scroll-snap-align:center; border:1px solid #9ac9ce; border-radius:999px; background:#fff; color:#145c71; font-weight:900; cursor:pointer; }
-  .trade-shortcut.is-active { border-color:#087766; background:linear-gradient(135deg,#086b8a,#07916f); color:#fff; box-shadow:0 4px 10px #07697d38; }
+  .trade-shortcut.is-active { border-color:#087766; background:linear-gradient(135deg,#086b8a,#0b7a5f); color:#fff; box-shadow:0 4px 10px #07697d38; }
   .trade-shortcut:focus-visible { outline:3px solid #79daca; outline-offset:2px; }
   .trade-navigator p { margin:1px 2px 0; color:#4b6e76; font-size:.72rem; line-height:1.35; }
   #quoteTable tr { scroll-margin-top:132px; transition:border-color .18s ease,box-shadow .18s ease; }
@@ -263,164 +263,28 @@ dialog button.primary:hover { background:var(--accent-strong); }
    pinned to its light appearance here, and must stay pinned. */
 :root { color-scheme: light dark; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-grouped: #000000; --bg-elevated: #1c1c1e; --bg-inset: #2c2c2e;
-    --label: #ffffff; --label-2: #ebebf599; --label-3: #ebebf54d;
-    --separator: #54545899; --separator-solid: #38383a;
-    /* Lifted so the teal keeps AA contrast on a dark surface; the light-mode value would not. */
-    --accent: #3ab3c4; --accent-strong: #5cc9d8; --accent-soft: #3ab3c422;
-    --teal-blue: #4aa8d0; --teal-green: #35b892; --teal-core: #3ab3c4; --teal-deep: #6fa8b0;
-    --tint-red: #ff6961;
-    --shadow-1: 0 1px 2px #00000059; --shadow-2: 0 4px 12px #0000006b;
-    --shadow-3: 0 12px 32px #00000080;
-  }
-
-  /* Elevated surfaces. Everything here was a literal white or near-white. */
-  .toolbar, .notice, .entry-workspace, dialog, .backend-panel,
-  #quoteTable tr, .ranking-card, .backend-timeline-card, .backend-rfq-card,
-  .backend-market-context-card, .backend-analysis-section, .backend-analysis-shell,
-  .backend-artifact-preview-card, .backend-health-grid article, .issuer-state,
-  .guide-section, .backend-archive-preview, .backend-market-links article,
-  .backend-market-idea-card, .backend-market-consent, .hotlist-consent,
-  .backend-registration-list, .backend-accounts-list, .backend-archive-list,
-  .hotlist-panel > details, .backend-market-resources, .backend-analysis-paths article,
-  .quote-preview-panel, .table-card, .backend-artifact-viewer, .backend-health-panel,
-  .backend-analysis-spot-card, .backend-rfq-empty, .trade-navigator, .backend-userbar {
-    background: var(--bg-elevated) !important;
-    border-color: var(--separator-solid);
-    color: var(--label);
-  }
-  .backend-analysis-view, .backend-analysis-paths { background: var(--bg-grouped); }
-
-  /* Headings and emphasis inside those surfaces were literal navy/teal. */
-  :is(.backend-panel, .ranking-card, .backend-timeline-card, .backend-rfq-card,
-      .backend-market-context-card, .backend-analysis-section, .backend-analysis-shell,
-      .guide-section, .backend-health-panel, .backend-market-links, .backend-market-idea-card,
-      .backend-artifact-viewer, .backend-archive-preview, .entry-workspace, .hotlist-panel)
-    :is(h1, h2, h3, h4) { color: var(--label); }
-  .guide-shell h1, .backend-analysis-header h1, .entry-workspace-header h2 { color: var(--label); }
-  .backend-health-grid strong, .backend-analysis-terms b, .backend-market-context-card dd,
-  .backend-rfq-card header strong, .backend-rfq-underlyings { color: var(--label); }
-  .notice, .backend-analysis-note, .guide-intro, .hotlist-note { color: var(--label-2); }
-
-  /* Inputs: dark field, light text, same focus ring hue. */
-  #quoteTable input, #quoteTable select, .backend-panel input, .issuer-dialog select,
-  .backend-analysis-spot-card input, .backend-account-lookup input, .hotlist-controls select,
-  .backend-market-controls select, .backend-artifact-toolbar select, .custom-fifth-row select,
-  .backend-analysis-hero select {
-    background: var(--bg-inset); border-color: var(--separator-solid); color: var(--label);
-  }
-  #quoteTable input[readonly] { background: #0000004d; color: var(--label-2); }
-
-  /* Tinted field groups: the same hues at an alpha that reads on black. */
-  #quoteTable .field-label { background: #4aa8d017; }
-  #quoteTable .group-underlying .field-label { background: #35b89217; }
-  #quoteTable .group-payoff .field-label { background: #3ab3c417; }
-  #quoteTable .group-risk .field-label { background: #6fa8b017; }
-  #quoteTable td.group-basic { background: #4aa8d00d; }
-  #quoteTable td.group-underlying { background: #35b8920d; }
-  #quoteTable td.group-payoff { background: #3ab3c40d; }
-  #quoteTable td.group-risk { background: #6fa8b00d; }
-  #quoteTable tbody tr:hover td:not(.row-number) { background: #ffffff0f; }
-
-  /* Chips, pills and helper blocks. */
-  .field-group-legend span, .backend-rfq-meta span, .backend-timeline-metrics span,
-  .backend-analysis-metrics span, .hotlist-exchanges, .backend-market-links a,
-  .hotlist-screens a { background: #ffffff14; color: var(--accent-strong); }
-  .dialog-hint { background: var(--accent-soft); color: var(--accent-strong); }
-  .issuer-warning { background: #ff696114; color: #ff8b85; }
-  .status.success { color: #4fd39a; }
-  .backend-provisional, .issuer-picker-summary { background: #3ab3c414; color: var(--accent-strong); border-color: var(--separator-solid); }
-
-  /* Separators inside data tables. */
-  .guide-table td, .guide-table th, .ranking-card th, .ranking-card td,
-  .backend-registration-list th, .backend-registration-list td,
-  .backend-accounts-list th, .backend-accounts-list td,
-  .backend-analysis-table-wrap th, .backend-analysis-table-wrap td { border-color: var(--separator-solid); }
-  .guide-table td:first-child { background: var(--bg-inset); }
-  .backend-analysis-table-wrap tbody tr:nth-child(even) { background: #ffffff08; }
-
-  /* ---- Pinned light: rasterised into a PNG a client receives. ---- */
-  .quote-sheet, .quote-sheet * { color-scheme: light; }
-  .quote-sheet { background: linear-gradient(145deg,#edf9f8 0,#ffffff 32%,#eff7fb 100%) !important; color: #16313d !important; }
-  .quote-sheet .quote-card { background: #fff !important; border-color: #b9d8df !important; }
-  .quote-sheet .quote-card-summary { background: var(--issuer-soft) !important; }
-  .quote-sheet .quote-detail { border-color: #d4e7e9 !important; }
-  .quote-sheet .quote-detail li { background: #e4f2f4 !important; color: #155066 !important; }
-  .quote-sheet .quote-card-footer { background: #eaf4f6 !important; color: #236074 !important; }
-  .quote-sheet :is(.quote-card-summary span, .quote-detail > span) { color: #286174 !important; }
-  .quote-sheet :is(h2, strong, b) { color: inherit; }
-  .quote-sheet .quote-sheet-header h2 { color: var(--issuer-color) !important; }
-  .quote-sheet .quote-highlight, .quote-sheet .quote-detail em { color: var(--issuer-color) !important; }
-  .quote-sheet .quote-sheet-disclaimer, .quote-sheet .quote-sheet-header p { color: #246075 !important; }
-  .quote-capture-scroll { background: #fff; }
+/* Appearance picker ------------------------------------------------------------------------
+   Three states rather than two: an explicit choice has to be able to lose to the OS again, and
+   "auto" is the state the page shipped with. The stored value drives a media attribute on the
+   dark stylesheet, so with JavaScript disabled the control simply never appears and the OS
+   setting still applies. */
+.theme-bar { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:0 0 12px; }
+.theme-bar > span { color:var(--label-2); font-size:.8rem; font-weight:600; letter-spacing:.02em; }
+.theme-switch { display:inline-flex; gap:2px; padding:2px; border-radius:var(--r-pill); background:#7676801f; }
+.theme-switch button {
+  min-height:36px; padding:6px 15px; border:0; border-radius:var(--r-pill); background:transparent;
+  /* Not --label-2: the unselected segment sits on the translucent track, not on the page, and the
+     secondary token lands at 4.4:1 there. */
+  color:#4a4a52; font:inherit; font-size:.82rem; font-weight:600; cursor:pointer;
+  transition:background .18s ease, color .18s ease;
 }
-
-@media (prefers-color-scheme: dark) {
-  /* The accent is lifted in dark mode so it reads against black — which makes white-on-accent fail
-     AA (2.5:1 measured). Filled controls therefore take dark text on the bright fill, the way iOS
-     does, giving ~6.4:1. Tinted and plain controls already pass and keep the light accent. */
-  .primary, .quote-image-button, dialog button.primary, .dialog-actions button.primary,
-  .follow-hero + * .primary { color: #08262b; }
-  .primary:hover, dialog button.primary:hover { background: var(--accent-strong); color: #08262b; }
-  .quote-image-button:hover { background: #6fc3e0; color: #08262b; }
-  .manual-email-button { background: #4aa8d022; color: #7cc7e6; }
-  .manual-email-button:hover { background: #4aa8d033; }
-  .danger { background: #ff696117; color: #ff8b85; }
-  .danger:hover { background: #ff696126; }
-  #quoteTable .row-number { background: var(--accent); color: #08262b; }
-  .backend-userbar { background: #1c1c1eeb !important; }
-  /* Queue/progress bars and any remaining accent fills carry dark text for the same reason. */
-  .backend-rfq-progress span { background: linear-gradient(90deg, #3ab3c4, #4aa8d0); }
-  .artifact-link, .backend-card-preview .artifact-link { background: var(--accent); color: #08262b; }
+.theme-switch button:hover { color:var(--label); }
+.theme-switch button[aria-pressed="true"] {
+  background:var(--bg-elevated); color:var(--label); box-shadow:0 1px 3px #0000002e;
 }
-
-@media (prefers-color-scheme: dark) {
-  /* Correction to the earlier dark rules: filled controls used near-black text on a bright teal to
-     satisfy AA. Separating the two roles is better — a deeper teal for FILLS keeps white text at
-     4.9:1, while the bright accent stays for TEXT and borders on dark surfaces. No black-on-teal. */
-  .primary, dialog button.primary, .dialog-actions button.primary {
-    background: #0a7c8a; color: #fff;
-  }
-  .primary:hover, dialog button.primary:hover { background: #0e93a3; color: #fff; }
-  .quote-image-button { background: #146382; color: #fff; }
-  .quote-image-button:hover { background: #1b7fa8; color: #fff; }
-  #quoteTable .row-number { background: #0a7c8a; color: #fff; }
-  #quoteTable th { background: #146382; color: #fff; }
-  #quoteTable th:nth-child(n+6):nth-child(-n+10) { background: #0e6e54; }
-  #quoteTable th:nth-child(n+11):nth-child(-n+16) { background: #0a7c8a; }
-  #quoteTable th:nth-child(n+17) { background: #22585f; }
-  #quoteTable th:first-child { background: #06626e; }
-  .artifact-link, .backend-card-preview .artifact-link { background: #0a7c8a; color: #fff; }
-  .ranking-card th, .backend-registration-list th, .backend-accounts-list th,
-  .backend-archive-list th, .backend-analysis-table-wrap th { background: #0a7c8a; color: #fff; }
-  .backend-rfq-progress span { background: linear-gradient(90deg, #0a7c8a, #146382); }
-
-  /* The dark rules above remapped headings but not the other two text roles that carry a
-     hard-coded dark ink in the backend markup: <summary> (#0b5570) and <label> (#315c68/#174d62).
-     Both landed at ~2:1 on the dark cards. Fixed as a class, not per-report — every disclosure
-     title and form label on these surfaces, including the ones inside dialogs that are not in
-     the DOM until opened. */
-  .hotlist-panel > details > summary,
-  .backend-market-resources > summary,
-  .issuer-picker-summary,
-  .backend-panel label,
-  .hotlist-controls label,
-  .hotlist-consent label,
-  .backend-market-controls label,
-  .backend-market-consent label,
-  .backend-analysis-spot-card label,
-  .backend-account-lookup label { color: var(--label); }
-
-  /* The lookup box keeps a hard-coded mint fill that no dark rule ever darkened, so it survived as
-     a light panel inside a dark dialog — and the white label above would have been invisible on it.
-     Darken the surface rather than exempting the label. */
-  .backend-account-lookup { background: var(--bg-inset); border-color: var(--separator-solid); }
-  .backend-account-lookup-result { color: var(--label); }
-
-  /* Same defect, chip form: a light fill with dark ink reads as a hole punched in the dark card. */
-  .backend-analysis-terms > span,
-  .backend-market-context-card dl > div { background: #ffffff14; color: var(--label-2); }
-  .backend-analysis-terms b, .backend-market-context-card dd { color: var(--label); }
+.theme-switch button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+@media (max-width:760px) {
+  .theme-bar { justify-content:center; }
+  .theme-switch { flex:1; }
+  .theme-switch button { flex:1; min-height:44px; }
 }

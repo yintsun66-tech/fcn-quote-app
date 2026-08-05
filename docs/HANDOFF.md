@@ -2,13 +2,13 @@
 
 Updated: 2026-08-05 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`520ba32`), pushed to its remote tracking branch.
-Current `main` is `f11da30`, **24 commits behind**. The feature branch also contains the newer
+Current branch: `codex/market-analysis-phase2-4` (`ab79e1c`), pushed to its remote tracking branch.
+Current `main` is `f11da30`, **26 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `6e9b2210-82cf-41e1-b553-e692a6c5a95a`, deployed from the tree recorded
-by `520ba32` and resolved from `wrangler deployments list`, not from a branch name. Every
+Current production Worker: `108b233a-c16a-42f0-bd7c-89273f616e98`, deployed from the tree recorded
+by `ab79e1c` and resolved from `wrangler deployments list`, not from a branch name. Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
@@ -24,9 +24,10 @@ alone never proves that production is running the committed tree.
 
 ## Earnings-date advisory (committed, pushed and deployed, 2026-08-06)
 
-`GET /api/v1/market/earnings` tells the entry form whether an underlying reports earnings today or
-in the next two days; the form shows 「財報日前後可能影響報價與無法進場」 after each BBG code
-resolves. ADR 0034 carries the decision and the provider comparison. Advisory only — validation,
+`GET /api/v1/market/earnings` tells the entry form whether an underlying's earnings date falls
+between **yesterday and the day after tomorrow**; the form shows
+「財報日前後可能影響報價與無法進場」 after each BBG code resolves, labelling each hit
+昨日已發布／今日／明日／後日 from the `dayOffset` the API returns. ADR 0034 carries the decision and the provider comparison. Advisory only — validation,
 dispatch, ranking and the quote image never consult it, so a provider outage cannot stop an RFQ.
 
 **Provider boundary, measured from the Worker rather than read off a pricing page.** Finnhub's free
@@ -34,7 +35,7 @@ tier serves US earnings and returns **HTTP 401** for `international=true`: the s
 and window succeed without that flag, so Japan is a plan boundary and not a broken key. Twelve Data,
 whose key this repo already holds, gates `/earnings_calendar` behind its *grow* plan (403).
 J-Quants looks like the obvious Japanese answer and is not — JPX's free tier serves data from twelve
-weeks ago backwards, so it cannot answer a three-day question at all. The keyless
+weeks ago backwards, so it cannot answer a question about the days around today at all. The keyless
 `api.nasdaq.com` calendar was rejected on principle: it returns real data to a developer machine,
 which is precisely the shape of the Yahoo failure already recorded here.
 
@@ -58,7 +59,7 @@ the upstream calendar held before symbol matching, so "checked, nothing due" is 
 calendar came back empty", and a failed lookup says so on screen instead of showing nothing.
 
 Verified against the deployed Worker with a real sign-in: 11 underlyings requested, `rowsSeen` 1118,
-2 hits, 1 unchecked, 0 unsupported. 28 test files / 212 tests pass. `FINNHUB_API_KEY` is set as a
+2 hits, 1 unchecked, 0 unsupported. 28 test files / 215 tests pass. `FINNHUB_API_KEY` is set as a
 Worker Secret; absent, the advisory reports itself unavailable rather than reporting "no earnings".
 
 ### The advisory is shared by both builds, and its endpoint is public (2026-08-06)
@@ -91,7 +92,7 @@ and the panel renders 「未能查詢：7203 JT」 plus 「此資料來源不支
 `AAPL UW` correctly absent. The published module greps zero for `token|api_key|secret` — the
 provider key never leaves the Worker Secret.
 
-Static snapshot synced at `7f2ff44` (`index.html`, `styles.css`, `styles-dark.css`, `app.js`,
+Static snapshot synced at `d580dc9` (`index.html`, `styles.css`, `styles-dark.css`, `app.js`,
 `guide.html`, plus the new `earnings-advisory.mjs`); the other allowlisted files were byte-identical
 after line-ending normalisation and left alone.
 

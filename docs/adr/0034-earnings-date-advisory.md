@@ -10,10 +10,32 @@ decline to quote it at all. Operators were checking this by hand, or not at all.
 
 ## Decision
 
-`GET /api/v1/market/earnings?symbols=...` returns, for each underlying, whether it reports earnings
-today or in the following two days, in that listing market's own calendar. The entry form asks
-after each BBG code resolves and shows an advisory. It is advisory only: nothing in validation,
-dispatch, ranking or the quote image consults it, and a provider outage cannot stop an RFQ.
+`GET /api/v1/market/earnings?symbols=...` returns, for each underlying, whether its earnings date
+falls between yesterday and the day after tomorrow, in that listing market's own calendar. The entry
+form asks after each BBG code resolves and shows an advisory. It is advisory only: nothing in
+validation, dispatch, ranking or the quote image consults it, and a provider outage cannot stop an
+RFQ.
+
+### The window is asymmetric around today, and that is the point
+
+`LOOKBACK_DAYS = 1`, `LOOKAHEAD_DAYS = 2`, reported to the client as `{ back, forward }` so the
+shape is stated once rather than hard-coded on both sides.
+
+It began as today plus the next two days, which quietly failed to cover what the warning text
+already promised — 財報日前**後**. The day *after* an announcement is when a gap reprices the
+underlying, so an underlying that reported last night is at least as risky to quote as one
+reporting tomorrow, and it was invisible. Live check when the window widened: `AMD UW` returned
+`2026-08-04`, `dayOffset -1`, `hour amc` — a result the original window could not see at all.
+
+Each hit carries `dayOffset` (-1 yesterday through 2), and the form labels it
+昨日已發布／今日／明日／後日. With the window reaching backwards, an announcement already made and
+one still to come call for different decisions, and a bare date leaves the operator to work that out
+against a market calendar that is not the one on their wall — the US date is a day behind Taipei for
+much of the day.
+
+`dayOffset` compares calendar dates parsed at UTC midnight instead of subtracting local times. A
+daylight-saving boundary makes a local-time difference 23 or 25 hours, which rounds to the wrong
+day; a test pins 2026-11-01.
 
 ### Provider: Finnhub, and what its free tier does not include
 
@@ -31,7 +53,7 @@ same window succeed without `international=true` and 401 with it.
 
 J-Quants is worth spelling out because it looks like the obvious Japanese answer and is not. It is
 JPX's own API and its free tier does include the earnings-date endpoint — but the free window runs
-from twelve weeks ago backwards. It cannot answer a question about the next three days at all, so
+from twelve weeks ago backwards. It cannot answer a question about the days around today at all, so
 it is not partial coverage for this feature; it is none. Its other limits (next business day only,
 and only 3月期/9月期 companies) never come into play. A paid J-Quants tier would remove the delay
 and would be the authoritative Japanese source if this is ever funded.
@@ -48,7 +70,7 @@ symbol. A 20-trade RFQ with 100 underlyings costs one call; the Cache API then s
 for six hours. `public_data_cache` was not extended: its `source` CHECK constraint would need a
 migration, and the call volume does not justify a schedule, a table and a cleanup path.
 
-Revisit if the window grows well beyond three days, if earnings dates are wanted for audit, or if
+Revisit if the window grows well beyond a few days, if earnings dates are wanted for audit, or if
 peak-season payloads make the first lookup slow. The trigger would be latency, not quota — the free
 tier allows 60 calls a minute and this design uses a handful a day.
 
@@ -65,7 +87,8 @@ dependency worth taking for an advisory.
 - Windows are computed per market: `America/New_York` for US listings, `Asia/Tokyo` for Japanese
   ones. A Taipei morning is the previous evening in New York, so a server-side date would shift the
   US window by a day and silently invent or miss a warning — the same class of error the
-  previous-close path was corrected for. Tests pin one instant producing two different windows.
+  previous-close path was corrected for. Tests pin one instant producing two different windows
+  (`2026-08-04..07` for US, `2026-08-05..08` for Japan) and month boundaries in both directions.
 - Silence must never be ambiguous. `rowsSeen` reports how many companies the upstream calendar held
   before symbol matching, so "checked, nothing due" is distinguishable from "the calendar came back
   empty". A failed lookup says so on screen rather than showing nothing, because an operator reads

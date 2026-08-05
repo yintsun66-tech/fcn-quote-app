@@ -455,6 +455,13 @@ import {
       field.value = raw;
       setStatus("找不到此 ticker 的交易所資料；將保留您的輸入。", false);
     }
+    // Announce the resolved underlying so the Cloudflare-mode client can look up its earnings date.
+    // Deliberately an event rather than a call: this file is the shared entry form and also runs on
+    // the static site, where there is no API to ask. Nothing here waits on or reads a reply, so the
+    // quoting flow is identical whether or not anything is listening.
+    document.dispatchEvent(new CustomEvent("fcn:underlying-resolved", {
+      detail: { bbgCode: field.value }
+    }));
   }
 
   function displayValue(value, fallback = "—") {

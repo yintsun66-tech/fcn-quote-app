@@ -325,3 +325,27 @@ dialog button.primary:hover { background:var(--accent-strong); }
 }
 .backend-userbar:not(.is-expanded) .backend-mobile-collapsible { display:none!important; }
 .backend-userbar.is-expanded .backend-mobile-toggle-icon { transform:rotate(180deg); }
+
+/* Earnings-date advisory ----------------------------------------------------------------------
+   Advisory, not an error: it warns about timing, it never means the trade was rejected. Amber
+   rather than red for that reason. It sits directly under the workspace header so it is in the
+   same eyeline as the underlying that triggered it. */
+.earnings-advisory {
+  margin: 0 0 16px; padding: 14px 16px; border-left: 4px solid #c47a2c;
+  border-radius: var(--r-control); background: #fff4e6; color: #6b4415; line-height: 1.55;
+}
+.earnings-advisory[hidden] { display: none; }
+.earnings-advisory p { margin: 0; }
+.earnings-advisory-lead { font-weight: 700; font-size: 1.02rem; }
+.earnings-advisory-list {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none;
+}
+.earnings-advisory-list li {
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 11px;
+  border-radius: var(--r-pill); background: #ffffffcc; font-size: .88rem;
+}
+.earnings-advisory-list b { font-weight: 700; }
+.earnings-advisory-list span { color: #7a5423; }
+.earnings-advisory-note { margin-top: 9px; font-size: .84rem; }
+/* A failed lookup must read as "unknown", never as an all-clear. */
+.earnings-advisory-unavailable { margin-top: 9px; font-weight: 700; }

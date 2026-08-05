@@ -9,6 +9,9 @@ export interface AppEnv extends Env {
   LINE_CHANNEL_SECRET?: string;
   // Optional. Primary equity daily-bar provider; the chain falls through to the keyless one.
   TWELVE_DATA_API_KEY?: string;
+  // Optional. Earnings-date advisory only; absent means the advisory reports itself unavailable
+  // rather than reporting "no earnings", which would be indistinguishable from a real all-clear.
+  FINNHUB_API_KEY?: string;
 }
 
 export type UserStatus = "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "SUSPENDED" | "DISABLED";

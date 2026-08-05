@@ -289,6 +289,108 @@ import {
     return payload;
   }
 
+  // Earnings-date advisory ---------------------------------------------------------------------
+  // Purely informational. It never blocks validation or dispatch, and a failure is shown rather
+  // than swallowed: an empty advisory has to mean "checked, nothing due", never "could not check".
+  let earningsTimer = null;
+  let earningsPanel = null;
+
+  function earningsHost() {
+    if (earningsPanel && earningsPanel.isConnected) return earningsPanel;
+    const workspace = document.querySelector(".entry-workspace");
+    if (!workspace) return null;
+    earningsPanel = document.createElement("div");
+    earningsPanel.className = "earnings-advisory";
+    earningsPanel.setAttribute("role", "status");
+    earningsPanel.setAttribute("aria-live", "polite");
+    earningsPanel.hidden = true;
+    const header = workspace.querySelector(".entry-workspace-header");
+    if (header && header.nextSibling) workspace.insertBefore(earningsPanel, header.nextSibling);
+    else workspace.appendChild(earningsPanel);
+    return earningsPanel;
+  }
+
+  function currentUnderlyings() {
+    const codes = new Set();
+    document.querySelectorAll("#quoteTable tbody tr").forEach(row => {
+      ["bbgCode1", "bbgCode2", "bbgCode3", "bbgCode4", "bbgCode5"].forEach(name => {
+        const value = row.querySelector(`[name="${name}"]`)?.value?.trim();
+        if (value) codes.add(value.toUpperCase());
+      });
+    });
+    return [...codes];
+  }
+
+  function renderEarnings(payload) {
+    const host = earningsHost();
+    if (!host) return;
+    const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+    const unsupported = Array.isArray(payload?.unsupported) ? payload.unsupported : [];
+    const parts = [];
+
+    if (hits.length) {
+      const when = { bmo: "盤前", amc: "盤後", dmh: "盤中" };
+      const list = hits
+        .slice()
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+        .map(hit => {
+          const label = when[hit.hour] || "";
+          return `<li><b>${escapeHtml(hit.bbgCode)}</b><span>${escapeHtml(hit.date)}${label ? `　${label}` : ""}</span></li>`;
+        })
+        .join("");
+      parts.push(
+        `<p class="earnings-advisory-lead">⚠ 財報日前後可能影響報價與無法進場</p>`,
+        `<ul class="earnings-advisory-list">${list}</ul>`,
+        `<p class="earnings-advisory-note">以下標的在今日起三日內（含當日，依該市場當地日期）發布財報。</p>`
+      );
+    }
+    const unchecked = Array.isArray(payload?.unchecked) ? payload.unchecked : [];
+    if (payload && payload.available === false) {
+      parts.push(
+        `<p class="earnings-advisory-unavailable">財報日資料暫時無法取得，請自行確認。未顯示警示不代表沒有財報。</p>`
+      );
+    } else {
+      // Two different answers, deliberately not merged: an unsupported exchange will never work
+      // through this provider, while an unchecked one only needs a plan that covers that market.
+      if (unchecked.length) {
+        parts.push(
+          `<p class="earnings-advisory-unavailable">未能查詢：${escapeHtml(unchecked.join("、"))}。`
+          + `目前的資料方案不含該市場，請自行確認財報日。</p>`
+        );
+      }
+      if (unsupported.length) {
+        parts.push(
+          `<p class="earnings-advisory-note">此資料來源不支援的交易所：${escapeHtml(unsupported.join("、"))}。</p>`
+        );
+      }
+    }
+
+    host.innerHTML = parts.join("");
+    host.hidden = parts.length === 0;
+  }
+
+  async function refreshEarnings() {
+    if (!state.user) return;
+    const codes = currentUnderlyings();
+    if (!codes.length) {
+      const host = earningsHost();
+      if (host) { host.innerHTML = ""; host.hidden = true; }
+      return;
+    }
+    try {
+      const payload = await request(`/market/earnings?symbols=${encodeURIComponent(codes.join(","))}`);
+      renderEarnings(payload);
+    } catch (error) {
+      // Surfaced, not swallowed — silence here would read as an all-clear.
+      renderEarnings({ available: false, hits: [], unsupported: [] });
+    }
+  }
+
+  document.addEventListener("fcn:underlying-resolved", () => {
+    clearTimeout(earningsTimer);
+    earningsTimer = setTimeout(refreshEarnings, 400);
+  });
+
   function showAuth() {
     if (!authDialog.open) authDialog.showModal();
   }

@@ -17,6 +17,7 @@ import {
 import { getAdminOutboundEmail, listAdminOutboundEmails } from "./admin-outbound";
 import { listAdminRfqTimelines } from "./admin-rfq";
 import { getAdminMarketContextHealth } from "./admin-market";
+import { getEarningsAdvisory } from "./earnings-route";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
@@ -110,6 +111,9 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const session = await requireSession(request, env);
   if (method === "POST" && path === "/api/v1/auth/logout") return logout(request, env, session);
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
+  // Advisory for the entry form. Deliberately not on the RFQ path: it must never be able to block
+  // validation, dispatch or ranking.
+  if (method === "GET" && path === "/api/v1/market/earnings") return getEarningsAdvisory(request, env);
   if (method === "GET" && path === "/api/v1/admin/registrations") return listRegistrations(env, session);
   if (method === "GET" && path === "/api/v1/admin/accounts") return listAccounts(env, session);
   if (method === "POST" && path === "/api/v1/admin/accounts/lookup") return lookupAccountByEmployeeNumber(request, env, session);

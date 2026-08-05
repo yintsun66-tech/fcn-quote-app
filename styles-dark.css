@@ -207,3 +207,10 @@
 .theme-switch button { color:var(--label-2); }
 .theme-switch button:hover { color:var(--label); }
 .theme-switch button[aria-pressed="true"] { background:#48484a; color:var(--label); box-shadow:none; }
+
+/* Earnings-date advisory. Same amber pairing as the TIMEOUT issuer chips, which measured 7:1 on
+   the dark surface, so the two warning colours stay one language. */
+.earnings-advisory { background: #ff9f0a29; border-left-color: #ff9f0a; color: var(--label); }
+.earnings-advisory-list li { background: #ffffff14; }
+.earnings-advisory-list span, .earnings-advisory-note { color: var(--label-2); }
+.earnings-advisory-lead, .earnings-advisory-unavailable { color: #ffb340; }

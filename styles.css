@@ -311,3 +311,17 @@ dialog button.primary:hover { background:var(--accent-strong); }
   .eyebrow { font-size:.75rem; }
   .field-group-legend span { font-size:.75rem; }
 }
+
+/* Collapsible user panel at every width -------------------------------------------------------
+   The collapse used to be mobile-only; tablet and desktop always showed the whole bar. It now
+   behaves the same at every width: collapsed shows 我的詢價 and the toggle and nothing else.
+   The .backend-mobile-* class and id names are historical — the behaviour is no longer
+   mobile-only, and renaming them would touch the generated markup, the CSS and the JS together
+   for no functional gain. The <=760px block keeps its own expanded layout (a two-column grid
+   pinned across the screen); this block only governs the collapsed state and the toggle. */
+.backend-mobile-menu-toggle {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:auto; min-width:58px; min-height:44px; padding:8px 10px;
+}
+.backend-userbar:not(.is-expanded) .backend-mobile-collapsible { display:none!important; }
+.backend-userbar.is-expanded .backend-mobile-toggle-icon { transform:rotate(180deg); }

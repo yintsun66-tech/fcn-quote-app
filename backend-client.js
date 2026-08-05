@@ -219,7 +219,6 @@ import {
   const userbar = document.querySelector(".backend-userbar");
   const mobileActionsToggle = document.querySelector("#backendMobileActionsToggle");
   const mobileActionsLabel = document.querySelector("#backendMobileActionsLabel");
-  const mobileUserbarMedia = matchMedia("(max-width: 760px)");
   const adminRegistrationsButton = document.querySelector("#backendAdminRegistrations");
   const adminRegistrationReviewDialog = document.querySelector("#backendRegistrationReview");
   const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
@@ -254,8 +253,10 @@ import {
   const analysisError = document.querySelector("#backendAnalysisError");
   const analysisBack = document.querySelector("#backendAnalysisBack");
 
+  // Named "mobile" for historical reasons: the collapse was mobile-only until it was extended to
+  // every width. Collapsed leaves 我的詢價 and the toggle visible; everything else is hidden.
   function setMobileActionsExpanded(expanded) {
-    const next = Boolean(expanded && mobileUserbarMedia.matches && state.user);
+    const next = Boolean(expanded && state.user);
     userbar.classList.toggle("is-expanded", next);
     mobileActionsToggle.setAttribute("aria-expanded", String(next));
     mobileActionsToggle.setAttribute("aria-label", next ? "收合其他操作" : "展開其他操作");
@@ -2139,7 +2140,7 @@ import {
     setMobileActionsExpanded(mobileActionsToggle.getAttribute("aria-expanded") !== "true");
   });
   userbar.addEventListener("click", event => {
-    if (!mobileUserbarMedia.matches || event.target.closest("#backendMobileActionsToggle")) return;
+    if (event.target.closest("#backendMobileActionsToggle")) return;
     if (event.target.closest("button")) setMobileActionsExpanded(false);
   });
   document.addEventListener("click", event => {
@@ -2153,9 +2154,9 @@ import {
       mobileActionsToggle.focus();
     }
   });
-  addEventListener("resize", () => {
-    if (!mobileUserbarMedia.matches) setMobileActionsExpanded(false);
-  }, { passive: true });
+  // The resize listener that used to force-collapse above 760px is gone: it existed to restore the
+  // always-expanded desktop bar, and with the collapse universal it would close the panel on any
+  // desktop resize instead.
   newRfqButton.addEventListener("click", () => {
     if (rfqHistoryDialog.open) rfqHistoryDialog.close();
     closeRfqProgress();

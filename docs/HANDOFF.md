@@ -2,13 +2,13 @@
 
 Updated: 2026-08-05 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`62949d0`), pushed to its remote tracking branch.
-Current `main` is `f11da30`, **18 commits behind**. The feature branch also contains the newer
+Current branch: `codex/market-analysis-phase2-4` (`167d303`), pushed to its remote tracking branch.
+Current `main` is `f11da30`, **22 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `911c5297-4bb9-4384-bfd7-88658e6022fc`, deployed from the tree recorded
-by `62949d0` and resolved from `wrangler deployments list`, not from a branch name. Every
+Current production Worker: `ef5728cf-8660-4907-8dc9-9617cd651478`, deployed from the tree recorded
+by `167d303` and resolved from `wrangler deployments list`, not from a branch name. Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
@@ -21,6 +21,55 @@ Deployed bytes were compared against the working tree for all seven served asset
 `backend-client.js`, `follow-board.mjs`) and all three cache tokens: identical. Worth repeating as
 a habit — several deploys in this session happened before their commit, so a clean `git status`
 alone never proves that production is running the committed tree.
+
+## Earnings-date advisory (committed, pushed and deployed, 2026-08-06)
+
+`GET /api/v1/market/earnings` tells the entry form whether an underlying reports earnings today or
+in the next two days; the form shows 「財報日前後可能影響報價與無法進場」 after each BBG code
+resolves. ADR 0034 carries the decision and the provider comparison. Advisory only — validation,
+dispatch, ranking and the quote image never consult it, so a provider outage cannot stop an RFQ.
+
+**Provider boundary, measured from the Worker rather than read off a pricing page.** Finnhub's free
+tier serves US earnings and returns **HTTP 401** for `international=true`: the same key, endpoint
+and window succeed without that flag, so Japan is a plan boundary and not a broken key. Twelve Data,
+whose key this repo already holds, gates `/earnings_calendar` behind its *grow* plan (403).
+J-Quants looks like the obvious Japanese answer and is not — JPX's free tier serves data from twelve
+weeks ago backwards, so it cannot answer a three-day question at all. The keyless
+`api.nasdaq.com` calendar was rejected on principle: it returns real data to a developer machine,
+which is precisely the shape of the Yahoo failure already recorded here.
+
+**Japanese underlyings are reported as `unchecked`, and that is the accepted state** — not a gap to
+be closed silently. It is kept apart from `unsupported` (HK, FP, GY): an unsupported exchange never
+works through this provider, an unchecked one only needs a plan covering that market, and merging
+them would make a billing problem look permanent. If Japan is ever funded, a paid J-Quants tier is
+the authoritative source.
+
+**Caching is at the edge, not in D1, and that was deliberate.** Finnhub returns the whole date range
+rather than one ticker at a time, so a 20-trade RFQ with 100 underlyings costs one upstream call,
+cached six hours. `public_data_cache` was not extended because its `source` CHECK constraint would
+need a migration and the volume does not justify a schedule, a table and a cleanup path. Revisit on
+latency — peak-season payloads — not on quota; the free tier allows 60 calls a minute.
+
+Two properties this must keep. Windows are per market (`America/New_York`, `Asia/Tokyo`): a Taipei
+morning is the previous evening in New York, so a server-side date would shift the US window a day
+and silently invent or miss a warning. Tests pin one instant yielding `2026-08-05..07` for US and
+`2026-08-06..08` for Japan. And silence must stay unambiguous: `rowsSeen` reports how many companies
+the upstream calendar held before symbol matching, so "checked, nothing due" is separable from "the
+calendar came back empty", and a failed lookup says so on screen instead of showing nothing.
+
+Verified against the deployed Worker with a real sign-in: 11 underlyings requested, `rowsSeen` 1118,
+2 hits, 1 unchecked, 0 unsupported. 28 test files / 212 tests pass. `FINNHUB_API_KEY` is set as a
+Worker Secret; absent, the advisory reports itself unavailable rather than reporting "no earnings".
+
+**Operational trap found the hard way.** `wrangler secret put` does not prompt when stdin is not a
+TTY — it reads stdin and will store an **empty** secret while printing `✨ Success`. Running it from
+a non-interactive shell can therefore overwrite a live key with an empty string and look like it
+worked. Set secrets from a real terminal. Two further traps cost time in the same session: `npx` is
+not on the default PowerShell PATH here (Node lives under the Codex runtime directory, and `npx.cmd`
+also shells out to `node` by bare name, so a full path to npx alone is not enough), and Windows
+PowerShell 5.1 reads a `.ps1` in the ANSI codepage unless it carries a UTF-8 BOM — a UTF-8 file with
+non-ASCII text does not merely display as mojibake, the quoting breaks and the remainder is echoed
+rather than run. Keep helper scripts ASCII.
 
 ## Issuer status colour coding, and phone touch/reading sizes (committed, pushed and deployed, 2026-08-05)
 

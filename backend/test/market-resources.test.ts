@@ -83,13 +83,14 @@ describe("public market resource mapping", () => {
       expect(descriptor.screens.map((screen: { screenKey: string }) => screen.screenKey)).toEqual(expected);
       for (const screen of descriptor.screens as Array<{ url: string }>) {
         const url = new URL(screen.url);
-        expect(url.origin).toBe("https://www.tradingview.com");
+        // tw. rather than www.: TradingView serves the Traditional Chinese page from that host.
+        expect(url.origin).toBe("https://tw.tradingview.com");
         expect(url.pathname).toContain(`/markets/${marketPath}/market-movers-`);
         expect(url.toString()).not.toMatch(/rfq_|quote_|employee|branch/i);
       }
     }
     expect(hotlistScreenUrl("japan", "highest_revenue"))
-      .toBe("https://www.tradingview.com/markets/stocks-japan/market-movers-highest-revenue/");
+      .toBe("https://tw.tradingview.com/markets/stocks-japan/market-movers-highest-revenue/");
   });
 
   it("fails closed for hot-list markets or rankings outside the allowlist", () => {

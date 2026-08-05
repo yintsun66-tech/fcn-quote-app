@@ -70,7 +70,7 @@ export function hotlistScreenUrl(marketKey, screenKey) {
   const market = allowlisted(HOTLIST_MARKETS, marketKey);
   const screen = allowlisted(HOTLIST_SCREENS, screenKey);
   if (!market || !screen) throw new Error("無法建立未支援的熱門榜連結。");
-  return `https://www.tradingview.com/markets/${market.marketPath}/${screen.slug}/`;
+  return `https://tw.tradingview.com/markets/${market.marketPath}/${screen.slug}/`;
 }
 
 // Builds the TradingView hot-list embed URL directly instead of injecting their loader script into
@@ -118,7 +118,7 @@ function tickerVariants(value) {
 
 export function marketResourceDescriptor(underlying) {
   const normalized = normalizedUnderlying(underlying);
-  const searchUrl = `https://www.tradingview.com/symbols/?q=${encodeURIComponent(normalized)}`;
+  const searchUrl = `https://tw.tradingview.com/symbols/?q=${encodeURIComponent(normalized)}`;
   const match = /^(.+)\s+(UW|UN|UA)$/.exec(normalized);
   if (!match) {
     return { underlying: normalized, supported: false, searchUrl };
@@ -138,7 +138,7 @@ export function marketResourceDescriptor(underlying) {
     exchange,
     tradingViewSymbol,
     links: {
-      tradingView: `https://www.tradingview.com/symbols/${exchange}-${variants.tradingView}/`,
+      tradingView: `https://tw.tradingview.com/symbols/${exchange}-${variants.tradingView}/`,
       yahooFinance: `https://finance.yahoo.com/quote/${encodeURIComponent(variants.yahoo)}/`,
       googleTrends: `https://trends.google.com/trends/explore?geo=US&q=${encodeURIComponent(variants.yahoo)}`,
       cboe: `https://www.cboe.com/delayed_quotes/${encodeURIComponent(variants.cboe)}/quote_table/`,
@@ -166,7 +166,7 @@ export function tradingViewWidgetSrcdoc(descriptor) {
     hide_side_toolbar: true,
     save_image: false,
     calendar: false,
-    support_host: "https://www.tradingview.com"
+    support_host: "https://tw.tradingview.com"
   });
 
   return `<!doctype html><html lang="zh-Hant"><head>
@@ -201,7 +201,7 @@ export function tradingViewWidgetUrl(descriptor) {
     hide_side_toolbar: true,
     save_image: false,
     calendar: false,
-    support_host: "https://www.tradingview.com"
+    support_host: "https://tw.tradingview.com"
   };
   return `https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=zh_TW#${encodeURIComponent(JSON.stringify(configuration))}`;
 }

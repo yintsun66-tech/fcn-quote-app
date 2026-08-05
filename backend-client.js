@@ -11,7 +11,7 @@ import {
   MARKET_RESOURCE_CONSENT_KEY,
   marketResourceDescriptor,
   tradingViewWidgetUrl
-} from "./market-resources.mjs?v=market-hotlist-v3";
+} from "./market-resources.mjs?v=market-hotlist-v4";
 
 (() => {
   "use strict";

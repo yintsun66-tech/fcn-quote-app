@@ -6,7 +6,7 @@ import {
   HOTLIST_CONSENT_KEY,
   hotlistDescriptor,
   hotlistWidgetUrl,
-} from "./market-resources.mjs?v=market-hotlist-v3";
+} from "./market-resources.mjs?v=market-hotlist-v4";
 import {
   ZIMBRA_URL_STORAGE_KEY,
   buildMailtoUrl,

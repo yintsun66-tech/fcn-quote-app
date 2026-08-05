@@ -20,6 +20,10 @@ const PATH = "/api/v1/public/market/earnings";
 const DEBOUNCE_MS = 400;
 const REQUEST_TIMEOUT_MS = 8000;
 const HOUR_LABEL = { bmo: "盤前", amc: "盤後", dmh: "盤中" };
+// The window reaches back a day, so an already-published result and an upcoming one both appear.
+// They are different situations to act on, and an unlabelled date leaves the operator to work out
+// which is which against a market calendar that is not the one on their wall.
+const DAY_LABEL = { "-1": "昨日已發布", "0": "今日", "1": "明日", "2": "後日" };
 
 let timer = null;
 let panel = null;
@@ -70,15 +74,17 @@ function render(payload) {
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
       .map(hit => {
-        const label = HOUR_LABEL[hit.hour] || "";
+        const when = DAY_LABEL[String(hit.dayOffset)] || "";
+        const hour = HOUR_LABEL[hit.hour] || "";
+        const detail = [when, hour].filter(Boolean).join("・");
         return `<li><b>${escapeHtml(hit.bbgCode)}</b>`
-          + `<span>${escapeHtml(hit.date)}${label ? `　${label}` : ""}</span></li>`;
+          + `<span>${escapeHtml(hit.date)}${detail ? `　${escapeHtml(detail)}` : ""}</span></li>`;
       })
       .join("");
     parts.push(
       `<p class="earnings-advisory-lead">⚠ 財報日前後可能影響報價與無法進場</p>`,
       `<ul class="earnings-advisory-list">${list}</ul>`,
-      `<p class="earnings-advisory-note">以下標的在今日起三日內（含當日，依該市場當地日期）發布財報。</p>`
+      `<p class="earnings-advisory-note">以下標的的財報日落在昨日至後日之間（依該市場當地日期）。</p>`
     );
   }
 

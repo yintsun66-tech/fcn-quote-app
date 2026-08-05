@@ -1,5 +1,5 @@
 import { jsonResponse } from "./http";
-import { lookupEarnings } from "./earnings-calendar";
+import { LOOKAHEAD_DAYS, LOOKBACK_DAYS, lookupEarnings } from "./earnings-calendar";
 import { PUBLIC_ORIGINS } from "./follow-board";
 import type { AppEnv } from "./types";
 
@@ -7,6 +7,9 @@ import type { AppEnv } from "./types";
 const MAX_SYMBOLS = 100;
 
 export const EARNINGS_PUBLIC_PATH = "/api/v1/public/market/earnings";
+
+/** Reported so the form can describe the window it is showing without hard-coding it twice. */
+const WINDOW = { back: LOOKBACK_DAYS, forward: LOOKAHEAD_DAYS };
 
 /**
  * CORS for the static build, which has no backend of its own and must call this across origins.
@@ -52,10 +55,14 @@ export async function getEarningsAdvisory(request: Request, env: AppEnv): Promis
     .slice(0, MAX_SYMBOLS);
 
   if (!symbols.length) {
-    return jsonResponse({ available: true, hits: [], unsupported: [], unchecked: [], windowDays: 3 }, 200, cors);
+    return jsonResponse(
+      { available: true, hits: [], unsupported: [], unchecked: [], window: WINDOW },
+      200,
+      cors,
+    );
   }
 
-  const result = await lookupEarnings(env, symbols, new Date(), 3);
+  const result = await lookupEarnings(env, symbols, new Date());
 
   // A degraded advisory has to be visible from the outside. The project has already lost weeks to a
   // provider that failed quietly, so the outcome is logged whenever it is not a clean success —
@@ -82,7 +89,7 @@ export async function getEarningsAdvisory(request: Request, env: AppEnv): Promis
 
   return jsonResponse({
     available: result.available,
-    windowDays: 3,
+    window: WINDOW,
     hits: result.hits,
     unsupported: result.unsupported,
     unchecked: result.unchecked,

@@ -42,6 +42,13 @@ export interface EarningsHit {
   date: string;
   /** "bmo" before market open, "amc" after market close, "dmh" during hours, or "" if unknown. */
   hour: string;
+  /**
+   * Days from that market's today: -1 yesterday, 0 today, 1 tomorrow, 2 the day after. Carried so
+   * the form can say whether the announcement has already happened — with the window now reaching
+   * backwards, "reported yesterday" and "reports tomorrow" are different situations and collapsing
+   * them into one warning would throw away the part the operator acts on.
+   */
+  dayOffset: number;
 }
 
 export interface EarningsLookup {
@@ -103,10 +110,32 @@ export function marketToday(market: EarningsMarket, now: Date): string {
   }).format(now);
 }
 
-/** Inclusive window: today plus the following two days, in the market's own calendar. */
-export function marketWindow(market: EarningsMarket, now: Date, days = 3): { from: string; to: string } {
-  const from = marketToday(market, now);
-  return { from, to: addDays(from, days - 1) };
+/** How far either side of today the advisory looks, in the listing market's own calendar. */
+export const LOOKBACK_DAYS = 1;
+export const LOOKAHEAD_DAYS = 2;
+
+/**
+ * Inclusive window around today: yesterday through the day after tomorrow by default.
+ *
+ * The day *after* an announcement matters as much as the days before it — that is when a gap
+ * reprices the underlying — so the window is deliberately asymmetric around today rather than a
+ * plain "next N days".
+ */
+export function marketWindow(
+  market: EarningsMarket,
+  now: Date,
+  back = LOOKBACK_DAYS,
+  forward = LOOKAHEAD_DAYS,
+): { from: string; to: string; today: string } {
+  const today = marketToday(market, now);
+  return { from: addDays(today, -back), to: addDays(today, forward), today };
+}
+
+/** Whole days from that market's today: -1 yesterday, 0 today, 1 tomorrow, 2 the day after. */
+export function dayOffset(date: string, today: string): number {
+  const a = Date.parse(`${date}T00:00:00Z`);
+  const b = Date.parse(`${today}T00:00:00Z`);
+  return Math.round((a - b) / 86_400_000);
 }
 
 interface FinnhubEarningsRow {
@@ -124,7 +153,8 @@ function normalizeRows(payload: unknown): Map<string, { date: string; hour: stri
     const date = typeof row?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date) ? row.date : "";
     if (!symbol || !date) continue;
     const hour = typeof row?.hour === "string" ? row.hour : "";
-    // A symbol can appear more than once across a window; the earliest date is the one that matters.
+    // A symbol can appear more than once across a window. Keep the earliest: with the window now
+    // reaching back a day, an announcement already made is the one that has moved the price.
     const seen = out.get(symbol);
     if (!seen || date < seen.date) out.set(symbol, { date, hour });
   }
@@ -200,7 +230,8 @@ export async function lookupEarnings(
   env: AppEnv,
   bbgCodes: string[],
   now: Date,
-  days = 3,
+  back = LOOKBACK_DAYS,
+  forward = LOOKAHEAD_DAYS,
 ): Promise<EarningsLookup> {
   const unsupported: string[] = [];
   const wanted: EarningsSymbol[] = [];
@@ -223,7 +254,7 @@ export async function lookupEarnings(
   let lastError = "";
 
   for (const market of markets) {
-    const { from, to } = marketWindow(market, now, days);
+    const { from, to, today } = marketWindow(market, now, back, forward);
     try {
       const rows = await fetchWindow(env, from, to, market !== "US");
       anyWindowSucceeded = true;
@@ -239,6 +270,7 @@ export async function lookupEarnings(
           market,
           date: row.date,
           hour: row.hour,
+          dayOffset: dayOffset(row.date, today),
         });
       }
     } catch (error) {

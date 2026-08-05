@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { marketToday, marketWindow, toEarningsSymbol } from "../src/earnings-calendar";
+import { dayOffset, marketToday, marketWindow, toEarningsSymbol } from "../src/earnings-calendar";
 
 describe("earnings symbol mapping", () => {
   it("maps US Bloomberg suffixes to a bare Finnhub ticker", () => {
@@ -47,19 +47,45 @@ describe("market-local dates", () => {
   });
 
   it("puts the two markets on different windows for the same instant", () => {
-    expect(marketWindow("US", taipeiEarlyMorning)).toEqual({ from: "2026-08-05", to: "2026-08-07" });
-    expect(marketWindow("JP", taipeiEarlyMorning)).toEqual({ from: "2026-08-06", to: "2026-08-08" });
+    expect(marketWindow("US", taipeiEarlyMorning))
+      .toEqual({ from: "2026-08-04", to: "2026-08-07", today: "2026-08-05" });
+    expect(marketWindow("JP", taipeiEarlyMorning))
+      .toEqual({ from: "2026-08-05", to: "2026-08-08", today: "2026-08-06" });
   });
 
-  it("includes today and the following two days", () => {
+  it("reaches back one day and forward two, inclusive", () => {
     const noonNewYork = new Date("2026-08-06T16:00:00Z");
-    const window = marketWindow("US", noonNewYork);
-    expect(window.from).toBe("2026-08-06");
-    expect(window.to).toBe("2026-08-08");
+    // Yesterday matters because the day after an announcement is when a gap reprices the underlying.
+    expect(marketWindow("US", noonNewYork))
+      .toEqual({ from: "2026-08-05", to: "2026-08-08", today: "2026-08-06" });
   });
 
-  it("crosses a month boundary without arithmetic drift", () => {
-    const endOfMonth = new Date("2026-08-31T16:00:00Z");
-    expect(marketWindow("US", endOfMonth)).toEqual({ from: "2026-08-31", to: "2026-09-02" });
+  it("crosses a month boundary in both directions without arithmetic drift", () => {
+    expect(marketWindow("US", new Date("2026-08-31T16:00:00Z")))
+      .toEqual({ from: "2026-08-30", to: "2026-09-02", today: "2026-08-31" });
+    expect(marketWindow("US", new Date("2026-09-01T16:00:00Z")))
+      .toEqual({ from: "2026-08-31", to: "2026-09-03", today: "2026-09-01" });
+  });
+});
+
+describe("day offsets", () => {
+  it("labels each day of the window relative to that market's today", () => {
+    const today = "2026-08-06";
+    expect(dayOffset("2026-08-05", today)).toBe(-1);
+    expect(dayOffset("2026-08-06", today)).toBe(0);
+    expect(dayOffset("2026-08-07", today)).toBe(1);
+    expect(dayOffset("2026-08-08", today)).toBe(2);
+  });
+
+  it("stays correct across a month boundary", () => {
+    expect(dayOffset("2026-08-31", "2026-09-01")).toBe(-1);
+    expect(dayOffset("2026-09-01", "2026-08-31")).toBe(1);
+  });
+
+  it("is unaffected by daylight saving, because both sides are plain calendar dates", () => {
+    // 2026-11-01 is the US DST change. A local-time subtraction would give 24.x or 23.x hours here
+    // and round to the wrong day; comparing date strings at UTC midnight cannot.
+    expect(dayOffset("2026-10-31", "2026-11-01")).toBe(-1);
+    expect(dayOffset("2026-11-02", "2026-11-01")).toBe(1);
   });
 });

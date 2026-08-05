@@ -35,8 +35,8 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   they remain equal: deployment still runs `wrangler deploy` from a working tree, not from `main`,
   so either branch can move independently. Resolve what is deployed from
   `wrangler deployments list`, not from a branch name.
-- The current production Worker is `59de2931-6b1a-4d10-87f2-1ceb48299d4c`, deployed on
-  2026-08-05 from feature-branch state recorded by `d88559d`. Note that every `wrangler deploy`
+- The current production Worker is `911c5297-4bb9-4384-bfd7-88658e6022fc`, deployed on
+  2026-08-05 from feature-branch state recorded by `62949d0`. Note that every `wrangler deploy`
   mints a new version ID even when only static assets changed, so any ID written here goes stale on
   the next deploy — `wrangler deployments list` is the authority, and `version-status.html`
   deliberately records no ID at all because correcting it would itself require a deploy. The

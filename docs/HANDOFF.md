@@ -2,18 +2,61 @@
 
 Updated: 2026-08-05 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`a55991c`), pushed to its remote tracking branch.
-Current `main` is `f11da30`, five commits behind. The feature branch also contains the newer
+Current branch: `codex/market-analysis-phase2-4` (`62949d0`), pushed to its remote tracking branch.
+Current `main` is `f11da30`, **18 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `59de2931-6b1a-4d10-87f2-1ceb48299d4c`, resolved from
-`wrangler deployments list`, not from a branch name. Every `wrangler deploy` mints a new version ID
-even for an asset-only change, so this ID is stale the moment anyone deploys again; treat the
-command as the authority. `version-status.html` now records the source commit and no version ID,
-because keeping an ID current there would require a deploy to fix the number that the deploy itself
-invalidates. Verification baseline is now **27 test files / 202 tests**; the 198 recorded elsewhere
+Current production Worker: `911c5297-4bb9-4384-bfd7-88658e6022fc`, deployed from the tree recorded
+by `62949d0` and resolved from `wrangler deployments list`, not from a branch name. Every
+`wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
+moment anyone deploys again; treat the command as the authority. `version-status.html` records the
+source commit and no version ID, because keeping an ID current there would require a deploy to fix
+the number that the deploy itself invalidates — this file can carry one only because it is not a
+published asset. Verification baseline is **27 test files / 202 tests**; the 198 recorded elsewhere
 is historical.
+
+Deployed bytes were compared against the working tree for all seven served assets
+(`styles.css`, `styles-dark.css`, `follow-board.css`, `follow-board-dark.css`, `app.js`,
+`backend-client.js`, `follow-board.mjs`) and all three cache tokens: identical. Worth repeating as
+a habit — several deploys in this session happened before their commit, so a clean `git status`
+alone never proves that production is running the committed tree.
+
+## Issuer status colour coding, and phone touch/reading sizes (committed, pushed and deployed, 2026-08-05)
+
+Two further UI defects, both found by measuring rather than by report.
+
+**Status coding lost in dark mode.** On the RFQ progress dialog, VALID_REPLY, PENDING, TIMEOUT and
+PARSE_ERROR all rendered with the identical fill and border, so nothing said which issuers had
+replied — an information-design failure, not just a contrast one. The issuer name measured 1.8:1 and
+the status line 2.34:1. Cause: the elevated-surface rule in `styles-dark.css` also matched
+`.issuer-state` and carries `background: ... !important`, so it beat `.status-*` regardless of how
+the status rules were written. `.issuer-state` was removed from that `!important` list and given the
+surface treatment in its own rule. Light mode was never affected — there `.status-*` follows
+`.issuer-state` in source order and already won. Dark states encode with fill plus text colour, as
+light mode does; the chips carry `border: 0`, so a border would be a second language for the same
+signal. Selectors are `.issuer-state.status-*` (0,2,0) so a later `.issuer-state` rule cannot
+re-flatten the coding. Measured after: status line 17.01, issuer name 12.0, three distinct fills.
+
+**Touch and reading minimums on phones.** A dimensional audit at 375 px across all three pages and
+all three appearances. Under the 44 px target minimum: the hotlist consent checkbox at 13×13 (a
+default checkbox nothing had ever sized), 查看詳細規則 at 25 px, the five hotlist ranking links at
+38 px, the trade shortcut chips at 42 px, the guide back link at 22 px. Under 12 px of text:
+`#quoteTable .field-label-text` — 17 on screen at 11.8 px, and once the table becomes stacked cards
+this is the label naming the field being filled — plus the trade navigator hint that states the
+fixed values submitted on the user's behalf, `.eyebrow`, and the legend chips. All scoped to
+≤760 px; desktop density is deliberately untouched.
+
+Three audit hits were **not** defects and were checked rather than reported: programmatic `.focus()`
+does not trigger `:focus-visible` on buttons, so four "invisible focus" results were artifacts (a
+real Tab press shows a 2.4 px ring); the follow-board PIN input is named by a `<label for>`; and the
+hero's clipped content is a decorative circle cut by an intentional `overflow: hidden`.
+
+Two traps that cost time and will recur. `#quoteTable .field-label-text` carries an ID, so a plain
+`.field-label-text` override loses on specificity no matter how late it appears. And the browser
+pane's `navigate` drops the query string, so "load a new URL to bust the cache" silently re-serves
+the cached document; use an in-page `location.href = '/?cb=' + Date.now()` instead, and confirm the
+token in the loaded document before trusting any live measurement.
 
 ## Appearance picker and a contrast sweep (committed, pushed and deployed, 2026-08-05)
 

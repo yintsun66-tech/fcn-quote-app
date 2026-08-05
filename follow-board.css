@@ -245,3 +245,8 @@ th { background: #eaf5f5; color: #245a6c; }
 .follow-hero .back-link::before { content: "‹"; font-size: 1.25em; line-height: 1; margin-top: -2px; }
 .follow-hero .back-link:hover { background: #eaf6f7; color: #06626e; }
 .follow-hero .back-link:focus-visible { outline: 2.5px solid #fff; outline-offset: 3px; }
+
+@media (max-width: 760px) {
+  /* Matches the quote page: 11px uppercase is below the readable floor on a phone. */
+  .eyebrow { font-size: 12px; }
+}

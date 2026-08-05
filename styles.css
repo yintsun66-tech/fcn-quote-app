@@ -288,3 +288,26 @@ dialog button.primary:hover { background:var(--accent-strong); }
   .theme-switch { flex:1; }
   .theme-switch button { flex:1; min-height:44px; }
 }
+
+/* Touch and reading sizes on phones ---------------------------------------------------------
+   Measured at 375 px rather than assumed. Desktop density is deliberately left alone: a mouse
+   does not need a 44 px target, and the 21-column table is dense on purpose. */
+@media (max-width:760px) {
+  /* Five controls missed the 44 px minimum. The consent checkbox was the worst at 13x13 — a
+     default checkbox that nothing had ever sized. */
+  .hotlist-consent input { width:22px; height:22px; }
+  .link-button { display:inline-flex; align-items:center; min-height:44px; padding:0 6px; vertical-align:middle; }
+  .back-link { display:inline-flex; align-items:center; min-height:44px; }
+  .hotlist-screens a { min-height:44px; }
+  .trade-shortcut { min-height:44px; }
+
+  /* .field-label-text is the label that tells you which field you are filling once the table
+     becomes stacked cards, and there are 17 of them on screen at 11.8px. The #quoteTable prefix is
+     required, not decorative: the rule it has to beat is #quoteTable .field-label-text, and an ID
+     wins on specificity no matter how late this appears. */
+  #quoteTable .field-label-text { font-size:.8rem; }
+  /* The navigator hint states which fixed values are being submitted on your behalf. */
+  .trade-navigator p { font-size:.78rem; }
+  .eyebrow { font-size:.75rem; }
+  .field-group-legend span { font-size:.75rem; }
+}

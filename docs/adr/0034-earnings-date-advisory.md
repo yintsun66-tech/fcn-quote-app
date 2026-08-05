@@ -70,8 +70,17 @@ dependency worth taking for an advisory.
   before symbol matching, so "checked, nothing due" is distinguishable from "the calendar came back
   empty". A failed lookup says so on screen rather than showing nothing, because an operator reads
   an empty advisory as an all-clear.
-- Only the Cloudflare mode has this. The static build has no backend to ask, and the advisory is
-  absent there rather than silently inert.
+- Both builds have this, and run the same client (`earnings-advisory.mjs`, loaded unconditionally
+  by `index.html`). Putting it in `backend-client.js` was tried first and rejected: that file only
+  activates in Cloudflare mode, so the static build would have shipped the code and never run it —
+  a feature that is present and permanently silent is worse than one that is absent, because an
+  empty advisory reads as an all-clear.
+- Serving the static build meant a session-free endpoint: `GET /api/v1/public/market/earnings`,
+  ahead of `requireSession`, CORS limited to `PUBLIC_ORIGINS`. That CORS is not access control — it
+  stops another site's browser JavaScript and nothing else, and a scripted caller with no `Origin`
+  header gets a normal 200. The endpoint is public in practice, which holds only while the response
+  stays public market data with an upstream cost bounded by the edge cache. If it ever returns
+  anything derived from an RFQ, an account or a quote, it goes back behind the session.
 - `FINNHUB_API_KEY` is optional. Absent, the advisory reports itself unavailable instead of
   reporting "no earnings".
 

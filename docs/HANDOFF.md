@@ -2,13 +2,13 @@
 
 Updated: 2026-08-05 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`167d303`), pushed to its remote tracking branch.
-Current `main` is `f11da30`, **22 commits behind**. The feature branch also contains the newer
+Current branch: `codex/market-analysis-phase2-4` (`520ba32`), pushed to its remote tracking branch.
+Current `main` is `f11da30`, **24 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `ef5728cf-8660-4907-8dc9-9617cd651478`, deployed from the tree recorded
-by `167d303` and resolved from `wrangler deployments list`, not from a branch name. Every
+Current production Worker: `6e9b2210-82cf-41e1-b553-e692a6c5a95a`, deployed from the tree recorded
+by `520ba32` and resolved from `wrangler deployments list`, not from a branch name. Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
@@ -60,6 +60,40 @@ calendar came back empty", and a failed lookup says so on screen instead of show
 Verified against the deployed Worker with a real sign-in: 11 underlyings requested, `rowsSeen` 1118,
 2 hits, 1 unchecked, 0 unsupported. 28 test files / 212 tests pass. `FINNHUB_API_KEY` is set as a
 Worker Secret; absent, the advisory reports itself unavailable rather than reporting "no earnings".
+
+### The advisory is shared by both builds, and its endpoint is public (2026-08-06)
+
+The first cut put the client in `backend-client.js`, which only activates in Cloudflare mode. That
+left the static GitHub Pages build with no advisory at all — and a build that silently never warns
+is worse than one that has no feature, because an operator reads an empty advisory as an all-clear.
+Copying the files across would not have fixed it: the code was there but dormant.
+
+The client is therefore `earnings-advisory.mjs`, loaded unconditionally by `index.html`, so both
+builds run the same module. The 102-line copy in `backend-client.js` was removed; leaving it would
+have rendered the panel twice in Cloudflare mode. The module is on the `prepare-assets.mjs`
+allowlist, and it reuses the origin-fallback shape `follow-board.mjs` already uses — app origin
+first, API origin second, falling through only on a transport failure, since an HTTP error means
+the API answered and retrying elsewhere is pointless.
+
+That required a session-free endpoint, so **`GET /api/v1/public/market/earnings` is served before
+`requireSession`**, with CORS limited to `PUBLIC_ORIGINS` (now exported from `follow-board.ts`).
+
+**Do not mistake that CORS for access control.** It stops another site's browser JavaScript from
+reading the response and stops nothing else; a scripted caller gets 200 with no `Origin` header at
+all, which was verified rather than assumed. The endpoint is public in practice. That is acceptable
+only for what it carries and what it costs: public earnings dates, no RFQ, quote or user data, and
+an upstream cost bounded by the six-hour edge cache rather than by caller volume — so repeated
+calls do not consume Finnhub quota. If the response ever gains anything derived from an RFQ, an
+account or a quote, this endpoint has to go back behind the session.
+
+Verified on the deployed static site at `yintsun66-tech.github.io`: the cross-origin call succeeds
+and the panel renders 「未能查詢：7203 JT」 plus 「此資料來源不支援的交易所：0700 HK」, with
+`AAPL UW` correctly absent. The published module greps zero for `token|api_key|secret` — the
+provider key never leaves the Worker Secret.
+
+Static snapshot synced at `7f2ff44` (`index.html`, `styles.css`, `styles-dark.css`, `app.js`,
+`guide.html`, plus the new `earnings-advisory.mjs`); the other allowlisted files were byte-identical
+after line-ending normalisation and left alone.
 
 **Operational trap found the hard way.** `wrangler secret put` does not prompt when stdin is not a
 TTY — it reads stdin and will store an **empty** secret while printing `✨ Success`. Running it from

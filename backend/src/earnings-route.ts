@@ -1,9 +1,37 @@
 import { jsonResponse } from "./http";
 import { lookupEarnings } from "./earnings-calendar";
+import { PUBLIC_ORIGINS } from "./follow-board";
 import type { AppEnv } from "./types";
 
 /** Caps the fan-out: 20 trades x 5 underlyings is the documented maximum an RFQ can carry. */
 const MAX_SYMBOLS = 100;
+
+export const EARNINGS_PUBLIC_PATH = "/api/v1/public/market/earnings";
+
+/**
+ * CORS for the static build, which has no backend of its own and must call this across origins.
+ *
+ * Worth being honest about what this does and does not do: it stops another site's browser
+ * JavaScript from reading the response, and stops nothing else — any scripted caller can request
+ * this directly. The endpoint is public in practice, which is acceptable only because of what it
+ * is: public earnings dates, carrying no RFQ, quote or user data, and with upstream cost bounded by
+ * the edge cache rather than by caller volume.
+ */
+export function earningsCorsHeaders(request: Request): Headers {
+  const headers = new Headers({
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "600",
+    vary: "Origin",
+  });
+  const origin = request.headers.get("origin");
+  if (origin && PUBLIC_ORIGINS.has(origin)) headers.set("access-control-allow-origin", origin);
+  return headers;
+}
+
+export function earningsOptions(request: Request): Response {
+  return new Response(null, { status: 204, headers: earningsCorsHeaders(request) });
+}
 
 /**
  * GET /api/v1/market/earnings?symbols=AAPL%20UW,7203%20JT
@@ -14,6 +42,7 @@ const MAX_SYMBOLS = 100;
  * an all-clear.
  */
 export async function getEarningsAdvisory(request: Request, env: AppEnv): Promise<Response> {
+  const cors = earningsCorsHeaders(request);
   const url = new URL(request.url);
   const raw = url.searchParams.get("symbols") ?? "";
   const symbols = raw
@@ -23,7 +52,7 @@ export async function getEarningsAdvisory(request: Request, env: AppEnv): Promis
     .slice(0, MAX_SYMBOLS);
 
   if (!symbols.length) {
-    return jsonResponse({ available: true, hits: [], unsupported: [], unchecked: [], windowDays: 3 });
+    return jsonResponse({ available: true, hits: [], unsupported: [], unchecked: [], windowDays: 3 }, 200, cors);
   }
 
   const result = await lookupEarnings(env, symbols, new Date(), 3);
@@ -60,5 +89,5 @@ export async function getEarningsAdvisory(request: Request, env: AppEnv): Promis
     // A code, never the provider's raw message: that can echo the request, and the request
     // carries the API key.
     ...(result.errorCode ? { errorCode: result.errorCode } : {}),
-  });
+  }, 200, cors);
 }

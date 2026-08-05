@@ -12,7 +12,7 @@ import {
 } from "./http";
 import type { AppEnv, SessionContext } from "./types";
 
-const PUBLIC_ORIGINS = new Set([
+export const PUBLIC_ORIGINS = new Set([
   "https://app.yintsun66.com",
   "https://yintsun66-tech.github.io"
 ]);

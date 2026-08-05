@@ -14,6 +14,7 @@ const assets = [
   "backend-client.js",
   "market-analysis.mjs",
   "market-resources.mjs",
+  "earnings-advisory.mjs",
   "follow-board.html",
   "follow-board.css",
   "follow-board-dark.css",

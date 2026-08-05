@@ -17,7 +17,7 @@ import {
 import { getAdminOutboundEmail, listAdminOutboundEmails } from "./admin-outbound";
 import { listAdminRfqTimelines } from "./admin-rfq";
 import { getAdminMarketContextHealth } from "./admin-market";
-import { getEarningsAdvisory } from "./earnings-route";
+import { EARNINGS_PUBLIC_PATH, earningsOptions, getEarningsAdvisory } from "./earnings-route";
 import { isAppError } from "./errors";
 import { emptyResponse, jsonResponse, requestId } from "./http";
 import { ingestInboundEmail } from "./inbound";
@@ -85,6 +85,11 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   const method = request.method.toUpperCase();
 
   if (method === "OPTIONS" && isPublicFollowBoardPath(path)) return followBoardOptions(request);
+  // Public because the static build has no backend of its own and must reach this across origins.
+  // It returns public earnings dates only — no RFQ, quote or user data — and its upstream cost is
+  // bounded by the edge cache rather than by how often it is called.
+  if (method === "OPTIONS" && path === EARNINGS_PUBLIC_PATH) return earningsOptions(request);
+  if (method === "GET" && path === EARNINGS_PUBLIC_PATH) return getEarningsAdvisory(request, env);
   if (method === "GET" && path === "/api/v1/public/follow-board/manifest") {
     return getFollowBoardManifest(request, env);
   }

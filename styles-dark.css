@@ -25,7 +25,7 @@
 .toolbar, .notice, .entry-workspace, dialog, .backend-panel,
 #quoteTable tr, .ranking-card, .backend-timeline-card, .backend-rfq-card,
 .backend-market-context-card, .backend-analysis-section, .backend-analysis-shell,
-.backend-artifact-preview-card, .backend-health-grid article, .issuer-state,
+.backend-artifact-preview-card, .backend-health-grid article,
 .guide-section, .backend-archive-preview, .backend-market-links article,
 .backend-market-idea-card, .backend-market-consent, .hotlist-consent,
 .backend-registration-list, .backend-accounts-list, .backend-archive-list,
@@ -170,9 +170,29 @@
 .backend-market-context-card dl > div { background: #ffffff14; color: var(--label-2); }
 .backend-analysis-terms b, .backend-market-context-card dd { color: var(--label); }
 
-/* Appearance picker: the track needs more lift on black than the light track needs on white, and
-   the selected segment uses a raised grey rather than the elevated surface token, which is too
-   close to the track to read as selected. */
+/* Issuer status chips on the RFQ progress dialog.
+
+   This was not merely a contrast problem. The elevated-surface rule near the top of this sheet also
+   matched .issuer-state and carries `background: ... !important`, so it won outright and no
+   selector could override it: all four states rendered as the same neutral chip, and the colour
+   coding that tells you at a glance who has replied was gone. The issuer name compounded it at
+   1.8:1. .issuer-state has therefore been removed from that !important list and given the surface
+   treatment here instead, so the status rules below simply override it in the ordinary way.
+
+   Light mode was never affected: there .status-* follows .issuer-state in source order and wins.
+
+   The chips carry border: 0, so the state reads from fill and text colour, which is what light mode
+   already does. Not a border — that would be a second, inconsistent language for the same signal.
+
+   Written as .issuer-state.status-* (0,2,0) so that appending another .issuer-state rule later
+   cannot silently re-flatten the coding, which is exactly how this broke. */
+.issuer-state { background: var(--bg-elevated); color: var(--label); }
+.issuer-state b { color: var(--label); }
+.issuer-state.status-valid_reply { background: #30d1582e; color: #5ce08a; }
+.issuer-state.status-timeout,
+.issuer-state.status-parse_error { background: #ff9f0a29; color: #ffb340; }
+.backend-countdown { color: var(--label); }
+
 /* Trade navigator. It only exists at <=760px, so it never appeared in a desktop sweep: the surface
    rules darkened its card but nothing remapped the text inside it, leaving the heading at 2:1. */
 .trade-navigator-heading { color: var(--label); }
@@ -180,6 +200,9 @@
 .trade-navigator p { color: var(--label-2); }
 .trade-shortcut { background: var(--bg-inset); border-color: var(--separator-solid); color: var(--accent-strong); }
 
+/* Appearance picker: the track needs more lift on black than the light track needs on white, and
+   the selected segment uses a raised grey rather than the elevated surface token, which is too
+   close to the track to read as selected. */
 .theme-switch { background:#7676803d; }
 .theme-switch button { color:var(--label-2); }
 .theme-switch button:hover { color:var(--label); }

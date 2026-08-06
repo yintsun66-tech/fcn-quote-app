@@ -2,14 +2,18 @@
 
 Updated: 2026-08-06 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `b47d01f`. The deployed
+Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `0aa4f60`. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
-feature branch has 29), so neither branch should be described as a simple byte-identical copy or
-merged without first reviewing both sides.
+feature branch has 32), so neither branch should be described as a simple byte-identical copy or
+merged without first reviewing both sides. Recount with
+`git rev-list --count main..HEAD` rather than trusting the figure written here — it goes stale on
+every commit.
 
-Current production Worker: `ba1a5276-5394-4745-9e88-cf30cb97a611`, deployed from the tree recorded
-by `f8ff7f8` on 2026-08-06, not from a branch name. Every
+Current production Worker: `805a2fa2-473a-460c-b2c1-6a9ddfb2adbc`, deployed from the tree recorded
+by `827a3c7` on 2026-08-07, not from a branch name. (`ba1a5276` from `f8ff7f8` was the
+account-recovery deploy it replaced; `0aa4f60` on top is documentation only and needed no deploy.)
+Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
@@ -22,6 +26,47 @@ contained the `account-recovery-v1` token, and the deployed `backend-client.js` 
 committed local file. Wrangler reported four modified assets uploaded and 14 existing assets
 reused. Earlier all-asset comparisons are historical evidence, not proof for a future deploy; a
 clean `git status` alone never proves that production is running the committed tree.
+
+## Dark-mode contrast in the signed-in dialogs (committed, pushed and deployed, 2026-08-07)
+
+Thirteen elements across eight rules were still carrying light-mode ink on dark panels. The one
+reported was 「詢價由後端持續處理…」 at **2.32:1**; the worst was the quote-preview heading at
+**1.45:1**, and 「繼續等待」 sat at **1.76:1**.
+
+**Why they survived several earlier rounds of contrast work, which is the part worth keeping.**
+Every previous sweep only saw the landing page. These live inside `<dialog>` elements and `[hidden]`
+panels that exist only once a user has signed in and opened something, so no amount of sweeping the
+public page could reach them. The fix was to the method, not just the rules: force every dialog
+`open`, clear every `[hidden]`, then sweep. That found the whole set in one pass instead of one
+user report at a time. **Use that harness before claiming a dark-mode sweep is clean.**
+
+Two of the eight are worth naming because they are pattern failures rather than missed colours:
+
+- `.quote-preview-panel` was in the dark elevated-surface list but **missing from the heading list
+  immediately beside it**, so the panel darkened and its `h2` did not. Whenever a surface is added
+  to one list, check the other.
+- `.backend-finalize-confirm` kept a light mint gradient, which is why the accent-coloured
+  「繼續等待」 button inside it read as bright teal on near-white. The panel was darkened rather
+  than the button restyled — the surface was what was wrong, and restyling the button would have
+  left a light panel sitting in a dark dialog.
+
+The rest — `.backend-archive-note`, `.backend-analysis-loading`, `.backend-analysis-lead`,
+`.backend-market-status`, `.email-compose-actions small`, `.artifact-pending`, and the preview
+header's body copy — simply had no dark override.
+
+Verified on the deployed site with every dialog forced open: **0 failing**, the reported line at
+5.95, the preview heading at 17.01, 「繼續等待」 at 7.17, and `.quote-sheet` still rendering its
+light ink so the PNG is unaffected. 28 test files / 217 tests pass. Worker `805a2fa2`, source
+`827a3c7`.
+
+**Two environment traps hit during this change, now in `CLAUDE.md`.** Reading `index.html` and
+`guide.html` with PowerShell's `Get-Content -Raw` destroyed both: 5.1 decodes with the system ANSI
+codepage, so the Chinese became mojibake and writing it back corrupted the files — `-Encoding utf8`
+on the write does not help because the damage happens on the read. `git checkout --` recovered
+them; the token bump was redone with a byte-oriented `sed`. The encoding rule had already been
+recorded, but only for `.ps1` files, which is exactly why it did not come to mind here. Separately,
+the Node runtime path hash changes when the runtime updates (`f8d2abcb…` → `fb8898c0…`), so a path
+copied from an earlier transcript stops working; resolve it each run.
 
 ## Account recovery and anonymized account deletion (deployed 2026-08-06)
 

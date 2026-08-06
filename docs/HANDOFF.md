@@ -2,10 +2,11 @@
 
 Updated: 2026-08-06 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`f8ff7f8`), pushed to its remote tracking branch.
-Current `main` is `f11da30`, **26 commits behind**. The feature branch also contains the newer
-internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
-are byte-identical is historical.
+Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `b47d01f`. The deployed
+account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
+Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
+feature branch has 29), so neither branch should be described as a simple byte-identical copy or
+merged without first reviewing both sides.
 
 Current production Worker: `ba1a5276-5394-4745-9e88-cf30cb97a611`, deployed from the tree recorded
 by `f8ff7f8` on 2026-08-06, not from a branch name. Every
@@ -16,11 +17,11 @@ the number that the deploy itself invalidates — this file can carry one only b
 published asset. Current local verification baseline is **28 test files / 217 tests**; lower counts
 recorded elsewhere are historical.
 
-Deployed bytes were compared against the working tree for all seven served assets
-(`styles.css`, `styles-dark.css`, `follow-board.css`, `follow-board-dark.css`, `app.js`,
-`backend-client.js`, `follow-board.mjs`) and all three cache tokens: identical. Worth repeating as
-a habit — several deploys in this session happened before their commit, so a clean `git status`
-alone never proves that production is running the committed tree.
+For the 2026-08-06 account release, the API health endpoint returned 200, the cache-bypassed index
+contained the `account-recovery-v1` token, and the deployed `backend-client.js` SHA-256 matched the
+committed local file. Wrangler reported four modified assets uploaded and 14 existing assets
+reused. Earlier all-asset comparisons are historical evidence, not proof for a future deploy; a
+clean `git status` alone never proves that production is running the committed tree.
 
 ## Account recovery and anonymized account deletion (deployed 2026-08-06)
 

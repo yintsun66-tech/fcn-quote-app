@@ -163,7 +163,7 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   ADMIN/PS accounts are protected by SQL `WHERE` guards. The ADMIN-only
   `POST /admin/accounts/lookup` must never log the queried 行編, and `register()` stays silent to
   the applicant on duplicates (anti-enumeration). Remote D1 migrations are applied through
-  `0017`; source migration `0018` must be applied before deploying this account-recovery change.
+  `0018`; the account-recovery and anonymization change is deployed in production.
 
 ## Handback checklist
 

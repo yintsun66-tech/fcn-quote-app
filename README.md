@@ -123,8 +123,8 @@ Alpha Vantage 仍失敗但已無人依賴；不得恢復已移除的 movers API�
 - 正式結果自動顯示經濟排名 1–4；第五列由使用者從前四名以外的有效發行機構選擇，
   並可產圖。晚到報價保留原始狀態，僅能由詢價本人或 ADMIN 建立新的不可變排名版本。
 - 角色為 `USER｜PS｜ADMIN`；`PS` 以 `users.is_privileged_support` 旗標（migration
-  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已套用至 `0017`；帳號恢復
-  與匿名化功能的 source migration `0018` 尚待正式部署前套用。
+  `0010`）實作，由 Worker 推導有效角色。遠端 D1 migrations 已於 2026-08-06 套用至
+  `0018`，帳號恢復與匿名化功能已正式部署。
 - 新版主旨規則依第一筆交易決定 T+7 商品名稱：FCN 一律使用 `FCN(T+7)`；DAC
   家族在野村、DBS、SG、GS、CA 使用 `DRA(T+7)`，BMJB、UBS、CITI 使用
   `DAC(T+7)`；規則詳見 ADR 0014。

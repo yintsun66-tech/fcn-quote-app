@@ -2,13 +2,13 @@
 
 Updated: 2026-08-06 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`1f5c563`), pushed to its remote tracking branch.
+Current branch: `codex/market-analysis-phase2-4` (`f8ff7f8`), pushed to its remote tracking branch.
 Current `main` is `f11da30`, **26 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
 
-Current production Worker: `108b233a-c16a-42f0-bd7c-89273f616e98`, deployed from the tree recorded
-by `ab79e1c` and resolved from `wrangler deployments list`, not from a branch name. Every
+Current production Worker: `ba1a5276-5394-4745-9e88-cf30cb97a611`, deployed from the tree recorded
+by `f8ff7f8` on 2026-08-06, not from a branch name. Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
@@ -22,7 +22,7 @@ Deployed bytes were compared against the working tree for all seven served asset
 a habit — several deploys in this session happened before their commit, so a clean `git status`
 alone never proves that production is running the committed tree.
 
-## Account recovery and anonymized account deletion (implemented locally; not committed or deployed)
+## Account recovery and anonymized account deletion (deployed 2026-08-06)
 
 The approved recovery flow is implemented behind source migration
 `0018_account_recovery_and_anonymization.sql`. An ACTIVE plain USER may choose **忘記密碼**; the
@@ -49,8 +49,18 @@ production data was changed. Preserve the user-owned untracked `.claude/` and `o
 Verification: source/test TypeScript checks pass, root JavaScript syntax checks pass, the focused
 auth suite passes 11/11, all 28 test files / 217 tests pass, and the Wrangler dry-run build succeeds
 after rerunning outside the filesystem sandbox. Tests emit the known sandbox log/static-analysis
-warnings but exit zero. The safe next step is final diff review. A later authorized production release must apply remote migration
-0018 **before** deploying the Worker/assets; nothing in this section is live yet.
+warnings but exit zero. Commit `f8ff7f8` was pushed, remote D1 migration 0018 was applied first,
+and Worker/assets were then deployed as version `ba1a5276-5394-4745-9e88-cf30cb97a611`.
+
+Production verification used one ordinary disposable account and then removed it. The original
+password login returned 200; reset returned 202; both the old session and old password returned
+401; the twelve-zero temporary password returned 200 with `passwordChangeRequired=true` and a
+30-minute expiry; an ordinary RFQ endpoint returned 403 during the restricted session; password
+change returned 200, revoked the temporary session, and the new password logged in with
+`passwordChangeRequired=false`. ADMIN then soft-disabled and anonymized the test account. D1
+confirmed an irreversible `deleted-*` username, redacted display/branch data, a non-null
+`anonymized_at`, and both `ACCOUNT_DISABLED` and `ACCOUNT_PERSONAL_DATA_DELETED` audit events.
+The temporary employee number and test credentials are no longer active.
 
 Security caveat: the fixed known temporary password is not identity verification. The privileged
 account exclusion, forced-change-only session, 30-minute expiry and keyed rate limit reduce but do

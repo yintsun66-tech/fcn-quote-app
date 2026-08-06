@@ -22,13 +22,13 @@ not manually update D1 to bypass approval/audit behavior.
 | 核准／拒絕 registrations (使用者申請審核) | yes | yes |
 | 剔除 (soft-disable) a regular USER | yes | yes |
 | 剔除 an ADMIN or PS account | no | no |
-| 永久刪除 a disabled USER with zero RFQs | yes | no |
+| 刪除 disabled USER 的帳號個資並匿名保留 RFQs | yes | yes |
 | 管理者寄件紀錄 / RFQ 處理時間軸 | yes | no |
 
 `剔除` is a soft disable (`status='DISABLED'` plus session revocation). A disabled account cannot
-log in and its active sessions end immediately. ADR 0019 adds a distinct ADMIN-only permanent
-deletion for disabled accounts with zero RFQs; an account with any RFQ remains protected by
-`ON DELETE RESTRICT`.
+log in and its active sessions end immediately. ADR 0035 adds a separate ADMIN/PS personal-data
+deletion: it releases login/employee-number uniqueness but retains an opaque tombstone owner for
+historical RFQs, so `ON DELETE RESTRICT` and financial history remain intact.
 
 ## View all accounts, promote PS, or remove a regular account
 
@@ -42,12 +42,11 @@ deletion for disabled accounts with zero RFQs; an account with any RFQ remains p
    - **降級為一般** (ADMIN only, PS rows): return the account to a regular user.
    - **剔除** (ADMIN or PS, regular users only): confirm to disable the account. It becomes
      `已剔除` and cannot log in. ADMIN and PS rows have no 剔除 control.
-   - **永久刪除** (ADMIN only): available only after a regular account is `已剔除` and has zero
-     RFQs. Confirm the irreversible warning, then type the exact login account. Success removes
-     credentials, encrypted employee number, sessions, and idempotency keys, allowing the employee
-     number to apply again.
-   - A disabled row with RFQs shows the retained RFQ count instead of a delete button. Never
-     bypass this guard in D1; use account recovery for that user.
+   - **刪除帳號個資** (ADMIN or PS): available after a regular account is `已剔除`. Confirm the
+     irreversible warning, then type the exact login account. Success removes/replaces login,
+     branch, encrypted employee number, password, sessions and idempotency keys, allowing the
+     employee number to apply again. Existing RFQs remain attached to an inaccessible anonymous
+     owner and are not transferred to a newly registered account.
 5. Each change is recorded as an audit event. The list reloads after a successful action.
 6. **以行編查詢帳號 (ADMIN only):** the account list has an employee-number lookup box (visible to
    ADMIN, not PS). Enter a five-digit 行編 and choose **查詢** to see which existing account holds
@@ -55,6 +54,22 @@ deletion for disabled accounts with zero RFQs; an account with any RFQ remains p
    registration that was blocked because「行編已存在」— it identifies the colleague who already has
    an account. The lookup matches by keyed hash (no employee number is decrypted) and never writes
    the queried 行編 to the audit log.
+
+## Password reset and password change
+
+1. An ordinary ACTIVE user chooses **忘記密碼**, enters the login/employee number and confirms.
+2. The public response is deliberately generic. For an eligible ordinary account, the password is
+   now twelve zeroes (`000000000000`) for 30 minutes and every old session is revoked.
+3. The user logs in with that temporary password. Only the forced **修改密碼** dialog is usable;
+   RFQ, result, market and administration APIs are blocked until the change succeeds.
+4. The dialog displays the remaining time. The user enters the temporary password, a new password
+   of 12–128 characters and confirmation. Twelve zeroes and the current password are refused.
+5. Success revokes the temporary session and asks the user to log in again with the new password.
+6. ADMIN and PS accounts cannot use this self-service reset. Their recovery requires the separately
+   approved privileged-account process.
+7. The fixed temporary password is low-assurance. Knowing another user's login is enough to cause a
+   denial of service and creates an account-takeover window; migrate to a verified recovery factor
+   before treating this service as an official or regulated system.
 
 ## Approve or reject a user registration
 

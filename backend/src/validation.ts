@@ -109,6 +109,28 @@ export function normalizeLoginInput(value: unknown): LoginInput {
   };
 }
 
+export interface PasswordResetInput {
+  username: string;
+}
+
+export function normalizePasswordResetInput(value: unknown): PasswordResetInput {
+  const input = record(value);
+  return { username: normalizeUsername(input.username) };
+}
+
+export interface PasswordChangeInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export function normalizePasswordChangeInput(value: unknown): PasswordChangeInput {
+  const input = record(value);
+  return {
+    currentPassword: typeof input.currentPassword === "string" ? input.currentPassword : "",
+    newPassword: validatePassword(input.newPassword)
+  };
+}
+
 function normalizeUnderlying(value: unknown, field: string): string {
   const result = text(value, field, 1, 40).toUpperCase();
   if (!/^[A-Z0-9.\- /]+$/.test(result)) throw fieldError(field, "包含不允許的字元。 ");

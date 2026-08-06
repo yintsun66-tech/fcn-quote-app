@@ -70,6 +70,8 @@ interface SessionRow {
   branch_name: string;
   role: "USER" | "ADMIN";
   is_privileged_support: number;
+  password_change_required: number;
+  password_reset_expires_at: string | null;
 }
 
 export async function loadSession(env: AppEnv, rawToken: string): Promise<SessionContext | null> {
@@ -78,7 +80,7 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
     `SELECT s.id AS session_id, s.csrf_token_hash, s.absolute_expires_at, s.expires_at,
             s.credential_version, u.credential_version AS user_credential_version,
             u.id AS user_id, u.username_normalized, u.display_name, u.branch_name, u.role,
-            u.is_privileged_support
+            u.is_privileged_support, u.password_change_required, u.password_reset_expires_at
        FROM user_sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ? AND s.revoked_at IS NULL AND u.status = 'ACTIVE'`
@@ -88,6 +90,10 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
   const now = new Date();
   if (Date.parse(row.expires_at) <= now.getTime() || Date.parse(row.absolute_expires_at) <= now.getTime()) return null;
   if (row.credential_version !== row.user_credential_version) return null;
+  if (row.password_change_required === 1) {
+    const resetExpiry = row.password_reset_expires_at ? Date.parse(row.password_reset_expires_at) : Number.NaN;
+    if (!Number.isFinite(resetExpiry) || resetExpiry <= now.getTime()) return null;
+  }
 
   const idleSeconds = Number(env.SESSION_IDLE_SECONDS);
   const nextExpiryMs = Math.min(now.getTime() + idleSeconds * 1000, Date.parse(row.absolute_expires_at));
@@ -110,7 +116,9 @@ export async function loadSession(env: AppEnv, rawToken: string): Promise<Sessio
       displayName: row.display_name,
       branchName: row.branch_name,
       role: effectiveRole(row.role, row.is_privileged_support),
-      credentialVersion: row.user_credential_version
+      credentialVersion: row.user_credential_version,
+      passwordChangeRequired: row.password_change_required === 1,
+      passwordResetExpiresAt: row.password_reset_expires_at
     }
   };
 }

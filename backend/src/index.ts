@@ -1,5 +1,6 @@
 import {
   approveRegistration,
+  changePassword,
   deleteAccountPermanently,
   demoteAccount,
   disableAccount,
@@ -10,6 +11,7 @@ import {
   logout,
   promoteAccount,
   register,
+  requestPasswordReset,
   rejectRegistration,
   requireSession,
   sessionInfo
@@ -112,10 +114,21 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (method === "GET" && path === "/api/v1/health") return jsonResponse({ status: "ok" });
   if (method === "POST" && path === "/api/v1/auth/register") return register(request, env);
   if (method === "POST" && path === "/api/v1/auth/login") return login(request, env);
+  if (method === "POST" && path === "/api/v1/auth/password/reset") return requestPasswordReset(request, env);
 
   const session = await requireSession(request, env);
   if (method === "POST" && path === "/api/v1/auth/logout") return logout(request, env, session);
   if (method === "GET" && path === "/api/v1/auth/session") return sessionInfo(session);
+  if (method === "POST" && path === "/api/v1/auth/password/change") return changePassword(request, env, session);
+  if (session.user.passwordChangeRequired) {
+    return jsonResponse({
+      error: {
+        code: "PASSWORD_CHANGE_REQUIRED",
+        message: "請先修改臨時密碼，再繼續使用詢價系統。 ",
+        requestId: requestId(request)
+      }
+    }, 403);
+  }
   // Advisory for the entry form. Deliberately not on the RFQ path: it must never be able to block
   // validation, dispatch or ranking.
   if (method === "GET" && path === "/api/v1/market/earnings") return getEarningsAdvisory(request, env);

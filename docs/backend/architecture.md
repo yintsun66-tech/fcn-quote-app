@@ -7,7 +7,7 @@ Current backend branch: `codex/market-analysis-phase2-4`
 ## Scope
 
 This document defines the implemented Cloudflare backend boundary for the existing static FCN/DAC
-quote application. Migrations 0001–0015, the API/Email Worker, five Queues, one RFQ Durable Object
+quote application. Source migrations 0001–0018, the API/Email Worker, five Queues, one RFQ Durable Object
 class, private R2 storage, Browser Rendering and the application-domain frontend are implemented
 on `codex/market-analysis-phase2-4`. `feature/subject-branch-correlation` is the previous stable
 ancestor; neither branch is automatically equivalent to `main`.
@@ -23,7 +23,8 @@ The existing root-level static site remains unchanged during the backend build. 
 | Inbound route | `rfq@yintsun66.com` |
 | Bank mailbox forwarding | `i14053@firstbank.com.tw` can forward replies to the inbound route |
 | User authentication | Application-managed username and password |
-| Registration | Approval required; collect five-digit employee number, branch name, user name, username, and password |
+| Registration | Approval required; collect branch name, five-digit employee number (also the login), and password |
+| Password recovery | Ordinary USER self-service reset to a 30-minute forced-change password; ADMIN/PS excluded (ADR 0035) |
 | CITI price normalization | Preserve raw Upfront and calculate `notePriceEquivalent = 100 - upfrontPct` |
 | Equal quotes | Preserve equal economic rank; use earliest valid receipt as the deterministic image winner |
 | MS OBU handling | Display warning only until an explicit OBU attribute and enforcement rule exist |
@@ -91,7 +92,7 @@ flowchart LR
 
 The approved end-user model is application-managed username/password authentication, not Cloudflare Access identity-provider login. Cloudflare Access is therefore reserved for infrastructure and administration boundaries such as internal diagnostics and `/admin`, with the application admin role still checked by the Worker.
 
-The application recognizes three effective roles: `USER`, `PS` (privileged support), and `ADMIN`. `PS` is a delegated support tier stored as the `users.is_privileged_support` flag (migration 0010) and derived into an effective role by the Worker (`effectiveRole`), keeping the stored `role` column `USER`/`ADMIN`. `PS` may review registrations and remove (soft-disable) regular accounts; only `ADMIN` may promote/demote `PS` and view outbound/timeline diagnostics; `ADMIN` and `PS` accounts cannot be removed. See ADR 0012 and `docs/runbooks/admin.md`.
+The application recognizes three effective roles: `USER`, `PS` (privileged support), and `ADMIN`. `PS` is a delegated support tier stored as the `users.is_privileged_support` flag (migration 0010) and derived into an effective role by the Worker (`effectiveRole`), keeping the stored `role` column `USER`/`ADMIN`. `PS` may review registrations, soft-disable regular accounts and delete their identifying account data; only `ADMIN` may promote/demote `PS` and view outbound/timeline diagnostics. ADMIN and PS targets remain protected. Historical RFQs retain an opaque anonymized owner rather than being deleted or transferred (ADR 0035). See ADR 0012 and `docs/runbooks/admin.md`.
 
 ### Outbound email worker/consumer
 
@@ -172,11 +173,20 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
 
 ### 1. Registration and approval
 
-1. User submits employee number, branch, name, username, and password.
-2. Server validates the employee number as exactly five decimal digits and normalizes the other fields.
+1. User submits branch name, five-digit employee number and password; the employee number becomes the login.
+2. Server validates and protects the employee number and derives the login/display identity.
 3. Registration becomes `PENDING_APPROVAL`; no authenticated session is issued.
 4. An authorized administrator approves or rejects it with an audit reason.
 5. Only an `ACTIVE` account may log in.
+
+### 1a. Password recovery and account-data deletion
+
+1. An ordinary ACTIVE user may request a generic self-service reset. The fixed temporary password
+   is usable for thirty minutes, revokes old sessions and grants access only to password change.
+2. Password change revokes every session again and requires a fresh login with the new password.
+3. ADMIN or PS may soft-disable a plain USER and then delete its identifying data after exact-login
+   confirmation. The unique login/employee number are released, but RFQs retain the opaque
+   anonymized user ID; a later registration cannot see the historical RFQs.
 
 ### 2. RFQ creation and sending
 
@@ -282,7 +292,8 @@ a new version and may admit only finite, matched, non-rejected late values.
   support a separate BARCLAYS request batch if its body must differ from the shared BMJB batch.
 - Verify forwarding/header behavior for issuer templates not covered by the observed production
   evidence and keep sender mismatch/manual-review behavior fail-closed.
-- Define and exercise the approved administrator recovery and user password-reset process.
+- Replace the approved low-assurance fixed reset password with a verified recovery factor before
+  the system becomes an official or regulated record source.
 - Confirm Browser Rendering concurrency and Queue capacity with the expected-load test.
 
 ## Public follow-board

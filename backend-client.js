@@ -21,6 +21,7 @@ import {
   const statusElement = document.querySelector("#status");
   const state = {
     user: null,
+    passwordResetTimer: null,
     rfqId: null,
     timer: null,
     badgeTimer: null,
@@ -50,6 +51,7 @@ import {
   shell.innerHTML = `
     <div class="backend-userbar" hidden>
       <span id="backendUser" class="backend-mobile-collapsible"></span>
+      <button id="backendChangePassword" type="button" class="secondary backend-mobile-collapsible">修改密碼</button>
       <button id="backendNewRfq" type="button" class="secondary backend-mobile-collapsible">新增詢價</button>
       <button id="backendMyRfqs" type="button" class="secondary">我的詢價 <span id="backendRfqBadge" class="backend-rfq-badge" hidden>0</span></button>
       <button id="backendAdminAccounts" type="button" class="secondary backend-mobile-collapsible" hidden>所有帳號列表</button>
@@ -79,6 +81,7 @@ import {
         <label>密碼<input name="password" type="password" autocomplete="current-password" required></label>
         <p id="backendAuthError" class="backend-error" role="alert"></p>
         <button class="primary" type="submit">登入</button>
+        <button id="showPasswordReset" class="link-button" type="button">忘記密碼</button>
         <button id="showRegistration" class="link-button" type="button">申請新帳號</button>
       </form>
       <form id="backendRegistration" class="backend-panel" hidden>
@@ -89,6 +92,28 @@ import {
         <p id="backendRegistrationError" class="backend-error" role="alert"></p>
         <button class="primary" type="submit">送出審核</button>
         <button id="showLogin" class="link-button" type="button">返回登入</button>
+      </form>
+      <form id="backendPasswordReset" class="backend-panel" hidden>
+        <p class="eyebrow">ACCOUNT RECOVERY</p><h2>重置密碼</h2>
+        <label>五碼行編（登入帳號）<input name="username" autocomplete="username" inputmode="numeric" pattern="[0-9]{5}" minlength="5" maxlength="5" required></label>
+        <p class="backend-password-warning">按下重置後，臨時密碼會設為 12 個 0。請在 30 分鐘內登入，並立即設定新密碼。</p>
+        <p id="backendPasswordResetStatus" class="backend-error" role="status"></p>
+        <button class="primary" type="submit">重置為 12 個 0</button>
+        <button id="showLoginFromReset" class="link-button" type="button">返回登入</button>
+      </form>
+    </dialog>
+    <dialog id="backendPasswordChange" class="backend-dialog">
+      <form id="backendPasswordChangeForm" class="backend-panel">
+        <p class="eyebrow">ACCOUNT SECURITY</p><h2>修改密碼</h2>
+        <p id="backendPasswordChangeReminder" class="backend-password-warning"></p>
+        <label>目前密碼<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        <label>新密碼（至少 12 個字元）<input name="newPassword" type="password" autocomplete="new-password" minlength="12" required></label>
+        <label>再次輸入新密碼<input name="confirmPassword" type="password" autocomplete="new-password" minlength="12" required></label>
+        <p id="backendPasswordChangeError" class="backend-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelBackendPasswordChange" type="button" class="secondary">取消</button>
+          <button type="submit" class="primary">儲存新密碼</button>
+        </div>
       </form>
     </dialog>
     <dialog id="backendProgress" class="backend-dialog backend-results-dialog">
@@ -151,7 +176,7 @@ import {
     <dialog id="backendAccounts" class="backend-dialog backend-accounts-dialog">
       <section class="backend-panel">
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>所有帳號列表</h2></div><button id="closeBackendAccounts" type="button" class="secondary">關閉</button></div>
-        <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。管理者可升級／降級 PS 帳號並剔除一般帳號；PS 只能剔除一般帳號。只有 ADMIN 能永久刪除已剔除且從未建立詢價的帳號；管理者、PS 或已有詢價紀錄的帳號不得永久刪除。</p>
+        <p class="backend-archive-note">顯示全部帳號與上次上線時間（約 1 分鐘誤差）。ADMIN 與 PS 可先剔除一般帳號，再刪除其登入資料、行編與分行個資。歷史詢價及稽核紀錄會保留在不可登入的匿名帳號下，原行編可重新申請。</p>
         <p id="backendAccountsError" class="backend-error" role="alert"></p>
         <p id="backendAccountsStatus" class="backend-admin-status" role="status"></p>
         <div id="backendAccountLookup" class="backend-account-lookup" hidden>
@@ -216,6 +241,14 @@ import {
   const rfqLoadMoreButton = document.querySelector("#backendRfqLoadMore");
   const loginForm = document.querySelector("#backendLogin");
   const registrationForm = document.querySelector("#backendRegistration");
+  const passwordResetForm = document.querySelector("#backendPasswordReset");
+  const passwordResetStatus = document.querySelector("#backendPasswordResetStatus");
+  const passwordChangeButton = document.querySelector("#backendChangePassword");
+  const passwordChangeDialog = document.querySelector("#backendPasswordChange");
+  const passwordChangeForm = document.querySelector("#backendPasswordChangeForm");
+  const passwordChangeReminder = document.querySelector("#backendPasswordChangeReminder");
+  const passwordChangeError = document.querySelector("#backendPasswordChangeError");
+  const passwordChangeCancel = document.querySelector("#cancelBackendPasswordChange");
   const userbar = document.querySelector(".backend-userbar");
   const mobileActionsToggle = document.querySelector("#backendMobileActionsToggle");
   const mobileActionsLabel = document.querySelector("#backendMobileActionsLabel");
@@ -293,10 +326,62 @@ import {
     if (!authDialog.open) authDialog.showModal();
   }
 
+  function closePrivateDialogs() {
+    closeRfqProgress();
+    [rfqHistoryDialog, adminAccountsDialog, adminRegistrationReviewDialog, adminOutboundDialog,
+      adminTimelinesDialog, issuerPickerDialog].forEach(dialog => {
+      if (dialog?.open) dialog.close();
+    });
+  }
+
+  function showAuthPanel(panel) {
+    loginForm.hidden = panel !== "login";
+    registrationForm.hidden = panel !== "registration";
+    passwordResetForm.hidden = panel !== "reset";
+    if (panel === "reset") passwordResetStatus.textContent = "";
+  }
+
+  function updatePasswordResetReminder(user) {
+    clearInterval(state.passwordResetTimer);
+    state.passwordResetTimer = null;
+    if (!user?.passwordChangeRequired || !user.passwordResetExpiresAt) {
+      passwordChangeReminder.textContent = "修改後會登出所有裝置，請使用新密碼重新登入。";
+      return;
+    }
+    const render = () => {
+      const remaining = Math.max(0, Date.parse(user.passwordResetExpiresAt) - Date.now());
+      const minutes = Math.floor(remaining / 60000);
+      const seconds = Math.floor((remaining % 60000) / 1000);
+      passwordChangeReminder.textContent = remaining > 0
+        ? `目前使用臨時密碼，請在 ${minutes}:${String(seconds).padStart(2, "0")} 內設定新密碼。`
+        : "臨時密碼已逾時，請返回登入頁重新執行忘記密碼。";
+      if (remaining <= 0) {
+        clearInterval(state.passwordResetTimer);
+        state.passwordResetTimer = null;
+        if (passwordChangeDialog.open) passwordChangeDialog.close();
+        setUser(null);
+        showAuthPanel("reset");
+        passwordResetStatus.textContent = "臨時密碼已逾時，請重新重置。";
+        showAuth();
+      }
+    };
+    render();
+    state.passwordResetTimer = setInterval(render, 1000);
+  }
+
+  function showPasswordChange(user = state.user) {
+    const forced = Boolean(user?.passwordChangeRequired);
+    passwordChangeForm.reset();
+    passwordChangeError.textContent = "";
+    passwordChangeCancel.textContent = forced ? "取消並登出" : "取消";
+    updatePasswordResetReminder(user);
+    if (!passwordChangeDialog.open) passwordChangeDialog.showModal();
+  }
+
   function setUser(user) {
     state.user = user;
     setMobileActionsExpanded(false);
-    userbar.hidden = !user;
+    userbar.hidden = !user || Boolean(user.passwordChangeRequired);
     const isSupport = !!user && (user.role === "ADMIN" || user.role === "PS");
     adminAccountsButton.hidden = !isSupport;
     adminRegistrationsButton.hidden = !isSupport;
@@ -304,11 +389,14 @@ import {
     adminTimelinesButton.hidden = !user || user.role !== "ADMIN";
     document.querySelector("#backendUser").textContent = user ? `${user.displayName}｜${user.branchName}` : "";
     if (!user) {
+      clearInterval(state.passwordResetTimer);
+      state.passwordResetTimer = null;
       clearTimeout(state.timer);
       clearTimeout(state.badgeTimer);
       setRfqBadge(0);
     }
     if (user && authDialog.open) authDialog.close();
+    if (user?.passwordChangeRequired) showPasswordChange(user);
   }
 
   function escapeHtml(value) {
@@ -1314,12 +1402,9 @@ import {
       if (account.role === "USER" && account.status !== "DISABLED" && account.id !== selfId) {
         actions.push(`<button type="button" class="secondary" data-account-action="disable" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">剔除</button>`);
       }
-      if (viewer === "ADMIN" && account.role === "USER" && account.status === "DISABLED" && account.id !== selfId) {
-        if (account.rfqCount === 0) {
-          actions.push(`<button type="button" class="danger" data-account-action="delete" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}" data-account-username="${escapeHtml(account.username)}">永久刪除</button>`);
-        } else {
-          actions.push(`<small title="為保留金融與稽核紀錄，此帳號不可永久刪除">保留 ${escapeHtml(account.rfqCount)} 筆詢價</small>`);
-        }
+      if ((viewer === "ADMIN" || viewer === "PS") && account.role === "USER" && account.status === "DISABLED" && account.id !== selfId) {
+        actions.push(`<button type="button" class="danger" data-account-action="delete" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}" data-account-username="${escapeHtml(account.username)}">刪除帳號個資</button>`);
+        if (account.rfqCount > 0) actions.push(`<small>匿名保留 ${escapeHtml(account.rfqCount)} 筆詢價</small>`);
       }
       return `<tr>
         <td>${escapeHtml(formatDateTime(account.createdAt))}</td>
@@ -1381,9 +1466,8 @@ import {
     };
     let body = "{}";
     if (action === "delete") {
-      if (state.user?.role !== "ADMIN") return;
-      if (!window.confirm(`永久刪除「${displayName}」會移除登入資料、加密行編與所有工作階段，且無法復原。確定繼續？`)) return;
-      const confirmation = window.prompt(`請輸入登入帳號「${username}」確認永久刪除：`);
+      if (!window.confirm(`刪除「${displayName}」的帳號個資會移除登入資料、加密行編與所有工作階段，且無法復原；歷史詢價與稽核紀錄將匿名保留。確定繼續？`)) return;
+      const confirmation = window.prompt(`請輸入登入帳號「${username}」確認刪除帳號個資：`);
       if (confirmation === null) return;
       if (confirmation.trim().toLowerCase() !== username) {
         adminAccountsError.textContent = "確認文字與登入帳號不符，未執行刪除。";
@@ -1396,14 +1480,14 @@ import {
     const buttons = [...adminAccountsList.querySelectorAll("button")];
     buttons.forEach(item => { item.disabled = true; });
     adminAccountsError.textContent = "";
-    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…", delete: "正在永久刪除…" }[action];
+    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…", delete: "正在刪除帳號個資…" }[action];
     try {
       await request(`/admin/accounts/${encodeURIComponent(userId)}/${action}`, { method: "POST", body });
       const done = {
         promote: `已將「${displayName}」升級為 PS。`,
         demote: `已將「${displayName}」降級為一般帳號。`,
         disable: `已剔除「${displayName}」。`,
-        delete: `已永久刪除「${displayName}」，其行編現在可重新申請。`
+        delete: `已刪除「${displayName}」的帳號個資；歷史詢價已匿名保留，原行編現在可重新申請。`
       };
       await loadAdminAccounts(done[action]);
     } catch (error) {
@@ -1415,11 +1499,13 @@ import {
 
   async function loadSession() {
     try {
-      setUser((await request("/auth/session")).user);
+      const user = (await request("/auth/session")).user;
+      setUser(user);
+      if (user.passwordChangeRequired) return;
       void refreshRfqBadge();
       await restoreRfqFromUrl();
     }
-    catch { setUser(null); showAuth(); }
+    catch { setUser(null); showAuthPanel("login"); showAuth(); }
   }
 
   function nullable(value) {
@@ -2118,8 +2204,10 @@ import {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(loginForm));
     try {
-      setUser((await request("/auth/login", { method: "POST", body: JSON.stringify(data) })).user);
+      const user = (await request("/auth/login", { method: "POST", body: JSON.stringify(data) })).user;
+      setUser(user);
       document.querySelector("#backendAuthError").textContent = "";
+      if (user.passwordChangeRequired) return;
       void refreshRfqBadge();
       await restoreRfqFromUrl();
     }
@@ -2133,8 +2221,70 @@ import {
       document.querySelector("#backendRegistrationError").textContent = "申請已送出；核准後請以五碼行編登入。";
     } catch (error) { document.querySelector("#backendRegistrationError").textContent = error.message; }
   });
-  document.querySelector("#showRegistration").addEventListener("click", () => { loginForm.hidden = true; registrationForm.hidden = false; });
-  document.querySelector("#showLogin").addEventListener("click", () => { loginForm.hidden = false; registrationForm.hidden = true; });
+  passwordResetForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    passwordResetStatus.textContent = "正在重置…";
+    try {
+      const data = Object.fromEntries(new FormData(passwordResetForm));
+      const result = await request("/auth/password/reset", { method: "POST", body: JSON.stringify(data) });
+      passwordResetStatus.textContent = result.message;
+      loginForm.elements.username.value = data.username;
+      loginForm.elements.password.value = "";
+    } catch (error) {
+      passwordResetStatus.textContent = error.message;
+    }
+  });
+  passwordChangeForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    passwordChangeError.textContent = "";
+    const data = Object.fromEntries(new FormData(passwordChangeForm));
+    if (data.newPassword !== data.confirmPassword) {
+      passwordChangeError.textContent = "兩次輸入的新密碼不一致。";
+      return;
+    }
+    const submit = passwordChangeForm.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      await request("/auth/password/change", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword })
+      });
+      clearInterval(state.passwordResetTimer);
+      state.passwordResetTimer = null;
+      if (passwordChangeDialog.open) passwordChangeDialog.close();
+      closePrivateDialogs();
+      setUser(null);
+      showAuthPanel("login");
+      document.querySelector("#backendAuthError").textContent = "密碼已修改，請使用新密碼重新登入。";
+      showAuth();
+    } catch (error) {
+      passwordChangeError.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  passwordChangeButton.addEventListener("click", () => showPasswordChange());
+  passwordChangeCancel.addEventListener("click", async () => {
+    if (state.user?.passwordChangeRequired) {
+      try { await request("/auth/logout", { method: "POST", body: "{}" }); } catch { /* Session may already be expired. */ }
+      if (passwordChangeDialog.open) passwordChangeDialog.close();
+      closePrivateDialogs();
+      setUser(null);
+      showAuthPanel("login");
+      showAuth();
+      return;
+    }
+    clearInterval(state.passwordResetTimer);
+    state.passwordResetTimer = null;
+    passwordChangeDialog.close();
+  });
+  passwordChangeDialog.addEventListener("cancel", event => {
+    if (state.user?.passwordChangeRequired) event.preventDefault();
+  });
+  document.querySelector("#showRegistration").addEventListener("click", () => showAuthPanel("registration"));
+  document.querySelector("#showPasswordReset").addEventListener("click", () => showAuthPanel("reset"));
+  document.querySelector("#showLogin").addEventListener("click", () => showAuthPanel("login"));
+  document.querySelector("#showLoginFromReset").addEventListener("click", () => showAuthPanel("login"));
   mobileActionsToggle.addEventListener("click", event => {
     event.stopPropagation();
     setMobileActionsExpanded(mobileActionsToggle.getAttribute("aria-expanded") !== "true");
@@ -2183,9 +2333,9 @@ import {
   });
   document.querySelector("#backendLogout").addEventListener("click", async () => {
     await request("/auth/logout", { method: "POST", body: "{}" });
-    if (rfqHistoryDialog.open) rfqHistoryDialog.close();
-    closeRfqProgress();
+    closePrivateDialogs();
     setUser(null);
+    showAuthPanel("login");
     showAuth();
   });
   document.querySelector("#closeBackendProgress").addEventListener("click", () => closeRfqProgress());

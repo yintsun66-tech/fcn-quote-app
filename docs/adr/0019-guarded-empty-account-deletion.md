@@ -1,6 +1,6 @@
 # ADR 0019: Guarded permanent deletion of empty user accounts
 
-Status: Accepted
+Status: Superseded by ADR 0035
 Date: 2026-07-28
 
 ## Context

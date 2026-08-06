@@ -26,7 +26,9 @@ const session = {
     displayName: "Market User",
     branchName: "Market Branch",
     role: "USER",
-    credentialVersion: 1
+    credentialVersion: 1,
+    passwordChangeRequired: false,
+    passwordResetExpiresAt: null
   }
 } satisfies SessionContext;
 

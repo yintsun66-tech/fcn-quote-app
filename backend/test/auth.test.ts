@@ -137,6 +137,99 @@ describe("registration and authentication", () => {
     expect(expiredSession.status).toBe(401);
   });
 
+  it("resets an ordinary user's password to a 30-minute forced-change credential", async () => {
+    await api("/api/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(registration("reset01", "12400"))
+    }, "198.51.100.120");
+    await testEnv.DB.prepare("UPDATE users SET status = 'ACTIVE' WHERE username_normalized = '12400'").run();
+
+    const originalLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400", password: "Correct Horse Battery 123!" })
+    }, "198.51.100.121");
+    const originalAuth = authentication(originalLogin);
+
+    const reset = await api("/api/v1/auth/password/reset", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400" })
+    }, "198.51.100.122");
+    expect(reset.status).toBe(202);
+    expect(await reset.json()).toMatchObject({ status: "RESET_IF_ELIGIBLE", expiresInMinutes: 30 });
+    expect((await api("/api/v1/auth/session", { headers: { cookie: originalAuth.cookie } })).status).toBe(401);
+
+    const oldPassword = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400", password: "Correct Horse Battery 123!" })
+    }, "198.51.100.123");
+    expect(oldPassword.status).toBe(401);
+
+    const temporaryLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400", password: "000000000000" })
+    }, "198.51.100.124");
+    expect(temporaryLogin.status).toBe(200);
+    expect(await temporaryLogin.clone().json()).toMatchObject({
+      user: { username: "12400", passwordChangeRequired: true, passwordResetExpiresAt: expect.any(String) }
+    });
+    const temporaryAuth = authentication(temporaryLogin);
+    const blockedRfq = await api("/api/v1/rfqs/summary", { headers: { cookie: temporaryAuth.cookie } });
+    expect(blockedRfq.status).toBe(403);
+    expect(await blockedRfq.json()).toMatchObject({ error: { code: "PASSWORD_CHANGE_REQUIRED" } });
+
+    const unchanged = await api("/api/v1/auth/password/change", {
+      method: "POST",
+      headers: { cookie: temporaryAuth.cookie, "x-csrf-token": temporaryAuth.csrf },
+      body: JSON.stringify({ currentPassword: "000000000000", newPassword: "000000000000" })
+    });
+    expect(unchanged.status).toBe(422);
+    expect(await unchanged.json()).toMatchObject({ error: { code: "PASSWORD_TOO_WEAK" } });
+
+    const changed = await api("/api/v1/auth/password/change", {
+      method: "POST",
+      headers: { cookie: temporaryAuth.cookie, "x-csrf-token": temporaryAuth.csrf },
+      body: JSON.stringify({ currentPassword: "000000000000", newPassword: "A New Secure Password 456!" })
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ status: "PASSWORD_CHANGED", loginRequired: true });
+    expect((await api("/api/v1/auth/session", { headers: { cookie: temporaryAuth.cookie } })).status).toBe(401);
+
+    const newLogin = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400", password: "A New Secure Password 456!" })
+    }, "198.51.100.125");
+    expect(newLogin.status).toBe(200);
+    expect(await newLogin.json()).toMatchObject({ user: { passwordChangeRequired: false, passwordResetExpiresAt: null } });
+  });
+
+  it("does not let an expired reset password or a privileged account use self-service reset", async () => {
+    await api("/api/v1/auth/password/reset", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400" })
+    }, "198.51.100.126");
+    await testEnv.DB.prepare(
+      "UPDATE users SET password_reset_expires_at = ? WHERE username_normalized = '12400'"
+    ).bind(new Date(Date.now() - 60_000).toISOString()).run();
+    const expired = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username: "12400", password: "000000000000" })
+    }, "198.51.100.127");
+    expect(expired.status).toBe(401);
+
+    const adminBefore = await testEnv.DB.prepare(
+      "SELECT password_hash FROM users WHERE username_normalized = '12347'"
+    ).first<{ password_hash: string }>();
+    const adminReset = await api("/api/v1/auth/password/reset", {
+      method: "POST",
+      body: JSON.stringify({ username: "12347" })
+    }, "198.51.100.128");
+    expect(adminReset.status).toBe(202);
+    const adminAfter = await testEnv.DB.prepare(
+      "SELECT password_hash, password_change_required FROM users WHERE username_normalized = '12347'"
+    ).first<{ password_hash: string; password_change_required: number }>();
+    expect(adminAfter).toEqual({ password_hash: adminBefore?.password_hash, password_change_required: 0 });
+  });
+
   it("allows an administrator to reject a pending registration with an audit reason", async () => {
     await api("/api/v1/auth/register", {
       method: "POST",
@@ -245,14 +338,8 @@ describe("registration and authentication", () => {
     }, "203.0.113.14");
     expect(disabledLogin.status).toBe(401);
 
-    // Permanent deletion is ADMIN-only, requires exact username confirmation, and releases the
-    // employee-number/login uniqueness only for a disabled account without RFQs.
-    const psDelete = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
-      method: "POST",
-      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf },
-      body: JSON.stringify({ confirmation: "22003" })
-    });
-    expect(psDelete.status).toBe(403);
+    // ADMIN or PS can delete a disabled regular account's identifying data. Exact username
+    // confirmation is still required, and the opaque tombstone releases both unique identifiers.
     const wrongConfirmation = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
       method: "POST",
       headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
@@ -262,22 +349,40 @@ describe("registration and authentication", () => {
     expect(await wrongConfirmation.json()).toMatchObject({ error: { code: "ACCOUNT_DELETE_CONFIRMATION_MISMATCH" } });
     const permanentDelete = await api(`/api/v1/admin/accounts/${disableId}/delete`, {
       method: "POST",
-      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf },
       body: JSON.stringify({ confirmation: "22003" })
     });
     const permanentDeleteBody = await permanentDelete.json();
-    const deletedUser = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE id = ?").bind(disableId).first<{ n: number }>();
-    expect({ status: permanentDelete.status, body: permanentDeleteBody, deletedUser }).toEqual({
+    const anonymizedUser = await testEnv.DB.prepare(
+      `SELECT username_normalized, display_name, branch_name, employee_number_ciphertext,
+              employee_number_lookup_hash, anonymized_at
+         FROM users WHERE id = ?`
+    ).bind(disableId).first<{
+      username_normalized: string;
+      display_name: string;
+      branch_name: string;
+      employee_number_ciphertext: string;
+      employee_number_lookup_hash: string;
+      anonymized_at: string;
+    }>();
+    expect({ status: permanentDelete.status, body: permanentDeleteBody }).toEqual({
       status: 200,
-      body: expect.objectContaining({ userId: disableId, status: "DELETED" }),
-      deletedUser: { n: 0 }
+      body: expect.objectContaining({ userId: disableId, status: "ANONYMIZED", preservedRfqCount: 0 })
     });
+    expect(anonymizedUser).toMatchObject({
+      display_name: "已刪除使用者",
+      branch_name: "已刪除",
+      employee_number_ciphertext: "REDACTED"
+    });
+    expect(anonymizedUser?.username_normalized).toMatch(/^deleted-/);
+    expect(anonymizedUser?.employee_number_lookup_hash).toMatch(/^deleted-/);
+    expect(anonymizedUser?.anonymized_at).toBeTruthy();
     const deletedSessions = await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM user_sessions WHERE user_id = ?").bind(disableId).first<{ n: number }>();
     expect(deletedSessions?.n).toBe(0);
     const deletionAudit = await testEnv.DB.prepare(
-      "SELECT action, actor_user_id FROM audit_events WHERE entity_id = ? AND action = 'ACCOUNT_PERMANENTLY_DELETED'"
+      "SELECT action, actor_user_id FROM audit_events WHERE entity_id = ? AND action = 'ACCOUNT_PERSONAL_DATA_DELETED'"
     ).bind(disableId).first<{ action: string; actor_user_id: string }>();
-    expect(deletionAudit).toEqual({ action: "ACCOUNT_PERMANENTLY_DELETED", actor_user_id: adminId });
+    expect(deletionAudit).toEqual({ action: "ACCOUNT_PERSONAL_DATA_DELETED", actor_user_id: promoteId });
     const reapply = await api("/api/v1/auth/register", {
       method: "POST",
       body: JSON.stringify(registration("ignored-again", "22003"))
@@ -301,7 +406,7 @@ describe("registration and authentication", () => {
       headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf }
     })).status).toBe(409);
 
-    // Even ADMIN cannot permanently delete an account that owns an RFQ.
+    // A disabled account with RFQs is anonymized without deleting or transferring its history.
     await testEnv.DB.prepare(
       "INSERT INTO rfqs (id, user_id, status, trade_count, created_at) VALUES (?, ?, 'DRAFT', 1, ?)"
     ).bind("rfq_delete_guard", plainId, new Date().toISOString()).run();
@@ -311,11 +416,20 @@ describe("registration and authentication", () => {
     })).status).toBe(200);
     const protectedDelete = await api(`/api/v1/admin/accounts/${plainId}/delete`, {
       method: "POST",
-      headers: { cookie: adminAuth.cookie, "x-csrf-token": adminAuth.csrf },
+      headers: { cookie: psAuth.cookie, "x-csrf-token": psAuth.csrf },
       body: JSON.stringify({ confirmation: "22004" })
     });
-    expect(protectedDelete.status).toBe(409);
-    expect(await protectedDelete.json()).toMatchObject({ error: { code: "ACCOUNT_HAS_RFQS" } });
+    expect(protectedDelete.status).toBe(200);
+    expect(await protectedDelete.json()).toMatchObject({ status: "ANONYMIZED", preservedRfqCount: 1 });
+    expect(await testEnv.DB.prepare(
+      "SELECT user_id FROM rfqs WHERE id = 'rfq_delete_guard'"
+    ).first<{ user_id: string }>()).toEqual({ user_id: plainId });
+    expect(await testEnv.DB.prepare(
+      "SELECT display_name, anonymized_at FROM users WHERE id = ?"
+    ).bind(plainId).first<{ display_name: string; anonymized_at: string }>()).toMatchObject({
+      display_name: "已刪除使用者",
+      anonymized_at: expect.any(String)
+    });
 
     // ADMIN can demote the PS account back to a regular USER.
     const demoteResponse = await api(`/api/v1/admin/accounts/${promoteId}/demote`, {

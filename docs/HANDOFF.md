@@ -1,8 +1,8 @@
 # Project handoff
 
-Updated: 2026-08-05 (Asia/Taipei)
+Updated: 2026-08-06 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4` (`ab79e1c`), pushed to its remote tracking branch.
+Current branch: `codex/market-analysis-phase2-4` (`1f5c563`), pushed to its remote tracking branch.
 Current `main` is `f11da30`, **26 commits behind**. The feature branch also contains the newer
 internal-manual commits `65a2baa` and `f5f2b9f`, so the earlier statement that the two branch trees
 are byte-identical is historical.
@@ -13,14 +13,49 @@ by `ab79e1c` and resolved from `wrangler deployments list`, not from a branch na
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
 the number that the deploy itself invalidates — this file can carry one only because it is not a
-published asset. Verification baseline is **27 test files / 202 tests**; the 198 recorded elsewhere
-is historical.
+published asset. Current local verification baseline is **28 test files / 217 tests**; lower counts
+recorded elsewhere are historical.
 
 Deployed bytes were compared against the working tree for all seven served assets
 (`styles.css`, `styles-dark.css`, `follow-board.css`, `follow-board-dark.css`, `app.js`,
 `backend-client.js`, `follow-board.mjs`) and all three cache tokens: identical. Worth repeating as
 a habit — several deploys in this session happened before their commit, so a clean `git status`
 alone never proves that production is running the committed tree.
+
+## Account recovery and anonymized account deletion (implemented locally; not committed or deployed)
+
+The approved recovery flow is implemented behind source migration
+`0018_account_recovery_and_anonymization.sql`. An ACTIVE plain USER may choose **忘記密碼**; the
+server generically answers and, when eligible, resets the password to twelve zeroes for 30 minutes,
+increments `credential_version`, revokes every old session and marks the account for forced change.
+The temporary session may call only session/logout/password-change endpoints. The browser opens a
+non-dismissible change dialog with a live countdown (it still offers **取消並登出**), and a
+successful change revokes the temporary session and requires a fresh login. ADMIN and PS accounts
+are deliberately excluded from this low-assurance self-service path.
+
+ADMIN and PS may now delete the identifying data of a disabled plain USER after typing the exact
+login. The Worker replaces username, display name, branch, encrypted employee-number material,
+lookup hash and password with irreversible tombstone values, deletes sessions/idempotency keys and
+omits the tombstone from account lists and employee lookup. `rfqs.user_id` remains unchanged: old
+RFQs, quotes, mail, rankings, images and audit events stay under the inaccessible opaque owner and
+are never transferred to a new registration that reuses the employee number. The audit action is
+`ACCOUNT_PERSONAL_DATA_DELETED` and contains only the preserved RFQ count.
+
+Files changed include migration 0018; `backend/src/auth.ts`, `db.ts`, `index.ts`, `types.ts` and
+`validation.ts`; `backend-client.js`, both style sheets and `index.html`; authentication tests; ADR
+0035 and the authentication/operations documentation. No dependency, lockfile, secret, binding or
+production data was changed. Preserve the user-owned untracked `.claude/` and `output/` folders.
+
+Verification: source/test TypeScript checks pass, root JavaScript syntax checks pass, the focused
+auth suite passes 11/11, all 28 test files / 217 tests pass, and the Wrangler dry-run build succeeds
+after rerunning outside the filesystem sandbox. Tests emit the known sandbox log/static-analysis
+warnings but exit zero. The safe next step is final diff review. A later authorized production release must apply remote migration
+0018 **before** deploying the Worker/assets; nothing in this section is live yet.
+
+Security caveat: the fixed known temporary password is not identity verification. The privileged
+account exclusion, forced-change-only session, 30-minute expiry and keyed rate limit reduce but do
+not remove takeover/denial-of-service risk. Replace it with a verified recovery factor before this
+tool becomes an official or regulated record source. See ADR 0035.
 
 ## Earnings-date advisory (committed, pushed and deployed, 2026-08-06)
 

@@ -3,8 +3,9 @@
 Status: Accepted
 Date: 2026-07-25
 
-The hard-deletion boundary in this ADR is partially superseded by ADR 0019. `剔除` remains a
-soft disable, while ADMIN may permanently delete only a disabled plain USER with zero RFQs.
+The hard-deletion boundary in this ADR is superseded by ADR 0035. `剔除` remains a soft disable,
+while ADMIN or PS may remove a disabled plain USER's identifying account data and retain any RFQs
+under an inaccessible anonymous tombstone owner.
 
 ## Context
 

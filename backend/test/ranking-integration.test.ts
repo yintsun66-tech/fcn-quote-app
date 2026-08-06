@@ -123,7 +123,9 @@ describe("versioned ranking persistence", () => {
         displayName: "Ranker",
         branchName: "Test",
         role: "USER",
-        credentialVersion: 1
+        credentialVersion: 1,
+        passwordChangeRequired: false,
+        passwordResetExpiresAt: null
       }
     } as SessionContext;
     const provisional = await (await getRfqResults(testEnv, session, rfqId)).json<{

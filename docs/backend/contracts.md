@@ -34,7 +34,24 @@ employee number already exists beyond a generic registration response.
 
 Accepts username and password. Newly registered users enter their five-digit employee number as
 the username; existing accounts continue to use their existing stored login name. Only `ACTIVE`
-users may receive a session. Failure responses are generic and rate-limited.
+users may receive a session. Failure responses are generic and rate-limited. A user authenticated
+with a non-expired reset password receives `passwordChangeRequired: true` and may call only the
+session, logout and password-change endpoints until the password is changed.
+
+### `POST /api/v1/auth/password/reset`
+
+Accepts `{ username }` without an authenticated session. It always returns the same generic `202`
+response. For an ACTIVE plain USER, the server resets the password to `000000000000`, expires it in
+30 minutes, revokes every session and requires a password change. ADMIN, PS, disabled, unknown and
+anonymized accounts are not changed. Requests are rate-limited. This is an operator-approved
+low-assurance recovery flow, not verified identity recovery; see ADR 0035.
+
+### `POST /api/v1/auth/password/change`
+
+Accepts authenticated `{ currentPassword, newPassword }`. The new password must contain 12–128
+characters, differ from the current password and not be twelve zeroes. Success revokes every
+session, clears reset state and requires a fresh login. This endpoint is the only mutation besides
+logout that a reset-restricted session may call.
 
 ### `POST /api/v1/auth/logout`
 
@@ -42,7 +59,9 @@ Revokes the current server-side session and expires the cookie.
 
 ### `GET /api/v1/auth/session`
 
-Returns the minimum current-user profile needed by the UI. It never returns password material, employee-number protection keys, approval notes, or other users.
+Returns the minimum current-user profile needed by the UI, including `passwordChangeRequired` and
+`passwordResetExpiresAt` for the forced-change reminder. It never returns password material,
+employee-number protection keys, approval notes, or other users.
 
 ### Quote-card document (ADR 0017)
 
@@ -113,9 +132,10 @@ the attempted value.
 - `POST /api/v1/admin/accounts/:id/promote` — upgrade an ACTIVE regular `USER` to `PS`. `ADMIN` only.
 - `POST /api/v1/admin/accounts/:id/demote` — return a `PS` account to `USER`. `ADMIN` only.
 - `POST /api/v1/admin/accounts/:id/disable` — remove (soft-disable) a regular `USER`: set `status='DISABLED'` and revoke sessions. `ADMIN` or `PS`.
-- `POST /api/v1/admin/accounts/:id/delete` — `{ confirmation }` permanently deletes a disabled
-  plain `USER` only when `confirmation` equals the normalized login account and `rfqCount` is zero.
-  `ADMIN` only. Self, ADMIN, PS, non-disabled, or RFQ-owning targets are refused.
+- `POST /api/v1/admin/accounts/:id/delete` — `{ confirmation }` irreversibly removes the identifying
+  account data of a disabled plain `USER` when `confirmation` equals the normalized login account.
+  `ADMIN` or `PS`. It releases the username and employee number but retains an inaccessible opaque
+  tombstone as owner of any historical RFQs. Self, ADMIN, PS and non-disabled targets are refused.
 - `POST /api/v1/admin/accounts/lookup` — `{ employeeNumber }` (five digits) → `{ account }` (the single account holding that employee number, with `id`/`username`/`displayName`/`branchName`/effective `role`/`status`/`createdAt`) or `{ account: null }`. **`ADMIN` only** (it maps the employee-number identifier to an account, the linkage kept out of the PS account list). Matched via the keyed lookup hash — no employee number is decrypted, and the queried value is never written to the audit log (only whether a match was found).
 
 The `PS` tier is an effective role derived server-side from `users.is_privileged_support`
@@ -124,10 +144,11 @@ guard on the target being a plain `USER` (`role='USER'` plus the flag) in SQL, s
 `PS` target changes zero rows and returns `409 ACCOUNT_NOT_ELIGIBLE`; `disable` also rejects a
 self-target with `422`. These mutations are same-origin + CSRF protected and audited.
 
-Per ADR 0019, permanent deletion is a separate ADMIN-only operation after soft disable. It is
-refused when an RFQ exists, so `rfqs.user_id ON DELETE RESTRICT` remains the final database guard.
-Successful deletion cascades sessions/idempotency keys, releases the employee-number/login
-uniqueness, and records `ACCOUNT_PERMANENTLY_DELETED` without personal data.
+Per ADR 0035, personal-data deletion is a separate ADMIN/PS operation after soft disable. The
+`users` row and `rfqs.user_id ON DELETE RESTRICT` ownership remain, while username, display name,
+branch, encrypted employee-number material, employee lookup hash and password are replaced with
+irreversible tombstone values. Sessions/idempotency keys are deleted, uniqueness is released, and
+`ACCOUNT_PERSONAL_DATA_DELETED` records only safe metadata.
 
 ### Administrative RFQ diagnostics
 

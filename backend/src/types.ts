@@ -65,6 +65,8 @@ export interface AuthenticatedUser {
   branchName: string;
   role: UserRole;
   credentialVersion: number;
+  passwordChangeRequired: boolean;
+  passwordResetExpiresAt: string | null;
 }
 
 export interface SessionContext {

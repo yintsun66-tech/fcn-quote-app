@@ -192,6 +192,7 @@
 .issuer-state.status-timeout,
 .issuer-state.status-parse_error { background: #ff9f0a29; color: #ffb340; }
 .backend-countdown { color: var(--label); }
+.backend-password-warning { background: #30d1581f; border-left-color: #30d158; color: var(--label); }
 
 /* Trade navigator. It only exists at <=760px, so it never appeared in a desktop sweep: the surface
    rules darkened its card but nothing remapped the text inside it, leaving the heading at 2:1. */

@@ -3,7 +3,12 @@ import { addSeconds, effectiveRole, insertAudit, loadSession, newId, nowIso } fr
 import { AppError } from "./errors";
 import { clientAddress, CSRF_COOKIE, csrfCookie, jsonResponse, parseCookies, readJson, requestId, requireSameOrigin, SESSION_COOKIE, sessionCookie } from "./http";
 import type { AppEnv, SessionContext } from "./types";
-import { normalizeLoginInput, normalizeRegistrationInput } from "./validation";
+import {
+  normalizeLoginInput,
+  normalizePasswordChangeInput,
+  normalizePasswordResetInput,
+  normalizeRegistrationInput
+} from "./validation";
 
 interface UserAuthRow {
   id: string;
@@ -17,7 +22,12 @@ interface UserAuthRow {
   role: "USER" | "ADMIN";
   is_privileged_support: number;
   credential_version: number;
+  password_change_required: number;
+  password_reset_expires_at: string | null;
 }
+
+const TEMPORARY_RESET_PASSWORD = "000000000000";
+const PASSWORD_RESET_LIFETIME_SECONDS = 30 * 60;
 
 function positiveInteger(value: string, fallback: number): number {
   const result = Number(value);
@@ -42,6 +52,34 @@ async function recordAttempt(env: AppEnv, key: string, kind: "LOGIN" | "REGISTER
   await env.DB.prepare(
     "INSERT INTO auth_attempts (id, attempt_key, kind, succeeded, occurred_at) VALUES (?, ?, ?, ?, ?)"
   ).bind(newId("att"), key, kind, succeeded ? 1 : 0, nowIso()).run();
+}
+
+async function passwordResetAttemptKey(env: AppEnv, identity: string, request: Request): Promise<string> {
+  return keyedHash(env.EMPLOYEE_LOOKUP_KEY, `PASSWORD_RESET:${identity}:${clientAddress(request)}`);
+}
+
+async function isPasswordResetRateLimited(env: AppEnv, key: string): Promise<boolean> {
+  const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM password_reset_attempts
+      WHERE attempt_key = ? AND occurred_at >= ?`
+  ).bind(key, cutoff).first<{ count: number }>();
+  return Number(row?.count ?? 0) >= 3;
+}
+
+async function recordPasswordResetAttempt(env: AppEnv, key: string, succeeded: boolean): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO password_reset_attempts (id, attempt_key, succeeded, occurred_at)
+     VALUES (?, ?, ?, ?)`
+  ).bind(newId("rst"), key, succeeded ? 1 : 0, nowIso()).run();
+}
+
+function genericPasswordResetResponse(): Response {
+  return jsonResponse({
+    status: "RESET_IF_ELIGIBLE",
+    expiresInMinutes: 30,
+    message: "若為可自助重置的一般使用者帳號，臨時密碼已設為 12 個 0，請在 30 分鐘內登入並修改密碼。"
+  }, 202);
 }
 
 function genericRegistrationResponse(): Response {
@@ -95,6 +133,68 @@ export async function register(request: Request, env: AppEnv): Promise<Response>
   return genericRegistrationResponse();
 }
 
+export async function requestPasswordReset(request: Request, env: AppEnv): Promise<Response> {
+  requireSameOrigin(request);
+  let username = "invalid";
+  try {
+    username = normalizePasswordResetInput(await readJson(request)).username;
+  } catch {
+    return genericPasswordResetResponse();
+  }
+
+  const key = await passwordResetAttemptKey(env, username, request);
+  if (await isPasswordResetRateLimited(env, key)) {
+    throw new AppError(429, "AUTH_RATE_LIMITED", "重置次數過多，請稍後再試或聯絡管理者。 ");
+  }
+
+  const target = await env.DB.prepare(
+    `SELECT id FROM users
+      WHERE username_normalized = ? AND status = 'ACTIVE' AND role = 'USER'
+        AND is_privileged_support = 0 AND anonymized_at IS NULL`
+  ).bind(username).first<{ id: string }>();
+  if (!target) {
+    await recordPasswordResetAttempt(env, key, false);
+    return genericPasswordResetResponse();
+  }
+
+  const now = new Date();
+  const nowString = now.toISOString();
+  const expiresAt = addSeconds(now, PASSWORD_RESET_LIFETIME_SECONDS);
+  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
+  const password = await hashPassword(TEMPORARY_RESET_PASSWORD, iterations, env.EMPLOYEE_LOOKUP_KEY);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users SET password_hash = ?, password_salt = ?, password_algorithm = ?,
+          password_iterations = ?, password_change_required = 1,
+          password_reset_expires_at = ?, credential_version = credential_version + 1,
+          updated_at = ?
+        WHERE id = ? AND status = 'ACTIVE' AND role = 'USER'
+          AND is_privileged_support = 0 AND anonymized_at IS NULL`
+    ).bind(password.hash, password.salt, password.algorithm, password.iterations, expiresAt, nowString, target.id),
+    env.DB.prepare(
+      `UPDATE user_sessions SET revoked_at = ?
+        WHERE user_id = ? AND revoked_at IS NULL
+          AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_reset_expires_at = ?)`
+    ).bind(nowString, target.id, target.id, expiresAt),
+    env.DB.prepare(
+      `INSERT INTO audit_events
+        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+       SELECT ?, NULL, 'SELF_SERVICE_PASSWORD_RESET', 'USER', ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND password_reset_expires_at = ?)`
+    ).bind(
+      newId("aud"),
+      target.id,
+      requestId(request),
+      JSON.stringify({ expiresInMinutes: 30 }),
+      nowString,
+      target.id,
+      expiresAt
+    )
+  ]);
+  await recordPasswordResetAttempt(env, key, results[0]?.meta.changes === 1);
+  return genericPasswordResetResponse();
+}
+
 function loginError(): AppError {
   return new AppError(401, "AUTHENTICATION_FAILED", "帳號、密碼或帳號狀態不正確。 ");
 }
@@ -116,14 +216,18 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
 
   const user = await env.DB.prepare(
     `SELECT id, username_normalized, display_name, branch_name, password_hash, password_salt,
-            password_iterations, status, role, is_privileged_support, credential_version
-       FROM users WHERE username_normalized = ?`
+            password_iterations, status, role, is_privileged_support, credential_version,
+            password_change_required, password_reset_expires_at
+       FROM users WHERE username_normalized = ? AND anonymized_at IS NULL`
   ).bind(input.username).first<UserAuthRow>();
   const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
   const passwordValid = user
     ? await verifyPassword(input.password, user.password_hash, user.password_salt, user.password_iterations, env.EMPLOYEE_LOOKUP_KEY)
     : (await hashPassword(input.password || "invalid-password", iterations, env.EMPLOYEE_LOOKUP_KEY), false);
-  const allowed = Boolean(user && passwordValid && user.status === "ACTIVE");
+  const resetWindowValid = !user?.password_change_required || Boolean(
+    user.password_reset_expires_at && Date.parse(user.password_reset_expires_at) > Date.now()
+  );
+  const allowed = Boolean(user && passwordValid && user.status === "ACTIVE" && resetWindowValid);
   await recordAttempt(env, key, "LOGIN", allowed);
   if (!allowed || !user) throw loginError();
 
@@ -150,7 +254,10 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
       username: user.username_normalized,
       displayName: user.display_name,
       branchName: user.branch_name,
-      role: effectiveRole(user.role, user.is_privileged_support)
+      role: effectiveRole(user.role, user.is_privileged_support),
+      credentialVersion: user.credential_version,
+      passwordChangeRequired: user.password_change_required === 1,
+      passwordResetExpiresAt: user.password_reset_expires_at
     }
   });
   response.headers.append("set-cookie", sessionCookie(sessionToken));
@@ -176,6 +283,93 @@ export async function requireCsrf(request: Request, session: SessionContext): Pr
 
 export function sessionInfo(session: SessionContext): Response {
   return jsonResponse({ user: session.user });
+}
+
+export async function changePassword(request: Request, env: AppEnv, session: SessionContext): Promise<Response> {
+  requireSameOrigin(request);
+  await requireCsrf(request, session);
+  const input = normalizePasswordChangeInput(await readJson(request));
+  if (input.newPassword === TEMPORARY_RESET_PASSWORD) {
+    throw new AppError(422, "PASSWORD_TOO_WEAK", "新密碼不得使用 12 個 0。 ");
+  }
+
+  const user = await env.DB.prepare(
+    `SELECT password_hash, password_salt, password_iterations
+       FROM users WHERE id = ? AND status = 'ACTIVE' AND anonymized_at IS NULL`
+  ).bind(session.user.id).first<{
+    password_hash: string;
+    password_salt: string;
+    password_iterations: number;
+  }>();
+  if (!user) throw new AppError(401, "AUTHENTICATION_REQUIRED", "登入已失效，請重新登入。 ");
+
+  const currentValid = await verifyPassword(
+    input.currentPassword,
+    user.password_hash,
+    user.password_salt,
+    user.password_iterations,
+    env.EMPLOYEE_LOOKUP_KEY
+  );
+  if (!currentValid) throw new AppError(401, "CURRENT_PASSWORD_INVALID", "目前密碼不正確。 ");
+  if (await verifyPassword(
+    input.newPassword,
+    user.password_hash,
+    user.password_salt,
+    user.password_iterations,
+    env.EMPLOYEE_LOOKUP_KEY
+  )) {
+    throw new AppError(422, "PASSWORD_UNCHANGED", "新密碼不可與目前密碼相同。 ");
+  }
+
+  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
+  const password = await hashPassword(input.newPassword, iterations, env.EMPLOYEE_LOOKUP_KEY);
+  const now = nowIso();
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users SET password_hash = ?, password_salt = ?, password_algorithm = ?,
+          password_iterations = ?, password_change_required = 0,
+          password_reset_expires_at = NULL, credential_version = credential_version + 1,
+          updated_at = ? WHERE id = ? AND status = 'ACTIVE' AND anonymized_at IS NULL
+          AND credential_version = ?`
+    ).bind(
+      password.hash,
+      password.salt,
+      password.algorithm,
+      password.iterations,
+      now,
+      session.user.id,
+      session.user.credentialVersion
+    ),
+    env.DB.prepare(
+      `UPDATE user_sessions SET revoked_at = ?
+        WHERE user_id = ? AND revoked_at IS NULL
+          AND EXISTS (SELECT 1 FROM users WHERE id = ? AND credential_version = ? AND updated_at = ?)`
+    ).bind(now, session.user.id, session.user.id, session.user.credentialVersion + 1, now),
+    env.DB.prepare(
+      `INSERT INTO audit_events
+        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+       SELECT ?, ?, 'PASSWORD_CHANGED', 'USER', ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND credential_version = ? AND updated_at = ?)`
+    ).bind(
+      newId("aud"),
+      session.user.id,
+      session.user.id,
+      requestId(request),
+      JSON.stringify({ forcedReset: session.user.passwordChangeRequired }),
+      now,
+      session.user.id,
+      session.user.credentialVersion + 1,
+      now
+    )
+  ]);
+  if (results[0]?.meta.changes !== 1) {
+    throw new AppError(409, "PASSWORD_CHANGE_CONFLICT", "帳號狀態已變更，請重新登入後再試。 ");
+  }
+
+  const response = jsonResponse({ status: "PASSWORD_CHANGED", loginRequired: true });
+  response.headers.append("set-cookie", sessionCookie("", true));
+  response.headers.append("set-cookie", csrfCookie("", true));
+  return response;
 }
 
 export async function logout(request: Request, env: AppEnv, session: SessionContext): Promise<Response> {
@@ -321,7 +515,7 @@ export async function listAccounts(env: AppEnv, session: SessionContext): Promis
             u.is_privileged_support, u.status, u.created_at,
             (SELECT MAX(s.last_seen_at) FROM user_sessions s WHERE s.user_id = u.id) AS last_seen_at,
             (SELECT COUNT(*) FROM rfqs r WHERE r.user_id = u.id) AS rfq_count
-       FROM users u ORDER BY u.created_at ASC LIMIT 500`
+       FROM users u WHERE u.anonymized_at IS NULL ORDER BY u.created_at ASC LIMIT 500`
   ).all<AccountRow>();
   const accounts = result.results.map(row => ({
     id: row.id,
@@ -385,11 +579,11 @@ export async function disableAccount(request: Request, env: AppEnv, session: Ses
   return jsonResponse({ userId, status: "DISABLED" });
 }
 
-// Permanently remove a disabled plain USER that has never created an RFQ. This deliberately
-// preserves financial/audit history by refusing any account referenced by rfqs.user_id.
-// Cascades remove sessions and idempotency keys; other user references become NULL per schema.
+// Remove the identifying account data of a disabled plain USER while retaining its opaque user
+// id as the owner of historical RFQs. Replacing both unique identifiers releases the login and
+// employee number for a new registration without deleting financial or audit records.
 export async function deleteAccountPermanently(request: Request, env: AppEnv, session: SessionContext, userId: string): Promise<Response> {
-  requireAdmin(session);
+  requireAdminOrPs(session);
   requireSameOrigin(request);
   await requireCsrf(request, session);
   if (userId === session.user.id) throw new AppError(422, "ACCOUNT_SELF_TARGET", "無法永久刪除自己的帳號。 ");
@@ -403,7 +597,7 @@ export async function deleteAccountPermanently(request: Request, env: AppEnv, se
   const target = await env.DB.prepare(
     `SELECT u.username_normalized, u.role, u.is_privileged_support, u.status,
             (SELECT COUNT(*) FROM rfqs r WHERE r.user_id = u.id) AS rfq_count
-       FROM users u WHERE u.id = ?`
+       FROM users u WHERE u.id = ? AND u.anonymized_at IS NULL`
   ).bind(userId).first<{
     username_normalized: string;
     role: "USER" | "ADMIN";
@@ -418,27 +612,63 @@ export async function deleteAccountPermanently(request: Request, env: AppEnv, se
   if (target.status !== "DISABLED") {
     throw new AppError(409, "ACCOUNT_DELETE_REQUIRES_DISABLED", "請先剔除帳號，再執行永久刪除。 ");
   }
-  if (target.rfq_count > 0) {
-    throw new AppError(409, "ACCOUNT_HAS_RFQS", "此帳號已有詢價紀錄，為保留金融與稽核資料，不得永久刪除。 ");
-  }
   if (!confirmation || confirmation !== target.username_normalized) {
     throw new AppError(422, "ACCOUNT_DELETE_CONFIRMATION_MISMATCH", "永久刪除確認文字與登入帳號不符。 ");
   }
 
-  await env.DB.prepare(
-    `DELETE FROM users
-      WHERE id = ? AND role = 'USER' AND is_privileged_support = 0 AND status = 'DISABLED'`
-  ).bind(userId).run();
-  const remaining = await env.DB.prepare("SELECT 1 AS present FROM users WHERE id = ?")
-    .bind(userId).first<{ present: number }>();
-  if (remaining) {
+  const now = nowIso();
+  const tombstone = randomToken(18);
+  const iterations = positiveInteger(env.PASSWORD_PBKDF2_ITERATIONS, 10_000);
+  const unusablePassword = await hashPassword(randomToken(48), iterations, env.EMPLOYEE_LOOKUP_KEY);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users SET username_normalized = ?, display_name = '已刪除使用者', branch_name = '已刪除',
+          employee_number_ciphertext = 'REDACTED', employee_number_iv = 'REDACTED',
+          employee_number_lookup_hash = ?, password_hash = ?, password_salt = ?,
+          password_algorithm = ?, password_iterations = ?, password_change_required = 0,
+          password_reset_expires_at = NULL, rejection_reason = NULL,
+          credential_version = credential_version + 1, anonymized_at = ?, updated_at = ?
+        WHERE id = ? AND role = 'USER' AND is_privileged_support = 0
+          AND status = 'DISABLED' AND anonymized_at IS NULL`
+    ).bind(
+      `deleted-${tombstone}`,
+      `deleted-${tombstone}`,
+      unusablePassword.hash,
+      unusablePassword.salt,
+      unusablePassword.algorithm,
+      unusablePassword.iterations,
+      now,
+      now,
+      userId
+    ),
+    env.DB.prepare(
+      `DELETE FROM user_sessions WHERE user_id = ?
+        AND EXISTS (SELECT 1 FROM users WHERE id = ? AND anonymized_at = ?)`
+    ).bind(userId, userId, now),
+    env.DB.prepare(
+      `DELETE FROM idempotency_keys WHERE user_id = ?
+        AND EXISTS (SELECT 1 FROM users WHERE id = ? AND anonymized_at = ?)`
+    ).bind(userId, userId, now),
+    env.DB.prepare(
+      `INSERT INTO audit_events
+        (id, actor_user_id, action, entity_type, entity_id, request_id, safe_metadata_json, created_at)
+       SELECT ?, ?, 'ACCOUNT_PERSONAL_DATA_DELETED', 'USER', ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND anonymized_at = ?)`
+    ).bind(
+      newId("aud"),
+      session.user.id,
+      userId,
+      requestId(request),
+      JSON.stringify({ previousStatus: "DISABLED", preservedRfqCount: target.rfq_count }),
+      now,
+      userId,
+      now
+    )
+  ]);
+  if (results[0]?.meta.changes !== 1) {
     throw new AppError(409, "ACCOUNT_DELETE_CONFLICT", "帳號狀態已變更，請重新載入後再試。 ");
   }
-  await insertAudit(env, "ACCOUNT_PERMANENTLY_DELETED", "USER", userId, session.user.id, requestId(request), {
-    previousStatus: "DISABLED",
-    rfqCount: 0
-  });
-  return jsonResponse({ userId, status: "DELETED" });
+  return jsonResponse({ userId, status: "ANONYMIZED", preservedRfqCount: target.rfq_count });
 }
 
 // Look up which existing account holds a given employee number. ADMIN only, because it maps the
@@ -458,7 +688,7 @@ export async function lookupAccountByEmployeeNumber(request: Request, env: AppEn
   const lookupHash = await keyedHash(env.EMPLOYEE_LOOKUP_KEY, employeeNumber);
   const row = await env.DB.prepare(
     `SELECT id, username_normalized, display_name, branch_name, role, is_privileged_support, status, created_at
-       FROM users WHERE employee_number_lookup_hash = ?`
+       FROM users WHERE employee_number_lookup_hash = ? AND anonymized_at IS NULL`
   ).bind(lookupHash).first<{
     id: string;
     username_normalized: string;

@@ -89,7 +89,9 @@ beforeAll(async () => {
       displayName: "Phase 3 User",
       branchName: "測試分行",
       role: "USER",
-      credentialVersion: 1
+      credentialVersion: 1,
+      passwordChangeRequired: false,
+      passwordResetExpiresAt: null
     }
   };
 });

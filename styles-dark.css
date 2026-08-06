@@ -215,3 +215,29 @@
 .earnings-advisory-list li { background: #ffffff14; }
 .earnings-advisory-list span, .earnings-advisory-note { color: var(--label-2); }
 .earnings-advisory-lead, .earnings-advisory-unavailable { color: #ffb340; }
+
+/* Surfaces and helper text the earlier dark passes never reached ------------------------------
+   Found by forcing every <dialog> open and clearing [hidden], because these only exist once a
+   user has signed in and opened something — a sweep of the landing page cannot see them, which is
+   why they survived several rounds of contrast work. */
+
+/* The quote-image preview header sat at 1.45:1: .quote-preview-panel is in the elevated-surface
+   list but was missing from the heading list next to it. */
+.preview-heading h2 { color: var(--label); }
+.preview-heading p, .preview-heading .eyebrow { color: var(--label-2); }
+
+/* Explanatory copy that still carried its light-mode ink on a dark panel. */
+.backend-archive-note,
+.backend-analysis-loading,
+.backend-analysis-lead,
+.backend-market-status,
+.email-compose-actions small { color: var(--label-2); }
+.artifact-pending { background: #ffffff14; color: var(--label-2); }
+
+/* The finalize confirmation kept a light mint gradient, so the accent-coloured 繼續等待 button
+   inside it was bright teal on near-white: 1.76:1. Darkening the panel fixes the button too,
+   rather than restyling the button for a surface that should not have been light. */
+.backend-finalize-confirm {
+  background: var(--bg-inset); border-color: var(--accent); color: var(--label);
+}
+.backend-finalize-confirm strong { color: var(--accent-strong); }

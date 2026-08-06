@@ -105,6 +105,21 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   `backend/scripts/prepare-assets.mjs` allowlist or it will 404 in production. When changing any
   stylesheet, bump the `?v=` token in every page that links it — content changes without a token
   bump reach the edge but not the browser.
+- **Never read or write a non-ASCII file here with PowerShell's `Get-Content` / `Set-Content`.**
+  Windows PowerShell 5.1 decodes with the system ANSI codepage unless the file carries a UTF-8 BOM,
+  so `Get-Content -Raw` on `index.html` turns every Chinese character into mojibake and writing that
+  back corrupts the file — `-Encoding utf8` on the write does not help, because the damage happened
+  on the read. This has already destroyed `index.html` and `guide.html` once; `git checkout --` was
+  the recovery. Use the Edit tool, or a byte-oriented `sed` when the search and replacement strings
+  are pure ASCII (a cache-token bump qualifies). The same decoding rule is why any helper `.ps1`
+  must be ASCII-only: there the quoting breaks and the rest of the script is echoed instead of run.
+- Node is not on the default PATH. It lives at
+  `C:\Users\editi\AppData\Local\OpenAI\Codex\runtimes\cua_node\<hash>\bin`, and **the hash changes
+  when the runtime updates**, so do not paste a path from an older transcript. Resolve it each time,
+  e.g. ``export PATH="$(ls -1d /c/Users/editi/AppData/Local/OpenAI/Codex/runtimes/cua_node/*/bin |
+  head -1):$PATH"``. `npx.cmd` also invokes `node` by bare name, so a full path to `npx` alone still
+  fails; the directory has to be on PATH. A spawned terminal that lacks it exits immediately and
+  leaves a normal prompt — which is how a pasted secret once ran as a shell command.
 - `vendor/` holds self-hosted third-party browser assets (html2canvas). Do not edit them, and do
   not restore a CDN `<script>` — bank networks block CDNs, which would push image rendering back
   onto the metered Browser Rendering path. See `vendor/README.md` for provenance and the recorded

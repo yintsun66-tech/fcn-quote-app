@@ -1,12 +1,14 @@
 # Project handoff
 
-Updated: 2026-08-07 (Asia/Taipei)
+Updated: 2026-08-08 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; the performance implementation sequence is
+Current branch: `codex/market-analysis-phase2-4`, latest pushed commit `10a2931`, deployed as
+Worker `7da0d4a9-61f5-406c-b130-fce1a7e37d0d`. Verification baseline is **28 test files /
+218 tests**. The performance implementation sequence is
 `01d811e`, `d95f2ff` and `24714eb`, followed by the deployment-record commit. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
-feature branch has 33 after this deployment-record commit), so neither branch should be described
+feature branch has 43), so neither branch should be described
 as a simple byte-identical copy or
 merged without first reviewing both sides. Recount with
 `git rev-list --count main..HEAD` rather than trusting the figure written here — it goes stale on
@@ -23,6 +25,60 @@ source commit and no version ID, because keeping an ID current there would requi
 the number that the deploy itself invalidates — this file can carry one only because it is not a
 published asset. Current local verification baseline is **28 test files / 218 tests**; lower counts
 recorded elsewhere are historical.
+
+## UI human-factors review, and the four changes it produced (deployed 2026-08-08)
+
+A full UI inventory and human-factors review was produced as a separate report. Its four
+recommendations were implemented in `15c9f4b` (the first three) and `10a2931` (the fourth).
+
+**Read this first if you are about to trust a number in that report.** It claimed seventeen
+responsive breakpoints. There are six. The grep behind the figure counted `max-width` CSS
+*properties* — dialog widths such as `min(1180px, 96vw)` — alongside actual media queries, and the
+same breakpoint appearing in three spellings inflated it further. The finding was corrected before
+acting on it, and the correction changed what shipped. Measure `@media` queries specifically.
+
+**Resumable sending** (`fcn-quote-app.mail-queue.v1`). The static build's mail queue now survives a
+reload. It was the only piece of state whose loss reached outside the browser: the operator sends up
+to eight emails by hand, and a reload at email five reset the counter with no way to tell which
+issuers had already received one — a duplicate RFQ at an issuer is not recoverable. **The built
+payloads are stored, not the institution keys**, so a resumed run sends exactly what the earlier
+emails contained even if the table has since been edited; rebuilding from the current table would
+let email six silently disagree with emails one to five. An interrupted run offers itself on load as
+a banner, not a modal, because a dialog that opens before the operator has looked at the page gets
+dismissed on reflex and dismissing this one discards what it exists to protect.
+
+**Undo rather than confirmation.** 刪除最後一筆 and 清除本機暫存 destroyed up to 420 input cells with
+no confirmation and no way back, made worse by the autosave teaching people that the page remembers.
+Both now act immediately and offer 復原 for twelve seconds. A confirmation would slow every correct
+use to guard against the rare wrong one and trains people to click through it. One level, not a
+stack: it covers the mis-click without implying a history the page cannot keep across a reload.
+
+**Jump to field.** Each earnings-advisory entry is now a button that scrolls its underlying into
+view and focuses it. The advisory summarises the whole batch so it belongs at the top, but with 21
+columns and up to 20 trades the field that triggered it can be far below and scrolled off-screen.
+
+**Breakpoints — settled, not consolidated.** Reading what each one governs showed they encode
+distinct concerns rather than duplication: `760`/`761` is the structural one that turns the table
+into stacked cards and is depended on by CLAUDE.md; `600` and `700` are both backend-dialog
+internals; `460` is page chrome on small phones; `900` stacks two headers. Merging `600` into `700`
+would push twenty-one dialog rules a hundred pixels wider and change how dialogs look on a tablet —
+a visible change dressed as a refactor, so it was not done. What shipped: one spelling for all 22
+width queries, the two `430px` blocks folded into `460px` in place, and **the set documented in a
+comment at the head of the media queries in `styles.css`, including why `600` and `700` stay
+apart** — plain CSS cannot express breakpoints as tokens, so that comment is the only place the set
+is written down. Add to an existing breakpoint rather than introducing a sixth.
+
+Behaviour was proven unchanged rather than asserted: normalising both revisions to a comment-free,
+whitespace-free rule stream left exactly one difference, the intended `430`→`460` fold.
+
+Deployed set is `460/600/700/760/900` with the `761` and `901` pairs. Verified live: undo restores
+3 rows after deleting and after clearing; an interrupted queue at index 4 renders
+「停在第 5 / 8 封，前 4 封已寄出」 with both actions, and discarding clears the key.
+
+**Note for the next agent.** Two agents worked this tree on 2026-08-07/08. Everything reconciled —
+`1a12f82` is an ancestor of the current head and no work was lost — but CLAUDE.md's rule about not
+letting two agents share a working tree earned its place today. Check `git log` before assuming the
+tree is where you left it.
 
 ## Frontend startup and outbound telemetry (committed, pushed and deployed)
 

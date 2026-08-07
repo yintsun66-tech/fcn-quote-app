@@ -1,8 +1,8 @@
 # Project handoff
 
-Updated: 2026-08-06 (Asia/Taipei)
+Updated: 2026-08-07 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `0aa4f60`. The deployed
+Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `1a12f82`. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
 feature branch has 32), so neither branch should be described as a simple byte-identical copy or
@@ -18,7 +18,7 @@ Every
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
 source commit and no version ID, because keeping an ID current there would require a deploy to fix
 the number that the deploy itself invalidates — this file can carry one only because it is not a
-published asset. Current local verification baseline is **28 test files / 217 tests**; lower counts
+published asset. Current local verification baseline is **28 test files / 218 tests**; lower counts
 recorded elsewhere are historical.
 
 For the 2026-08-06 account release, the API health endpoint returned 200, the cache-bypassed index
@@ -26,6 +26,29 @@ contained the `account-recovery-v1` token, and the deployed `backend-client.js` 
 committed local file. Wrangler reported four modified assets uploaded and 14 existing assets
 reused. Earlier all-asset comparisons are historical evidence, not proof for a future deploy; a
 clean `git status` alone never proves that production is running the committed tree.
+
+## Static requester trace labels (implemented locally, not committed or deployed, 2026-08-07)
+
+The GitHub Pages/static workflow now requires a branch name and five-digit employee number before
+manual mail preparation or browser quote-image generation. The normalized values are saved only in
+that browser under `fcn-quote-app.static-requester.v1`, remain editable from the page, and are
+explicitly presented as tracing labels rather than login or authorization evidence. Backend mode
+(`app.yintsun66.com` or `?backend=1`) does not activate this dialog and continues to use its
+authenticated account identity.
+
+All eight static email subjects preserve their existing issuer/product prefix and append
+`<分行名稱> 行編<五碼行編>`; the shared helper strips unsafe subject characters and validates the
+five digits. Browser-generated static quote sheets add `製圖行編：<五碼行編>` to the bottom footer.
+No email table columns or backend outbound subjects changed.
+
+Files changed: `index.html`, `app.js`, `backend/shared/email-formats.js` plus its `.d.ts`, and the
+email-format regression test. Browser verification covered first-entry enforcement, persistence
+after reload, the exact BMJB subject, quote-image footer, successful PNG generation, and backend
+mode isolation. `node --check app.js` passes; all 28 test files / 218 tests pass; TypeScript checks
+and Wrangler dry-run build pass outside the filesystem sandbox. No migration, dependency, lockfile,
+secret, Cloudflare binding or production resource changed. Preserve the user-owned untracked
+`.claude/` and `output/` directories. Smallest next step: review this diff, then commit/push and
+publish the static mirror only if explicitly requested.
 
 ## Dark-mode contrast in the signed-in dialogs (committed, pushed and deployed, 2026-08-07)
 

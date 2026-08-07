@@ -40,6 +40,11 @@ export const EMAIL_INSTITUTIONS: Readonly<Record<string, {
 export function buildEmailBody(columns: readonly { label: string }[], dataRows: readonly (readonly string[])[]): string;
 export function buildEmailHtml(columns: readonly { label: string }[], dataRows: readonly (readonly string[])[]): string;
 export function branchSubjectLabel(rawBranchName: string | null | undefined): string;
+export function buildStaticRequesterSubject(
+  baseSubject: string,
+  rawBranchName: string | null | undefined,
+  rawEmployeeNumber: string | number | null | undefined,
+): string;
 export function buildCorrelatedSubject(baseSubject: string, rfqToken: string, batchCode: string): string;
 export function buildProductAwareSubject(
   baseSubject: string,

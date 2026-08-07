@@ -1,7 +1,9 @@
 import {
   MAIL_INSTITUTION_ORDER as SHARED_MAIL_INSTITUTION_ORDER,
+  branchSubjectLabel,
   buildInstitutionEmail as buildSharedInstitutionEmail,
-} from "./backend/shared/email-formats.js?v=issuer-product-subject-v3";
+  buildStaticRequesterSubject,
+} from "./backend/shared/email-formats.js?v=static-requester-v1";
 import {
   HOTLIST_CONSENT_KEY,
   hotlistDescriptor,
@@ -18,6 +20,7 @@ import {
 
   const MAX_ROWS = 20;
   const DRAFT_STORAGE_KEY = "fcn-quote-app.trade-draft.v1";
+  const STATIC_IDENTITY_STORAGE_KEY = "fcn-quote-app.static-requester.v1";
   const ROW_CHANGE_DEBOUNCE_MS = 250;
   const MAIL_TO = "i14053@firstbank.com.tw";
   const DEFAULT_MAIL_SUBJECT = "BMJB[詢價]FCBKTPE: FCN(T+7)";
@@ -39,6 +42,15 @@ import {
   const tradeNavigator = document.querySelector("#tradeNavigator");
   const tradeShortcuts = document.querySelector("#tradeShortcuts");
   const activeTradeLabel = document.querySelector("#activeTradeLabel");
+  const staticIdentityNotice = document.querySelector("#staticIdentityNotice");
+  const staticIdentitySummary = document.querySelector("#staticIdentitySummary");
+  const staticIdentityDialog = document.querySelector("#staticIdentityDialog");
+  const staticIdentityForm = document.querySelector("#staticIdentityForm");
+  const staticBranchName = document.querySelector("#staticBranchName");
+  const staticEmployeeNumber = document.querySelector("#staticEmployeeNumber");
+  const staticIdentityError = document.querySelector("#staticIdentityError");
+  const isStaticSite = location.hostname !== "app.yintsun66.com"
+    && new URLSearchParams(location.search).get("backend") !== "1";
   let selectedIssuer = "BNP";
   let issuerDialogMode = "download";
   let emailQueue = [];
@@ -48,6 +60,7 @@ import {
   let bbgLookupPromise = null;
   let activeTradeIndex = 0;
   let tradeScrollFrame = 0;
+  let staticIdentity = null;
 
   const issuerProfiles = {
     BNP: { name: "BNP PARIBAS", shortName: "BNP", theme: "bnp" },
@@ -151,6 +164,79 @@ import {
   function setStatus(message = "", success = false) {
     status.textContent = message;
     status.classList.toggle("success", success);
+  }
+
+  function normalizedStaticIdentity(branchName, employeeNumber) {
+    const branchLabel = branchSubjectLabel(branchName);
+    const normalizedEmployeeNumber = String(employeeNumber ?? "").normalize("NFKC").trim();
+    if (!branchLabel) throw new Error("請輸入有效的分行名稱。");
+    if (!/^\d{5}$/.test(normalizedEmployeeNumber)) throw new Error("行編必須是五碼數字。");
+    return { version: 1, branchLabel, employeeNumber: normalizedEmployeeNumber };
+  }
+
+  function loadStaticIdentity() {
+    if (!isStaticSite) return null;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(STATIC_IDENTITY_STORAGE_KEY) ?? "null");
+      if (stored?.version !== 1) return null;
+      return normalizedStaticIdentity(stored.branchLabel, stored.employeeNumber);
+    } catch {
+      return null;
+    }
+  }
+
+  function syncStaticIdentityUi() {
+    if (!isStaticSite) return;
+    staticIdentityNotice.hidden = false;
+    staticIdentitySummary.textContent = staticIdentity
+      ? `${staticIdentity.branchLabel}｜行編 ${staticIdentity.employeeNumber}`
+      : "尚未設定";
+    if (!quotePreviewPanel.hidden) renderQuoteSheet();
+  }
+
+  function showStaticIdentityDialog() {
+    if (!isStaticSite || staticIdentityDialog.open) return;
+    staticBranchName.value = staticIdentity?.branchLabel ?? "";
+    staticEmployeeNumber.value = staticIdentity?.employeeNumber ?? "";
+    staticIdentityError.hidden = true;
+    staticIdentityDialog.showModal();
+    staticBranchName.focus();
+  }
+
+  function requireStaticIdentity() {
+    if (!isStaticSite || staticIdentity) return true;
+    showStaticIdentityDialog();
+    setStatus("請先輸入分行名稱與五碼行編，才能開始靜態版詢價或產圖。");
+    return false;
+  }
+
+  function setupStaticIdentity() {
+    if (!isStaticSite) return;
+    staticIdentity = loadStaticIdentity();
+    syncStaticIdentityUi();
+    document.querySelector("#editStaticIdentity").addEventListener("click", showStaticIdentityDialog);
+    staticIdentityDialog.addEventListener("cancel", event => {
+      if (!staticIdentity) event.preventDefault();
+    });
+    staticIdentityForm.addEventListener("submit", event => {
+      event.preventDefault();
+      try {
+        const identity = normalizedStaticIdentity(staticBranchName.value, staticEmployeeNumber.value);
+        staticIdentity = identity;
+        try {
+          window.localStorage.setItem(STATIC_IDENTITY_STORAGE_KEY, JSON.stringify(identity));
+        } catch {
+          setStatus("詢價身分已套用，但瀏覽器無法保存；下次開啟時需重新輸入。", true);
+        }
+        staticIdentityDialog.close();
+        syncStaticIdentityUi();
+        if (!status.textContent.includes("無法保存")) setStatus("已儲存靜態版詢價身分。", true);
+      } catch (error) {
+        staticIdentityError.textContent = error.message;
+        staticIdentityError.hidden = false;
+      }
+    });
+    if (!staticIdentity) queueMicrotask(showStaticIdentityDialog);
   }
 
   function createRow(copyFirstRow = false) {
@@ -543,7 +629,7 @@ import {
       <div class="quote-sheet-header-note"><strong>${quotes.length}</strong><span>筆詢價條件</span></div>
     </header>
     <div class="quote-card-grid">${quotes.map((quote, index) => quoteCardHtml(quote, index, profile)).join("")}</div>
-    <footer class="quote-sheet-disclaimer">本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer>`;
+    <footer class="quote-sheet-disclaimer">${isStaticSite && staticIdentity ? `製圖行編：${escapeHtml(staticIdentity.employeeNumber)}　｜　` : ""}本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer>`;
   }
 
   function ensureQuoteRowsValid() {
@@ -684,7 +770,13 @@ import {
     const records = rows.map(row => Object.fromEntries(
       fields.map(([name]) => [name, rowValue(row, name)])
     ));
-    return buildSharedInstitutionEmail(key, records);
+    const email = buildSharedInstitutionEmail(key, records);
+    if (!isStaticSite) return email;
+    if (!staticIdentity) throw new Error("請先輸入分行名稱與五碼行編。");
+    return {
+      ...email,
+      subject: buildStaticRequesterSubject(email.subject, staticIdentity.branchLabel, staticIdentity.employeeNumber),
+    };
   }
 
   async function copyEmailTable(html, plainText) {
@@ -784,6 +876,7 @@ import {
 
   function showMailIssuerDialog() {
     setStatus();
+    if (!requireStaticIdentity()) return;
     try {
       validatedMailRows();
       emailIssuerDialog.showModal();
@@ -846,6 +939,7 @@ import {
   });
   document.querySelector("#generateQuoteImage").addEventListener("click", () => {
     try {
+      if (!requireStaticIdentity()) return;
       ensureQuoteRowsValid();
       showIssuerDialog("download");
     } catch (error) { setStatus(error.message); }
@@ -998,5 +1092,6 @@ import {
   }
 
   if (!restoreDraft()) createRow();
+  setupStaticIdentity();
   scheduleTradeViewportSync();
 })();

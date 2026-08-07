@@ -162,6 +162,17 @@ export function branchSubjectLabel(rawBranchName) {
   return collapsed.endsWith("分行") ? collapsed : `${collapsed}分行`;
 }
 
+// Static GitHub Pages users do not have an authenticated application account. This suffix is a
+// trace label only: it makes a manually sent quote request easier to identify without changing the
+// issuer-routing prefix or pretending that the self-reported employee number is authentication.
+export function buildStaticRequesterSubject(baseSubject, rawBranchName, rawEmployeeNumber) {
+  const branchLabel = branchSubjectLabel(rawBranchName);
+  const employeeNumber = String(rawEmployeeNumber ?? "").normalize("NFKC").trim();
+  if (!branchLabel) throw new Error("Invalid static requester branch name.");
+  if (!/^\d{5}$/.test(employeeNumber)) throw new Error("Invalid static requester employee number.");
+  return `${baseSubject} ${branchLabel} 行編${employeeNumber}`;
+}
+
 export function buildCorrelatedSubject(baseSubject, rfqToken, batchCode) {
   if (/##|^(?:re|fw|fwd)\s*:/i.test(baseSubject)) throw new Error("Unsafe outbound base subject.");
   if (!/^[0-9A-HJKMNP-TV-Z]{10}$/.test(rfqToken)) throw new Error("Invalid RFQ correlation token.");

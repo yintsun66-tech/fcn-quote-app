@@ -6,6 +6,7 @@ import {
   buildCorrelatedSubject,
   buildInstitutionEmail,
   buildProductAwareSubject,
+  buildStaticRequesterSubject,
   type MailTradeRecord
 } from "../shared/email-formats.js";
 
@@ -109,6 +110,16 @@ describe("shared issuer email formats", () => {
     expect(branchSubjectLabel("   ")).toBe("");
     expect(branchSubjectLabel(null)).toBe("");
     expect(branchSubjectLabel("台".repeat(30)).length).toBeLessThanOrEqual(20 + 2);
+  });
+
+  it("adds a safe static requester trace suffix without changing the issuer subject prefix", () => {
+    expect(buildStaticRequesterSubject(
+      "SG[詢價]FCBKTPE: DRA(T+7)",
+      "台北CITI[SG]##分行",
+      "１４０５３",
+    )).toBe("SG[詢價]FCBKTPE: DRA(T+7) 台北分行 行編14053");
+    expect(() => buildStaticRequesterSubject("BMJB[詢價]FCBKTPE: FCN(T+7)", "OBU", "14053")).toThrow();
+    expect(() => buildStaticRequesterSubject("BMJB[詢價]FCBKTPE: FCN(T+7)", "營業部", "1405A")).toThrow();
   });
 
   it("uses the first trade product in the T+7 subject label and preserves branch/correlation order", () => {

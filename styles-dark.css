@@ -241,3 +241,14 @@
   background: var(--bg-inset); border-color: var(--accent); color: var(--label);
 }
 .backend-finalize-confirm strong { color: var(--accent-strong); }
+
+/* Undo, resume and the advisory jump buttons. The resume bar keeps the amber warning language
+   already used by the earnings advisory and the TIMEOUT chips, so the page has one vocabulary for
+   "needs your attention" rather than three. */
+.undo-bar { background: var(--bg-inset); color: var(--label); }
+.undo-bar-action { background: var(--accent); color: #08262b; }
+.resume-bar { background: #ff9f0a29; border-left-color: #ff9f0a; color: var(--label); }
+.resume-bar-action { background: #ffb340; color: #2b1c00; }
+.resume-bar-dismiss { border-color: #6b5320; color: var(--label-2); }
+.earnings-advisory-jump { background: #ffffff14; color: var(--label); }
+.earnings-advisory-jump:hover { background: #ffffff24; }

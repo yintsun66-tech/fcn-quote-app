@@ -350,3 +350,40 @@ dialog button.primary:hover { background:var(--accent-strong); }
 .earnings-advisory-note { margin-top: 9px; font-size: .84rem; }
 /* A failed lookup must read as "unknown", never as an all-clear. */
 .earnings-advisory-unavailable { margin-top: 9px; font-weight: 700; }
+
+/* Undo and resume bars, and the advisory's jump target -----------------------------------------
+   Both bars sit directly under the status line, where the eye already goes after an action. They
+   are transient, so they must not shift the table the moment they appear and again when they go —
+   hence a fixed min-height on the slot rather than a collapsing element. */
+.undo-bar, .resume-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  margin: 0 0 14px; padding: 11px 15px;
+  border-radius: var(--r-control); font-size: .92rem;
+}
+.undo-bar[hidden] { display: none; }
+.undo-bar { background: var(--bg-inset); color: var(--label); }
+.resume-bar { background: #fff4e6; color: #6b4415; border-left: 4px solid #c47a2c; }
+.undo-bar > span, .resume-bar > span { flex: 1 1 240px; }
+.undo-bar-action, .resume-bar-action, .resume-bar-dismiss {
+  min-height: 36px; padding: 6px 14px; border-radius: var(--r-control);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.undo-bar-action { border: 0; background: var(--accent); color: #fff; }
+.resume-bar-action { border: 0; background: #a2601f; color: #fff; }
+.resume-bar-dismiss { border: 1px solid #c9a77a; background: transparent; color: #6b4415; }
+@media (max-width: 760px) {
+  .undo-bar-action, .resume-bar-action, .resume-bar-dismiss { min-height: 44px; flex: 1; }
+}
+
+/* The advisory entries are buttons back to the field that produced them. */
+.earnings-advisory-jump {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 11px; border: 0; border-radius: var(--r-pill);
+  background: #ffffffcc; color: inherit; font: inherit; font-size: .88rem;
+  cursor: pointer; text-align: left;
+}
+.earnings-advisory-jump:hover { background: #fff; }
+.earnings-advisory-list li { padding: 0; background: none; }
+/* Brief highlight so the field is findable once the scroll lands. */
+.field-flash { box-shadow: 0 0 0 3px var(--accent); }
+@media (prefers-reduced-motion: reduce) { .field-flash { box-shadow: 0 0 0 3px var(--accent); } }

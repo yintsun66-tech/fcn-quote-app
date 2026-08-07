@@ -81,8 +81,15 @@ function render(payload) {
         const when = DAY_LABEL[String(hit.dayOffset)] || "";
         const hour = HOUR_LABEL[hit.hour] || "";
         const detail = [when, hour].filter(Boolean).join("・");
-        return `<li><b>${escapeHtml(hit.bbgCode)}</b>`
-          + `<span>${escapeHtml(hit.date)}${detail ? `　${escapeHtml(detail)}` : ""}</span></li>`;
+        // Each entry is a button back to the field that produced it. The advisory is a summary of
+        // the whole batch, so it belongs at the top — but with a 21-column table and up to 20
+        // trades, the input that triggered it can be far below and scrolled off to the right, and
+        // a warning you cannot navigate back to is a warning you have to hunt for.
+        return `<li><button type="button" class="earnings-advisory-jump"`
+          + ` data-bbg="${escapeHtml(hit.bbgCode)}">`
+          + `<b>${escapeHtml(hit.bbgCode)}</b>`
+          + `<span>${escapeHtml(hit.date)}${detail ? `　${escapeHtml(detail)}` : ""}</span>`
+          + `</button></li>`;
       })
       .join("");
     parts.push(
@@ -116,6 +123,28 @@ function render(payload) {
 
   target.innerHTML = parts.join("");
   target.hidden = parts.length === 0;
+
+  target.querySelectorAll(".earnings-advisory-jump").forEach(button => {
+    button.addEventListener("click", () => focusUnderlying(button.dataset.bbg || ""));
+  });
+}
+
+/** Scrolls the first field holding this BBG code into view and focuses it. */
+function focusUnderlying(bbgCode) {
+  const wanted = bbgCode.trim().toUpperCase();
+  if (!wanted) return;
+  for (const row of document.querySelectorAll("#quoteTable tbody tr")) {
+    for (const name of ["bbgCode1", "bbgCode2", "bbgCode3", "bbgCode4", "bbgCode5"]) {
+      const field = row.querySelector(`[name="${name}"]`);
+      if (!field || field.value.trim().toUpperCase() !== wanted) continue;
+      field.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      // focus() alone would scroll instantly and fight the smooth scroll above.
+      setTimeout(() => field.focus({ preventScroll: true }), 320);
+      field.classList.add("field-flash");
+      setTimeout(() => field.classList.remove("field-flash"), 1600);
+      return;
+    }
+  }
 }
 
 async function fetchWithTimeout(url, signal) {

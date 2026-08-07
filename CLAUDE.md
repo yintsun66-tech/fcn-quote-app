@@ -93,6 +93,13 @@ of truth. Do not infer current behavior from old chat transcripts or historical 
   browser-time budget), so do not reintroduce automatic rendering without re-measuring capacity.
   Client rasterization must keep its per-step timeouts: every await there can stall on mobile
   WebKit, and an unguarded one leaves the button stuck on 「產圖中…」 forever.
+- ADR 0036 keeps `backend-client.js` as the authentication/RFQ core. ADMIN controls,
+  market/risk analysis and quote-image rasterization live in lazy `backend-admin.mjs`,
+  `backend-analysis.mjs` and `backend-image.mjs`; `follow-board.mjs` remains its own page module.
+  Do not move those imports back to startup. Static GitHub Pages must not download
+  `backend-client.js`, and the self-hosted html2canvas must load only when a PNG is requested.
+  ADMIN RFQ diagnostics are the authority for create/queue/first-send/last-send timing; the
+  three-or-fewer issuer 20-second figure is a measured target, not an issuer-response SLA.
 - The light/dark appearance is user-selectable. `styles-dark.css` and `follow-board-dark.css` hold
   the dark rules verbatim and are linked with `media="(prefers-color-scheme: dark)"`; a pre-paint
   inline script rewrites that attribute from the `fcn-theme` `localStorage` key. **Do not fold them

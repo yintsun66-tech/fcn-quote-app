@@ -68,5 +68,6 @@ Do not put secrets, raw mail, user records, or personal data in an ADR.
 - [ADR 0033: Deliver follow-board LINE pushes to one personal chat](0033-line-personal-delivery.md)
 - [ADR 0034: Earnings-date advisory](0034-earnings-date-advisory.md)
 - [ADR 0035: Self-service password reset and account anonymization](0035-self-service-password-reset-and-account-anonymization.md)
+- [ADR 0036: Lazy frontend modules and outbound performance telemetry](0036-lazy-frontend-modules-and-outbound-performance.md)
 
 The current technical decisions are also summarized in `docs/backend/architecture.md`; when an ADR and a historical phase document disagree, verify current code/configuration and update the documentation in a dedicated change.

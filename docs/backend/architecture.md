@@ -140,6 +140,9 @@ Implemented logical queues:
 Every consumer must be idempotent, record attempts and terminal errors, and have a dead-letter path. A failure for one issuer or RFQ must not block another RFQ.
 Consumers use one-message, one-second batches with bounded per-queue concurrency to reduce
 batch-wait latency without creating unbounded parallel work.
+The outbound consumer is capped at 8 concurrent messages; email parsing and normalization stay at
+5, ranking and image rendering stay at 3. ADMIN diagnostics measure queue-to-first/last outbound
+delivery before any further tuning.
 
 ### Durable Object per RFQ
 
@@ -158,13 +161,13 @@ D1 is the structured source of truth for users, RFQs, trades, mail metadata, nor
 
 Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, generated PNG files, and the generated subject/HTML/plain-text archive for each outbound request email. Outbound archives use the `raw-email/outbound/` prefix and the same 30-day private mail retention policy. Downloads pass through an authenticated Worker or a short-lived signed URL. The bucket is never public.
 
-### Browser Rendering
+### Quote-card rendering
 
-- Renders an internal deterministic quote-card route from a finalized ranking snapshot.
-- Uses fixed viewport, device scale, fonts, background, and animation-disabled styling.
-- Creates a mobile-portrait image for the deterministic rank-one winner immediately after
-  finalization. The owner can request a rank 1–4 or custom-fifth quote image (ADR 0015).
-  A trade with no valid quote produces no image.
+- The default on-demand path returns server-authorized card HTML and rasterizes it in the user's
+  browser at a fixed mobile-portrait size. html2canvas is self-hosted and loaded only after the
+  user asks for a PNG.
+- Browser Rendering remains an idempotent server fallback with fixed viewport, device scale,
+  fonts, background and animation-disabled styling. A trade with no valid quote produces no image.
 - Uses the same issuer-specific color palette as the compatibility frontend, themed by each trade's winning issuer.
 - Uses the request trade date and displays the same complete `[RFQ:<10-character-code>]` reference carried by the outbound email subject. The displayed code is informational and is never accepted as authorization evidence.
 - Stores PNG output in private R2.
@@ -197,7 +200,8 @@ Private R2 stores raw MIME, approved attachments, sanitized parser artifacts, ge
    selection defaults to all eleven issuers and all eight batches.
 5. An idempotent send request queues only those batches. Selecting any BNP/MS/JPM/BARCLAYS issuer
    still queues the shared BMJB batch, while only explicitly selected issuers enter ranking.
-6. On successful dispatch, the UI reminder becomes `sent_at + 7 minutes`; the RFQ hard deadline
+6. D1 preserves RFQ creation/queue time and the first/last successful batch send time for safe
+   operational measurement. On successful dispatch, the UI reminder becomes `sent_at + 7 minutes`; the RFQ hard deadline
    becomes `sent_at + 15 minutes`, and its Durable Object alarm is set.
 
 ### 3. Reply ingestion
@@ -244,12 +248,13 @@ a new version and may admit only finite, matched, non-rejected late values.
   sixty-second grace ends.
 - It shows issuer status, the first four economic ranks, a fifth issuer selector, invalid/no-quote
   reasons, countdown/final status, and artifacts.
-- Each trade's deterministic rank-one image is queued automatically. Ranks 1–4 and the selected
-  fifth issuer can create or reuse one idempotent, owner-scoped image job for that exact quote.
-- A failed image exposes an owner-only **重新產圖** action. Reusing the same endpoint resets and
-  re-enqueues the existing idempotent job; Browser Rendering failures retain only a safe
-  request/HTTP category and never the response body.
-- Server-rendered quote cards use a fixed portrait viewport so browser zoom and scroll do not affect the PNG.
+- Images are on demand only. Ranks 1–4 and the selected fifth issuer first use the lazy browser
+  renderer; a local failure creates or reuses one idempotent, owner-scoped server image job.
+- A failed server image exposes an owner-only **重新產圖** action. Reusing the same endpoint resets
+  and re-enqueues the existing job; Browser Rendering failures retain only a safe request/HTTP
+  category and never the response body.
+- Both local and server-rendered quote cards use a fixed portrait profile so browser zoom and
+  scroll do not affect the PNG dimensions.
 - Ties retain the same economic rank; the earliest valid receipt is selected only where a single deterministic image winner is required.
 
 ## RFQ lifecycle

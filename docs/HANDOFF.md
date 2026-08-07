@@ -2,8 +2,8 @@
 
 Updated: 2026-08-07 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; latest implementation commit is `326dfac`, with
-this deployment-record update immediately after it. The deployed
+Current branch: `codex/market-analysis-phase2-4`; the latest performance implementation commits
+are `01d811e` and `d95f2ff`, followed by the current documentation commit. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
 feature branch has 32), so neither branch should be described as a simple byte-identical copy or
@@ -21,6 +21,60 @@ source commit and no version ID, because keeping an ID current there would requi
 the number that the deploy itself invalidates — this file can carry one only because it is not a
 published asset. Current local verification baseline is **28 test files / 218 tests**; lower counts
 recorded elsewhere are historical.
+
+## Frontend startup and outbound telemetry (committed locally, not pushed or deployed)
+
+The ADR 0036 performance change is split into `01d811e` (`perf(frontend)`) and `d95f2ff`
+(`feat(admin)`), followed by the current documentation commit. It has **not** been pushed,
+merged, deployed or copied to the independent `fcnV2` static repository. Therefore the live
+Cloudflare and GitHub Pages sites still have their previously deployed behavior, and outbound
+Queue concurrency remains unchanged in production until an explicitly authorized deployment.
+
+Low-risk startup changes:
+
+- `index.html` imports the authenticated backend only on `app.yintsun66.com` or with `?backend=1`;
+  static GitHub Pages no longer downloads dormant backend/ADMIN/analysis/image code.
+- The self-hosted html2canvas is no longer a startup script. `html2canvas-loader.mjs` loads it once,
+  with a 12-second timeout and retry after failure, when static quote cards, backend quote cards or
+  follow-board cards actually request a PNG.
+- `earnings-advisory.mjs` keys requests by the sorted unique underlying set, suppresses identical
+  in-flight calls, reuses the last successful identical response and aborts a superseded request.
+  Backend/follow-board API calls now have explicit timeouts instead of leaving a permanent loading
+  state after a network fault.
+
+The authenticated frontend is split at runtime: `backend-client.js` is the login/RFQ/result core
+and is about 71 KB instead of about 131 KB; `backend-admin.mjs` (~28 KB),
+`backend-analysis.mjs` (~32 KB, including its deferred market imports) and `backend-image.mjs`
+(~8 KB) load on first use. `follow-board.mjs` remains an independent page module. The allowlisted
+asset build contains all four new modules; no generated asset is tracked.
+
+Outbound measurement and tuning:
+
+- Source configuration raises only `fcn-outbound-email` consumer concurrency from 5 to 8. Batch
+  size, retries, DLQ, idempotency and all other queues are unchanged.
+- The ADMIN RFQ timeline adds safe seven-day create→queue, queue→first-send,
+  first→last-send and queue→last-send aggregates, per-batch timing, and a three-or-fewer issuer
+  20-second target summary. Individual rows now expose the same stage durations and safe
+  first/last timestamps; no subject, body, quote value, token, message ID or R2 key is returned.
+- Synthetic regression data proves a three-issuer RFQ completed queue→last-send in 18 seconds and
+  was counted inside the 20-second target. Existing outbound tests prove three selected issuers
+  produce only their two physical batches through the one-round-trip submit path. This is not proof
+  that deployed traffic will remain within 10–20 seconds; confirm that from several real ADMIN
+  dashboard samples after deployment without sending a special bank test solely for measurement.
+
+Verification completed: root syntax checks passed for all changed/new JavaScript modules; direct
+source/test TypeScript checks passed; focused ADMIN/outbound tests passed 8/8; the complete suite
+passed **28 files / 218 tests**; and the Wrangler dry-run build passed outside the filesystem
+sandbox, reading 25 allowlisted public files. The first sandboxed dry-run failed only because
+Wrangler could not read its parent path/write its own AppData log; the same build passed with
+normal filesystem access. No migration, secret, production dependency, lockfile, auth rule,
+ranking rule, mail format or production data changed. Preserve the untracked user-owned
+`.claude/` and `output/` directories.
+
+Smallest safe next step: review the three local commits. Only after explicit authorization should
+they be pushed and deployed;
+after deploy, verify conditional static loading, lazy image/analysis/admin paths and several real
+small-RFQ timing samples.
 
 For the 2026-08-06 account release, the API health endpoint returned 200, the cache-bypassed index
 contained the `account-recovery-v1` token, and the deployed `backend-client.js` SHA-256 matched the

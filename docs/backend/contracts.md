@@ -153,9 +153,12 @@ irreversible tombstone values. Sessions/idempotency keys are deleted, uniqueness
 ### Administrative RFQ diagnostics
 
 `GET /api/v1/admin/rfq-timelines?limit=...` remains `ADMIN`-only. It returns the recent safe RFQ
-timelines plus a seven-day `health` aggregate. The aggregate contains issuer counts/rates,
-unmatched/manual-review inbound counts, failed-artifact counts and machine-readable alerts. It
-never returns raw subjects, requester markers, correlation tokens, quote values, mail bodies,
+timelines plus seven-day `health` and `performance` aggregates. `performance` contains average
+create→queue, queue→first-send, first→last-send and queue→last-send durations, a three-or-fewer
+issuer 20-second target summary, and safe per-batch timing. Each timeline also exposes its expected
+issuer/batch counts and first/last outbound timestamps. `health` contains issuer counts/rates,
+unmatched/manual-review inbound counts, failed-artifact counts and machine-readable alerts. Neither
+aggregate returns raw subjects, requester markers, correlation tokens, quote values, mail bodies,
 private R2 keys or message IDs.
 
 ## RFQ API

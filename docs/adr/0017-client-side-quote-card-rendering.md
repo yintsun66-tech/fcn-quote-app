@@ -35,14 +35,14 @@ copy for the owner.
    `QUOTE_CARD_WIDTH_PX` is exported and used by both the render viewport and the client.
 4. **The HTML is returned inside JSON**, not as a rendered `text/html` response, so the API origin
    never serves renderable markup.
-5. **The client rasterizes it.** `backend-client.js` loads the document into an offscreen
+5. **The client rasterizes it.** The on-demand `backend-image.mjs` module loads the document into an offscreen
    `sandbox="allow-same-origin"` iframe — which lets html2canvas read the DOM while keeping scripts
    blocked — waits for `document.fonts.ready`, rasterizes with the same phone-size profile on every
    device (`scale` capped at 1.5 and canvas area capped at 4M pixels), and produces the PNG via
    `canvas.toBlob`. Nothing is queued and nothing is written to R2.
-6. **A server-side fallback is retained.** html2canvas is served from a CDN that some corporate
-   networks block. When `window.html2canvas` is unavailable the button falls back to the existing
-   server-rendered artifact request, so the image stays obtainable.
+6. **A server-side fallback is retained.** html2canvas is self-hosted under `vendor/` and is loaded
+   only after a PNG request through `html2canvas-loader.mjs`. When it cannot be loaded or local
+   rendering fails, the button falls back to the existing server-rendered artifact request.
 
 ## Consequences
 
@@ -59,4 +59,4 @@ copy for the owner.
   byte-canonical either; ADR 0018 (server-generated SVG) is the step that makes the artifact itself
   exactly reproducible.
 - No D1 migration, schema change, dependency, lockfile, mail format, authentication rule or binding
-  change is required. html2canvas was already loaded by the existing static mode.
+  change is required. ADR 0036 later made the existing self-hosted html2canvas load on demand.

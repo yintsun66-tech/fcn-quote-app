@@ -12,7 +12,7 @@ These instructions apply to Codex, Claude Code, and any other coding agent worki
 ## Repository map
 
 - Root `index.html`, `app.js`, and `styles.css`: compatibility static FCN/DAC interface, still deployable to GitHub Pages.
-- Root `backend-client.js`: application-domain login, RFQ workflow, result dialogs, and ADMIN controls. It activates only on `app.yintsun66.com` or with `?backend=1`.
+- Root `backend-client.js`: application-domain login, RFQ workflow and result core. It activates only on `app.yintsun66.com` or with `?backend=1`; ADMIN, analysis and quote-image code lives in lazy `backend-*.mjs` modules.
 - `backend/`: Cloudflare Worker, D1 migrations, Durable Object, Queue consumers, tests, and deployment configuration.
 - `shared/`: shared domain data used by the frontend/backend.
 - `docs/backend/`: implemented architecture, API contracts, data model, and phase notes.

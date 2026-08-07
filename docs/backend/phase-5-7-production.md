@@ -48,6 +48,7 @@ choose a fifth issuer outside those ranks.
 - Private R2: `fcn-quote-private`
 - Email route: `rfq@yintsun66.com`
 - Queues: `fcn-outbound-email`, `fcn-email-parse`, `fcn-quote-normalize`, `fcn-quote-rank`, `fcn-image-render`, each with a DLQ
+- Outbound Queue consumer concurrency: 8; other consumer limits remain unchanged in `wrangler.jsonc`
 - Durable Object: `RfqCoordinator`
 - Cron recovery: every two minutes
 - Browser binding: `BROWSER`

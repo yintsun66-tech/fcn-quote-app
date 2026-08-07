@@ -1,23 +1,9 @@
-import {
-  ANALYSIS_SCENARIOS,
-  buildFcnAnalysis,
-  parseIndicativeSpot,
-  spotStorageKey
-} from "./market-analysis.mjs?v=dac-analysis-v1";
-// The specifier must stay byte-identical to the one app.js uses: a different query string is a
-// different module URL, so the browser would download and instantiate this module a second time,
-// and a version bump would only bust one of the two copies.
-import {
-  MARKET_RESOURCE_CONSENT_KEY,
-  marketResourceDescriptor,
-  tradingViewWidgetUrl
-} from "./market-resources.mjs?v=market-hotlist-v4";
-
 (() => {
   "use strict";
   if (location.hostname !== "app.yintsun66.com" && new URLSearchParams(location.search).get("backend") !== "1") return;
 
   const api = "/api/v1";
+  const DEFAULT_API_TIMEOUT_MS = 20_000;
   const statusElement = document.querySelector("#status");
   const state = {
     user: null,
@@ -41,10 +27,11 @@ import {
     hasRankings: false,
     rfqListScope: "active",
     rfqListCursor: null,
-    rfqListItems: [],
-    analysisInput: null,
-    marketContextRequests: new Map()
+    rfqListItems: []
   };
+  let imageControllerPromise = null;
+  let analysisControllerPromise = null;
+  let adminControllerPromise = null;
 
   const shell = document.createElement("section");
   shell.className = "backend-shell";
@@ -193,6 +180,7 @@ import {
         <div class="backend-results-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h2>RFQ 處理時間軸</h2></div><button id="closeBackendRfqTimelines" type="button" class="secondary">關閉</button></div>
         <p class="backend-archive-note">僅顯示安全的處理狀態與耗時統計，不顯示郵件全文、RFQ token 或私人 R2 路徑。</p>
         <p id="backendRfqTimelinesError" class="backend-error" role="alert"></p>
+        <div id="backendRfqPerformance" class="backend-rfq-health"></div>
         <div id="backendRfqHealth" class="backend-rfq-health"></div>
         <div id="backendMarketHealth" class="backend-rfq-health"></div>
         <div id="backendRfqTimelinesList" class="backend-timeline-list"></div>
@@ -254,37 +242,14 @@ import {
   const mobileActionsLabel = document.querySelector("#backendMobileActionsLabel");
   const adminRegistrationsButton = document.querySelector("#backendAdminRegistrations");
   const adminRegistrationReviewDialog = document.querySelector("#backendRegistrationReview");
-  const adminRegistrationReviewList = document.querySelector("#backendRegistrationReviewList");
-  const adminRegistrationReviewError = document.querySelector("#backendRegistrationReviewError");
-  const adminRegistrationReviewStatus = document.querySelector("#backendRegistrationReviewStatus");
-  const adminRegistrationDuplicateNote = document.querySelector("#backendRegistrationDuplicateNote");
   const adminAccountsButton = document.querySelector("#backendAdminAccounts");
   const adminAccountsDialog = document.querySelector("#backendAccounts");
-  const adminAccountsList = document.querySelector("#backendAccountsList");
-  const adminAccountsError = document.querySelector("#backendAccountsError");
-  const adminAccountsStatus = document.querySelector("#backendAccountsStatus");
-  const accountLookupRow = document.querySelector("#backendAccountLookup");
-  const accountLookupInput = document.querySelector("#backendAccountLookupInput");
-  const accountLookupBtn = document.querySelector("#backendAccountLookupBtn");
-  const accountLookupResult = document.querySelector("#backendAccountLookupResult");
   const adminOutboundButton = document.querySelector("#backendAdminOutbound");
   const adminOutboundDialog = document.querySelector("#backendOutboundArchive");
-  const adminOutboundList = document.querySelector("#backendOutboundArchiveList");
-  const adminOutboundError = document.querySelector("#backendOutboundArchiveError");
-  const adminOutboundSubject = document.querySelector("#backendOutboundArchiveSubject");
-  const adminOutboundMeta = document.querySelector("#backendOutboundArchiveMeta");
-  const adminOutboundFrame = document.querySelector("#backendOutboundArchiveFrame");
   const adminTimelinesButton = document.querySelector("#backendAdminTimelines");
   const adminTimelinesDialog = document.querySelector("#backendRfqTimelines");
-  const adminTimelinesList = document.querySelector("#backendRfqTimelinesList");
-  const adminTimelinesError = document.querySelector("#backendRfqTimelinesError");
-  const adminRfqHealth = document.querySelector("#backendRfqHealth");
-  const adminMarketHealth = document.querySelector("#backendMarketHealth");
   const artifactContainer = document.querySelector("#backendArtifacts");
   const analysisView = document.querySelector("#backendAnalysisView");
-  const analysisContent = document.querySelector("#backendAnalysisContent");
-  const analysisError = document.querySelector("#backendAnalysisError");
-  const analysisBack = document.querySelector("#backendAnalysisBack");
 
   // Named "mobile" for historical reasons: the collapse was mobile-only until it was extended to
   // every width. Collapsed leaves 我的詢價 and the toggle visible; everything else is hidden.
@@ -305,13 +270,41 @@ import {
   }
 
   async function request(path, options = {}) {
-    const headers = new Headers(options.headers);
-    if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-    if (options.method && options.method !== "GET") {
+    const { timeoutMs = DEFAULT_API_TIMEOUT_MS, signal, ...fetchOptions } = options;
+    const headers = new Headers(fetchOptions.headers);
+    if (fetchOptions.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+    if (fetchOptions.method && fetchOptions.method !== "GET") {
       const csrf = cookie("__Host-fcn_csrf");
       if (csrf) headers.set("x-csrf-token", csrf);
     }
-    const response = await fetch(`${api}${path}`, { ...options, headers, credentials: "same-origin" });
+    const controller = new AbortController();
+    let timedOut = false;
+    const forwardAbort = () => controller.abort(signal?.reason);
+    if (signal?.aborted) forwardAbort();
+    else signal?.addEventListener("abort", forwardAbort, { once: true });
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, Math.max(1_000, Number(timeoutMs) || DEFAULT_API_TIMEOUT_MS));
+    let response;
+    try {
+      response = await fetch(`${api}${path}`, {
+        ...fetchOptions,
+        headers,
+        credentials: "same-origin",
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (timedOut) {
+        const timeoutError = new Error("伺服器回應逾時，請確認網路後再試一次。");
+        timeoutError.code = "REQUEST_TIMEOUT";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", forwardAbort);
+    }
     const isJson = response.headers.get("content-type")?.includes("application/json");
     const payload = isJson ? await response.json() : null;
     if (!response.ok) {
@@ -320,6 +313,61 @@ import {
       throw error;
     }
     return payload;
+  }
+
+  function loadImageController() {
+    if (!imageControllerPromise) {
+      imageControllerPromise = import("./backend-image.mjs?v=performance-modules-v1")
+        .then(({ createImageController }) => createImageController({
+          getRfqId: () => state.rfqId,
+          request,
+          resetSnapshot: () => { state.snapshotVersion = null; },
+          scheduleResultRefresh
+        }))
+        .catch(error => {
+          imageControllerPromise = null;
+          throw error;
+        });
+    }
+    return imageControllerPromise;
+  }
+
+  function requestArtifactFromButton(event) {
+    const target = event.target.closest("[data-artifact-trade]");
+    if (!target) return;
+    event.preventDefault();
+    void loadImageController()
+      .then(controller => controller.requestArtifact(target))
+      .catch(error => {
+        document.querySelector("#backendCountdown").textContent = error instanceof Error
+          ? error.message
+          : "無法載入報價圖功能。";
+      });
+  }
+
+  function loadAdminController() {
+    if (!adminControllerPromise) {
+      adminControllerPromise = import("./backend-admin.mjs?v=performance-modules-v1")
+        .then(({ createAdminController }) => createAdminController({
+          request,
+          getUser: () => state.user,
+          escapeHtml,
+          formatDateTime
+        }))
+        .catch(error => {
+          adminControllerPromise = null;
+          throw error;
+        });
+    }
+    return adminControllerPromise;
+  }
+
+  function openAdminFeature(method) {
+    void loadAdminController()
+      .then(controller => controller[method]())
+      .catch(error => {
+        statusElement.textContent = error instanceof Error ? error.message : "無法載入管理功能。";
+      });
   }
 
   function showAuth() {
@@ -469,517 +517,52 @@ import {
     return `${url.pathname}${url.search}`;
   }
 
-  function updateRfqUrl(rfqId, replace = false) {
-    const url = new URL(location.href);
-    if (rfqId) url.searchParams.set("rfq", rfqId);
-    else url.searchParams.delete("rfq");
-    history[replace ? "replaceState" : "pushState"]({ rfqId }, "", `${url.pathname}${url.search}${url.hash}`);
-  }
-
-  function percentText(value) {
-    if (value === null || value === undefined || value === "") return "—";
-    const number = Number(value);
-    return Number.isFinite(number) ? `${Number(number.toFixed(4))}%` : "—";
-  }
-
-  function numberText(value) {
-    if (value === null || value === undefined || value === "") return "—";
-    const number = Number(value);
-    return Number.isFinite(number)
-      ? number.toLocaleString("zh-TW", { maximumFractionDigits: 4 })
-      : "—";
-  }
-
-  function loadSpotDraft(rfqId, tradeCode, underlying) {
-    try {
-      const raw = localStorage.getItem(spotStorageKey(rfqId, tradeCode, underlying));
-      if (!raw) return { spot: null, observedAt: "" };
-      const parsed = JSON.parse(raw);
-      return {
-        spot: parseIndicativeSpot(parsed?.spot),
-        observedAt: typeof parsed?.observedAt === "string" ? parsed.observedAt : ""
-      };
-    } catch {
-      return { spot: null, observedAt: "" };
-    }
-  }
-
-  function saveSpotDraft(rfqId, tradeCode, underlying, spot, observedAt) {
-    try {
-      const key = spotStorageKey(rfqId, tradeCode, underlying);
-      if (spot === null && !observedAt) {
-        localStorage.removeItem(key);
-        return;
-      }
-      localStorage.setItem(key, JSON.stringify({ version: 1, spot, observedAt }));
-    } catch {
-      // Browsers may disable storage. Analysis still works for the current page session.
-    }
-  }
-
-  function localDateTimeValue() {
-    const now = new Date();
-    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-  }
-
-  function availableAnalysisQuotes(results, tradeCode) {
-    const trade = results?.trades?.find(item => item.tradeCode === tradeCode);
-    if (!trade) return [];
-    const seen = new Set();
-    return [
-      ...(trade.rankings ?? []).map(item => ({
-        quoteId: item.quoteId,
-        label: `第 ${item.rank} 名${item.tie ? "（同價）" : ""}｜${item.issuerDisplayName}`
-      })),
-      ...(trade.alternateQuotes ?? []).map(item => ({
-        quoteId: item.quoteId,
-        label: `自選候選｜${item.issuerDisplayName}`
-      }))
-    ].filter(item => {
-      if (seen.has(item.quoteId)) return false;
-      seen.add(item.quoteId);
-      return true;
-    });
-  }
-
   function isDacAnalysisProduct(product) {
     const normalized = String(product ?? "").normalize("NFKC").trim().replace(/\s+/gu, " ").toUpperCase();
     return ["DAC", "DRA", "WRA", "RANGE ACCRUAL"].includes(normalized);
   }
 
-  function renderAnalysisCalculation() {
-    const input = state.analysisInput;
-    const container = document.querySelector("#backendAnalysisCalculation");
-    if (!input || !container) return;
-    const spots = {};
-    analysisContent.querySelectorAll("[data-analysis-spot]").forEach(field => {
-      spots[field.dataset.analysisSpot] = field.value;
-    });
-    let analysis;
-    try {
-      analysis = buildFcnAnalysis(input.terms, spots, ANALYSIS_SCENARIOS);
-      analysisError.textContent = "";
-    } catch (error) {
-      container.innerHTML = "";
-      analysisError.textContent = error instanceof Error ? error.message : "無法建立分析。";
-      return;
+  function loadAnalysisController() {
+    if (!analysisControllerPromise) {
+      analysisControllerPromise = import("./backend-analysis.mjs?v=performance-modules-v1")
+        .then(({ createAnalysisController }) => createAnalysisController({
+          request,
+          escapeHtml,
+          formatDateTime,
+          analysisUrl,
+          rfqResultUrl,
+          onOpenRfq: rfqId => {
+            clearTimeout(state.timer);
+            state.rfqId = rfqId;
+          }
+        }))
+        .catch(error => {
+          analysisControllerPromise = null;
+          throw error;
+        });
     }
-
-    const levelRows = analysis.referenceLevels.map(level => `<tr>
-      <td><strong>${escapeHtml(level.underlying)}</strong></td>
-      <td>${numberText(level.spot)}</td>
-      <td>${numberText(level.strikePrice)}</td>
-      <td>${numberText(level.koPrice)}</td>
-      <td>${input.terms.barrierType === "NONE" ? "不適用" : numberText(level.kiPrice)}</td>
-    </tr>`).join("");
-    const scenarioRows = analysis.scenarios.map(row => {
-      const projected = row.projectedPrices.map(item => `${escapeHtml(item.underlying)}：${numberText(item.price)}`).join("<br>");
-      return `<tr>
-        <td>${row.changePct > 0 ? "+" : ""}${escapeHtml(row.changePct)}%</td>
-        <td>${escapeHtml(row.worstOfIndexPct)}%</td>
-        <td>${projected || "請先輸入參考現價"}</td>
-        <td>${escapeHtml(row.koAssessment)}</td>
-        <td>${escapeHtml(row.kiAssessment)}</td>
-        ${analysis.dacAccrualCondition ? `<td>${escapeHtml(row.accrualAssessment)}</td>` : ""}
-        <td>${escapeHtml(row.outcome)}</td>
-      </tr>`;
-    }).join("");
-    const dacNotice = analysis.dacAccrualCondition
-      ? `<aside class="backend-analysis-product-warning" role="note">
-          <strong>DAC／DRA 保息期後利息條件</strong>
-          <p>${escapeHtml(analysis.dacAccrualCondition.description)}</p>
-        </aside>`
-      : "";
-    const aki = analysis.akiBranches.length
-      ? `<section class="backend-analysis-paths"><h2>AKI 路徑分流</h2><div>${analysis.akiBranches.map(branch => `<article><h3>${escapeHtml(branch.title)}</h3><p>${escapeHtml(branch.description)}</p></article>`).join("")}</div></section>`
-      : "";
-    container.innerHTML = `
-      ${dacNotice}
-      <section class="backend-analysis-section">
-        <div class="backend-analysis-section-heading"><div><p class="eyebrow">REFERENCE LEVELS</p><h2>依參考現價換算的試算價位</h2></div>
-          <div class="backend-analysis-metrics"><span>KO 所需變動 <b>${percentText(analysis.metrics.koRequiredMovePct)}</b></span><span>KI 緩衝 <b>${percentText(analysis.metrics.kiBufferPct)}</b></span></div>
-        </div>
-        <div class="backend-analysis-table-wrap"><table><thead><tr><th>連結標的</th><th>參考現價</th><th>試算執行價</th><th>試算 KO 價</th><th>試算 KI 價</th></tr></thead><tbody>${levelRows}</tbody></table></div>
-      </section>
-      <section class="backend-analysis-section">
-        <p class="eyebrow">WORST-OF SCENARIOS</p><h2>最弱標的情境表</h2>
-        <p class="backend-analysis-note">情境以目前參考現價為 100，並假設所有標的同步變動；多標的判斷採最弱標的，不取平均。</p>
-        <div class="backend-analysis-table-wrap"><table><thead><tr><th>情境變動</th><th>最弱標的指數</th><th>試算價格</th><th>KO 判斷</th><th>KI／路徑判斷</th>${analysis.dacAccrualCondition ? "<th>保息期後利息</th>" : ""}<th>方向性說明</th></tr></thead><tbody>${scenarioRows}</tbody></table></div>
-      </section>
-      ${aki}
-      <p class="backend-analysis-disclaimer">${escapeHtml(analysis.disclaimer)}</p>`;
-  }
-
-  function marketResourceConsent() {
-    try {
-      return localStorage.getItem(MARKET_RESOURCE_CONSENT_KEY) === "granted";
-    } catch {
-      return false;
-    }
-  }
-
-  function setMarketResourceConsent(granted) {
-    try {
-      if (granted) localStorage.setItem(MARKET_RESOURCE_CONSENT_KEY, "granted");
-      else localStorage.removeItem(MARKET_RESOURCE_CONSENT_KEY);
-    } catch {
-      // Consent remains valid for this page even when browser storage is unavailable.
-    }
-  }
-
-  function renderMarketResourcesPanel(underlyings) {
-    const descriptors = (Array.isArray(underlyings) ? underlyings : []).map(marketResourceDescriptor);
-    const supported = descriptors.filter(item => item.supported);
-    const consentChecked = marketResourceConsent() ? " checked" : "";
-    const options = supported.map(item =>
-      `<option value="${escapeHtml(item.underlying)}">${escapeHtml(item.underlying)}</option>`
-    ).join("");
-    const links = descriptors.map(item => {
-      if (!item.supported) {
-        return `<article><h3>${escapeHtml(item.underlying || "未識別標的")}</h3>
-          <p>尚未建立安全的交易所代碼映射，不會載入圖表。</p>
-          <a href="${escapeHtml(item.searchUrl)}" target="_blank" rel="noopener noreferrer nofollow">前往 TradingView 搜尋</a></article>`;
-      }
-      return `<article>
-        <h3>${escapeHtml(item.ticker)} <small>${escapeHtml(item.exchange)}</small></h3>
-        <nav aria-label="${escapeHtml(item.ticker)} 公開市場連結">
-          <a href="${escapeHtml(item.links.yahooFinance)}" target="_blank" rel="noopener noreferrer nofollow">Yahoo Finance</a>
-          <a href="${escapeHtml(item.links.googleTrends)}" target="_blank" rel="noopener noreferrer nofollow">Google Trends</a>
-          <a href="${escapeHtml(item.links.cboe)}" target="_blank" rel="noopener noreferrer nofollow">Cboe 延遲報價</a>
-          <a href="${escapeHtml(item.links.oic)}" target="_blank" rel="noopener noreferrer nofollow">OIC 選擇權工具</a>
-        </nav>
-      </article>`;
-    }).join("");
-
-    return `<details class="backend-market-resources">
-      <summary>每日市場資料與標的靈感</summary>
-      <div class="backend-market-resources-body">
-        <p class="backend-analysis-note">Alpha Vantage 只提供此標的前一交易日的收盤價與日線統計，用於帶入上方參考現價。市場熱門榜已移至首頁，改由 TradingView 提供。這些內容只供參考，不會改變詢價、正式排名或報價圖。</p>
-        <div class="backend-market-consent">
-          <label><input type="checkbox" data-market-consent${consentChecked}> 我了解載入圖表後，TradingView 會收到我的 IP、瀏覽器資訊與所選股票代碼；不會傳送 RFQ、行編、分行、報價或發行機構資料。</label>
-        </div>
-        ${supported.length ? `<div class="backend-market-controls">
-          <label>圖表標的<select data-market-symbol>${options}</select></label>
-          <button type="button" class="secondary" data-market-context-load>載入公司與前收資料</button>
-          <button type="button" class="secondary" data-market-load>載入外部圖表</button>
-          <button type="button" class="secondary" data-market-unload hidden>卸載圖表</button>
-        </div>
-        <p class="backend-market-status" data-market-status role="status"></p>
-        <div class="backend-market-context" data-market-context aria-live="polite"></div>
-        <div class="backend-market-widget" data-market-widget></div>` : `<p class="backend-market-status">目前標的沒有可確認的美股交易所代碼，因此不載入外部圖表。</p>`}
-        <div class="backend-market-links">${links}</div>
-        <p class="backend-market-source-note">前收與日線統計來源：Alpha Vantage（免費資料為收盤後更新）。圖表與首頁熱門榜來源：TradingView（可能為即時、延遲或收盤資料，依市場與方案而異）。連結來源：Yahoo Finance、Google Trends、Cboe、Options Industry Council。所有內容均為公開資訊參考，不構成投資建議。</p>
-      </div>
-    </details>`;
-  }
-
-  function unloadMarketWidget(container) {
-    const host = container.querySelector("[data-market-widget]");
-    if (host) {
-      host.replaceChildren();
-      delete host.dataset.loaded;
-    }
-    const unload = container.querySelector("[data-market-unload]");
-    if (unload) unload.hidden = true;
-    const load = container.querySelector("[data-market-load]");
-    if (load) load.hidden = false;
-  }
-
-  function loadMarketWidget(container) {
-    const consent = container.querySelector("[data-market-consent]");
-    const status = container.querySelector("[data-market-status]");
-    const host = container.querySelector("[data-market-widget]");
-    const select = container.querySelector("[data-market-symbol]");
-    if (!consent?.checked) {
-      if (status) status.textContent = "請先勾選同意，再載入第三方圖表。";
-      return;
-    }
-    const descriptor = marketResourceDescriptor(select?.value);
-    if (!host || !descriptor.supported) {
-      if (status) status.textContent = "此標的尚未建立安全的交易所代碼映射。";
-      return;
-    }
-
-    const iframe = document.createElement("iframe");
-    iframe.title = `${descriptor.ticker} TradingView 公開市場圖表`;
-    iframe.loading = "lazy";
-    iframe.referrerPolicy = "no-referrer";
-    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
-    iframe.src = tradingViewWidgetUrl(descriptor);
-    host.replaceChildren(iframe);
-    host.dataset.loaded = "1";
-    setMarketResourceConsent(true);
-    if (status) status.textContent = `${descriptor.ticker} 圖表已載入；其資料不會進入本頁試算。`;
-    const unload = container.querySelector("[data-market-unload]");
-    if (unload) unload.hidden = false;
-    const load = container.querySelector("[data-market-load]");
-    if (load) load.hidden = true;
-  }
-
-  function publicSourceStatus(source) {
-    if (!source) return "無資料";
-    if (source.status === "FRESH") return "最新快取";
-    if (source.status === "STALE") return "暫用過期快取";
-    return "目前無法取得";
-  }
-
-  function officialSecUrl(value) {
-    try {
-      const url = new URL(value);
-      return url.protocol === "https:" && (url.hostname === "www.sec.gov" || url.hostname === "sec.gov")
-        ? url.toString()
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function marketNumber(value, maximumFractionDigits = 2) {
-    const number = Number(value);
-    return Number.isFinite(number)
-      ? number.toLocaleString("zh-TW", { maximumFractionDigits })
-      : "—";
-  }
-
-  function marketPercent(value) {
-    const number = Number(value);
-    return Number.isFinite(number)
-      ? `${number > 0 ? "+" : ""}${number.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}%`
-      : "—";
-  }
-
-  function marketVolume(value) {
-    const number = Number(value);
-    return Number.isFinite(number)
-      ? Math.round(number).toLocaleString("zh-TW")
-      : "—";
-  }
-
-  function marketContextRequest(descriptor) {
-    const existing = state.marketContextRequests.get(descriptor.ticker);
-    if (existing) return existing;
-    const pending = request(`/market/instruments/${encodeURIComponent(descriptor.ticker)}/context`)
-      .catch(error => {
-        state.marketContextRequests.delete(descriptor.ticker);
-        throw error;
-      });
-    state.marketContextRequests.set(descriptor.ticker, pending);
-    return pending;
-  }
-
-  function renderMarketContext(container, marketContext) {
-    const host = container.querySelector("[data-market-context]");
-    if (!host) return;
-    const sec = marketContext?.sec;
-    // The Worker and this file deploy separately, so read the new field but keep accepting the old
-    // one until both sides are known current. The old name is also a lie now: the close may come
-    // from any provider in the chain, which is why `equity.provider` is displayed.
-    const equityDaily = marketContext?.equityDaily ?? marketContext?.alphaVantage;
-    const company = sec?.data?.company;
-    const filings = Array.isArray(sec?.data?.recentFilings) ? sec.data.recentFilings : [];
-    const equity = equityDaily?.data;
-    const secContent = company
-      ? `<article class="backend-market-context-card">
-          <header><div><p class="eyebrow">SEC EDGAR</p><h3>${escapeHtml(company.companyName)}</h3></div><span>${escapeHtml(publicSourceStatus(sec))}</span></header>
-          <dl><div><dt>Ticker</dt><dd>${escapeHtml(company.ticker)}</dd></div><div><dt>Exchange</dt><dd>${escapeHtml(company.exchange || "—")}</dd></div><div><dt>CIK</dt><dd>${escapeHtml(company.cik)}</dd></div></dl>
-          <h4>最近 5 筆 10-K／10-Q／8-K</h4>
-          ${filings.length ? `<ul>${filings.map(filing => {
-            const url = officialSecUrl(filing.officialUrl);
-            return `<li><b>${escapeHtml(filing.form)}</b><span>${escapeHtml(filing.filingDate)}</span>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">SEC 原始文件</a>` : ""}</li>`;
-          }).join("")}</ul>` : "<p>目前沒有可顯示的指定申報文件。</p>"}
-          <small>資料日期 ${escapeHtml(sec.sourceAsOf || "—")}｜擷取 ${escapeHtml(formatDateTime(sec.fetchedAt))}${sec.isStale ? "｜資料已過期，暫供參考" : ""}</small>
-        </article>`
-      : `<article class="backend-market-context-card"><header><h3>SEC EDGAR</h3><span>${escapeHtml(publicSourceStatus(sec))}</span></header><p>目前無法取得此標的的 SEC 公司與申報資料。</p></article>`;
-    // Naming the provider matters: the chain can fall back, and a price whose source is invisible
-    // invites the reader to assume it came from wherever they last remember configuring.
-    const providerLabel = String(equity?.provider || "").replace(/_/g, " ") || "收盤價來源";
-    const alphaContent = equity
-      ? `<article class="backend-market-context-card backend-alpha-card">
-          <header><div><p class="eyebrow">${escapeHtml(providerLabel)}</p><h3>${escapeHtml(equity.symbol)} 前一交易日</h3></div><span>${escapeHtml(publicSourceStatus(equityDaily))}</span></header>
-          <strong class="backend-market-close">USD ${escapeHtml(marketNumber(equity.closePrice, 4))}</strong>
-          <small>交易日 ${escapeHtml(equity.tradingDate)}｜較前收 ${escapeHtml(marketPercent(equity.dailyChangePct))}</small>
-          <dl>
-            <div><dt>成交量</dt><dd>${escapeHtml(marketVolume(equity.volume))}</dd></div>
-            <div><dt>相對量能</dt><dd>${escapeHtml(marketNumber(equity.relativeVolume20d))}×</dd></div>
-            <div><dt>20日歷史波動</dt><dd>${escapeHtml(marketNumber(equity.realizedVolatility20dPct))}%</dd></div>
-            <div><dt>20日高低區間</dt><dd>${escapeHtml(marketNumber(equity.range20dPct))}%</dd></div>
-          </dl>
-          <small>資料日期 ${escapeHtml(equityDaily.sourceAsOf || equity.tradingDate)}｜擷取 ${escapeHtml(formatDateTime(equityDaily.fetchedAt))}${equityDaily.isStale ? "｜資料已過期，暫供參考" : ""}</small>
-        </article>`
-      : `<article class="backend-market-context-card"><header><h3>前一交易日收盤價</h3><span>${escapeHtml(publicSourceStatus(equityDaily))}</span></header><p>目前無法取得此標的的前一交易日股價。</p></article>`;
-    host.innerHTML = `<div class="backend-market-context-grid">${secContent}${alphaContent}</div>
-      <p class="backend-market-source-note">SEC／Alpha Vantage 資料僅供公開資訊參考。前收可作為上方試算的起始值，但不會寫回詢價條件、正式排名或報價圖。</p>`;
-  }
-
-  async function loadMarketContext(container, button) {
-    const select = container.querySelector("[data-market-symbol]");
-    const host = container.querySelector("[data-market-context]");
-    const descriptor = marketResourceDescriptor(select?.value);
-    if (!host || !descriptor.supported) {
-      if (host) host.innerHTML = "<p class=\"backend-market-status\">此標的尚未建立安全的美股代碼映射。</p>";
-      return;
-    }
-    button.disabled = true;
-    const original = button.textContent;
-    button.textContent = "載入中…";
-    host.innerHTML = "<p class=\"backend-market-status\">正在讀取 SEC 與 Alpha Vantage 公開資料…</p>";
-    try {
-      const payload = await marketContextRequest(descriptor);
-      renderMarketContext(container, payload.marketContext);
-    } catch (error) {
-      host.innerHTML = `<p class="backend-error">${escapeHtml(error.message || "公開資料載入失敗。")}</p>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = original;
-    }
-  }
-
-  function analysisSpotFields(underlying) {
-    const spot = [...analysisContent.querySelectorAll("[data-analysis-spot]")]
-      .find(field => field.dataset.analysisSpot === underlying);
-    const observed = [...analysisContent.querySelectorAll("[data-analysis-observed]")]
-      .find(field => field.dataset.analysisObserved === underlying);
-    const source = [...analysisContent.querySelectorAll("[data-analysis-source]")]
-      .find(field => field.dataset.analysisSource === underlying);
-    return { spot, observed, source };
-  }
-
-  function alphaSpotSourceHtml(underlying, equity, mode) {
-    const summary = `Alpha Vantage 前一交易日 ${equity.tradingDate} 收盤 USD ${marketNumber(equity.closePrice, 4)}`;
-    if (mode === "manual") {
-      return `${escapeHtml(summary)}；目前保留瀏覽器中的手動值。
-        <button type="button" class="link-button backend-apply-close" data-apply-previous-close="${escapeHtml(underlying)}" data-close-price="${escapeHtml(equity.closePrice)}" data-close-date="${escapeHtml(equity.tradingDate)}">套用前收</button>`;
-    }
-    return `${escapeHtml(summary)}（自動帶入；可手動修改）`;
-  }
-
-  function applyPreviousClose(underlying, closePrice, tradingDate, persist) {
-    const fields = analysisSpotFields(underlying);
-    const close = parseIndicativeSpot(closePrice);
-    if (!fields.spot || !fields.source || close === null || !/^\d{4}-\d{2}-\d{2}$/u.test(tradingDate)) return;
-    fields.spot.value = String(close);
-    if (fields.observed) fields.observed.value = `${tradingDate}T16:00`;
-    fields.source.innerHTML = `${escapeHtml(`Alpha Vantage 前一交易日 ${tradingDate} 收盤 USD ${marketNumber(close, 4)}`)}${persist ? "（已套用並儲存在此瀏覽器）" : "（自動帶入；可手動修改）"}`;
-    if (persist && state.analysisInput) {
-      saveSpotDraft(
-        state.analysisInput.rfq.id,
-        state.analysisInput.trade.tradeCode,
-        underlying,
-        close,
-        fields.observed?.value ?? ""
-      );
-    }
-    renderAnalysisCalculation();
-  }
-
-  // Each underlying is an independent lookup. Awaiting them one at a time made the analysis page
-  // wait for the sum of up to five round trips instead of the slowest one; `marketContextRequest`
-  // already de-duplicates a repeated ticker, so running them together issues no extra request.
-  async function autoFillPreviousCloses(input) {
-    await Promise.all(input.terms.underlyings.map(async underlying => {
-      const descriptor = marketResourceDescriptor(underlying);
-      const fields = analysisSpotFields(underlying);
-      if (!fields.source) return;
-      if (!descriptor.supported) {
-        fields.source.textContent = "來源：無法確認美股交易所代碼，請手動輸入。";
-        return;
-      }
-      fields.source.textContent = "正在取得前一交易日收盤價…";
-      try {
-        const payload = await marketContextRequest(descriptor);
-        if (state.analysisInput !== input) return;
-        const equity = (payload.marketContext?.equityDaily ?? payload.marketContext?.alphaVantage)?.data;
-        if (!equity || !Number.isFinite(Number(equity.closePrice))) {
-          fields.source.textContent = "暫時無法取得前一交易日收盤價，請手動輸入。";
-          return;
-        }
-        if (parseIndicativeSpot(fields.spot?.value) === null) {
-          applyPreviousClose(underlying, equity.closePrice, equity.tradingDate, false);
-        } else {
-          fields.source.innerHTML = alphaSpotSourceHtml(underlying, equity, "manual");
-        }
-      } catch (error) {
-        if (state.analysisInput === input) {
-          fields.source.textContent = `前收自動載入失敗：${error.message || "請手動輸入。"}`;
-        }
-      }
-    }));
-  }
-
-  function renderAnalysisPage(input, quotes) {
-    state.analysisInput = input;
-    state.marketContextRequests.clear();
-    const selectedQuoteId = input.quote.id;
-    const quoteOptions = quotes.some(item => item.quoteId === selectedQuoteId)
-      ? quotes
-      : [{ quoteId: selectedQuoteId, label: input.quote.issuerDisplayName }, ...quotes];
-    const spotFields = input.terms.underlyings.map(underlying => {
-      const saved = loadSpotDraft(input.rfq.id, input.trade.tradeCode, underlying);
-      return `<article class="backend-analysis-spot-card">
-        <h3>${escapeHtml(underlying)}</h3>
-        <label>參考現價<input type="number" min="0.000001" step="any" inputmode="decimal" data-analysis-spot="${escapeHtml(underlying)}" value="${saved.spot ?? ""}" placeholder="自動取得或手動輸入"></label>
-        <label>參考時間<input type="datetime-local" data-analysis-observed="${escapeHtml(underlying)}" value="${escapeHtml(saved.observedAt)}"></label>
-        <small data-analysis-source="${escapeHtml(underlying)}">${saved.spot ? "來源：使用者手動輸入（僅儲存在此瀏覽器）" : "正在準備前一交易日收盤價…"}</small>
-      </article>`;
-    }).join("");
-    analysisContent.innerHTML = `
-      <section class="backend-analysis-hero">
-        <div>
-          <span>${escapeHtml(input.trade.tradeCode)}｜正式排名版本 ${escapeHtml(input.rfq.rankingVersion)}</span>
-          <h2>${escapeHtml(input.terms.product)} · ${escapeHtml(input.terms.currency)}</h2>
-          <p>${escapeHtml(input.terms.underlyings.join(" / "))}</p>
-        </div>
-        <label>分析報價
-          <select id="backendAnalysisQuoteSelect">${quoteOptions.map(item => `<option value="${escapeHtml(item.quoteId)}"${item.quoteId === selectedQuoteId ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}</select>
-        </label>
-      </section>
-      <section class="backend-analysis-section">
-        <p class="eyebrow">SELECTED QUOTE</p><h2>${escapeHtml(input.quote.issuerDisplayName)}</h2>
-        <div class="backend-analysis-terms">
-          <span>期間<b>${escapeHtml(input.terms.tenorMonths)} 個月</b></span>
-          <span>Coupon<b>${percentText(input.terms.couponPaPct)}</b></span>
-          <span>Strike<b>${percentText(input.terms.strikePct)}</b></span>
-          <span>KO Barrier<b>${percentText(input.terms.koBarrierPct)}</b><small>${escapeHtml(input.terms.koType)}</small></span>
-          <span>KI Barrier<b>${input.terms.barrierType === "NONE" ? "不適用" : percentText(input.terms.kiBarrierPct)}</b><small>${escapeHtml(input.terms.barrierType)}</small></span>
-          <span>Guaranteed Period<b>${escapeHtml(input.terms.guaranteedPeriodsMonths)} 個月</b></span>
-          <span class="backend-analysis-underlyings-term">連結標的<b>${escapeHtml(input.terms.underlyings.join(" / "))}</b></span>
-          <span>報價時間<b>${escapeHtml(formatDateTime(input.quote.receivedAt))}</b></span>
-        </div>
-      </section>
-      <section class="backend-analysis-section">
-        <p class="eyebrow">INDICATIVE SPOT</p><h2>輸入標的參考現價</h2>
-        <p class="backend-analysis-note">尚未定價前，下列執行價、KO 價與 KI 價均為依百分比換算的試算值，不是正式 Fixing。</p>
-        <div class="backend-analysis-spots">${spotFields}</div>
-      </section>
-      <div id="backendAnalysisCalculation"></div>
-      ${renderMarketResourcesPanel(input.terms.underlyings)}`;
-    renderAnalysisCalculation();
-    void autoFillPreviousCloses(input);
+    return analysisControllerPromise;
   }
 
   async function openAnalysis(route) {
-    clearTimeout(state.timer);
-    state.rfqId = route.rfqId;
-    state.analysisInput = null;
-    document.body.classList.add("backend-analysis-active");
-    analysisView.hidden = false;
-    analysisBack.href = rfqResultUrl(route.rfqId);
-    analysisError.textContent = "";
-    analysisContent.innerHTML = "<p class=\"backend-analysis-loading\">正在載入分析資料…</p>";
     try {
-      const [analysisPayload, results] = await Promise.all([
-        request(`/rfqs/${route.rfqId}/trades/${encodeURIComponent(route.tradeCode)}/quotes/${encodeURIComponent(route.quoteId)}/analysis-input`),
-        request(`/rfqs/${route.rfqId}/results`)
-      ]);
-      renderAnalysisPage(
-        analysisPayload.analysisInput,
-        availableAnalysisQuotes(results, route.tradeCode)
-      );
+      const controller = await loadAnalysisController();
+      await controller.open(route);
     } catch (error) {
-      analysisContent.innerHTML = "";
-      analysisError.textContent = error instanceof Error ? error.message : "無法載入市場與風險分析。";
+      document.body.classList.add("backend-analysis-active");
+      analysisView.hidden = false;
+      document.querySelector("#backendAnalysisContent").innerHTML = "";
+      document.querySelector("#backendAnalysisError").textContent = error instanceof Error
+        ? error.message
+        : "無法載入市場與風險分析。";
     }
+  }
+
+  function updateRfqUrl(rfqId, replace = false) {
+    const url = new URL(location.href);
+    if (rfqId) url.searchParams.set("rfq", rfqId);
+    else url.searchParams.delete("rfq");
+    history[replace ? "replaceState" : "pushState"]({ rfqId }, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
   function rfqTimingText(rfq) {
@@ -1127,374 +710,6 @@ import {
     }
     const rfqId = currentRfqFromUrl();
     if (rfqId && state.user) await openRfq(rfqId, { updateUrl: false });
-  }
-
-  function renderAdminOutboundList(records) {
-    if (!records.length) {
-      adminOutboundList.innerHTML = "<p class=\"backend-archive-empty\">尚無已建立的寄件紀錄。</p>";
-      return;
-    }
-    adminOutboundList.innerHTML = `<table><thead><tr><th>時間</th><th>批次</th><th>詢價人</th><th>主旨</th><th>狀態</th><th></th></tr></thead><tbody>${records.map(record => `<tr>
-      <td>${escapeHtml(formatDateTime(record.sentAt || record.queuedAt))}</td>
-      <td>${escapeHtml(record.batchCode)}</td>
-      <td>${escapeHtml(record.requester.displayName)}<small>${escapeHtml(record.requester.username)}</small></td>
-      <td>${escapeHtml(record.baseSubject)}</td>
-      <td>${escapeHtml(record.status)}</td>
-      <td><button type="button" class="secondary backend-archive-view" data-outbound-id="${escapeHtml(record.id)}">檢視</button></td>
-    </tr>`).join("")}</tbody></table>`;
-  }
-
-  function renderAdminRegistrationList(registrations) {
-    if (!registrations.length) {
-      adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有待審核的使用者申請。</p>";
-      return;
-    }
-    adminRegistrationReviewList.innerHTML = `<table><thead><tr><th>申請時間</th><th>行編（登入帳號）</th><th>分行</th><th>操作</th></tr></thead><tbody>${registrations.map(registration => `<tr>
-      <td>${escapeHtml(formatDateTime(registration.createdAt))}</td>
-      <td>${escapeHtml(registration.employeeNumber)}${registration.username !== registration.employeeNumber ? `<small>既有申請帳號：${escapeHtml(registration.username)}</small>` : ""}</td>
-      <td>${escapeHtml(registration.branchName)}</td>
-      <td class="backend-registration-actions"><button type="button" class="primary" data-registration-action="approve" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.employeeNumber)}">核准</button><button type="button" class="secondary" data-registration-action="reject" data-registration-id="${escapeHtml(registration.id)}" data-registration-name="${escapeHtml(registration.employeeNumber)}">拒絕</button></td>
-    </tr>`).join("")}</tbody></table>`;
-  }
-
-  function renderDuplicateNote(duplicates) {
-    if (!duplicates || !duplicates.count) {
-      adminRegistrationDuplicateNote.hidden = true;
-      adminRegistrationDuplicateNote.textContent = "";
-      return;
-    }
-    const bits = [];
-    if (duplicates.byField?.employeeNumber) bits.push(`${duplicates.byField.employeeNumber} 筆行編已存在`);
-    if (duplicates.byField?.username) bits.push(`${duplicates.byField.username} 筆登入帳號已存在`);
-    if (duplicates.byField?.unknown) bits.push(`${duplicates.byField.unknown} 筆無法判別`);
-    const breakdown = bits.length ? `（${bits.join("、")}）` : "";
-    const latest = duplicates.latestAt ? `，最近一次 ${formatDateTime(duplicates.latestAt)}` : "";
-    adminRegistrationDuplicateNote.textContent = `⚠ 近 ${duplicates.windowDays} 天有 ${duplicates.count} 筆重複申請被系統擋下${breakdown}${latest}。這些申請的行編或登入帳號已存在，因此未建立帳號、也不會出現在下方名單。`;
-    adminRegistrationDuplicateNote.hidden = false;
-  }
-
-  async function loadAdminRegistrations(statusMessage = "") {
-    adminRegistrationReviewError.textContent = "";
-    adminRegistrationReviewStatus.textContent = statusMessage;
-    adminRegistrationReviewList.innerHTML = "<p class=\"backend-archive-empty\">正在載入待審核申請…</p>";
-    try {
-      const data = await request("/admin/registrations");
-      renderAdminRegistrationList(data.registrations);
-      renderDuplicateNote(data.duplicates);
-    } catch (error) {
-      adminRegistrationReviewError.textContent = error.message;
-      adminRegistrationReviewList.innerHTML = "";
-    }
-  }
-
-  function isSupportRole() {
-    return state.user?.role === "ADMIN" || state.user?.role === "PS";
-  }
-
-  async function openAdminRegistrationReview() {
-    if (!isSupportRole()) return;
-    if (!adminRegistrationReviewDialog.open) adminRegistrationReviewDialog.showModal();
-    await loadAdminRegistrations();
-  }
-
-  async function reviewRegistration(userId, action, displayName) {
-    if (!isSupportRole()) return;
-    let reason = "";
-    if (action === "approve") {
-      if (!window.confirm(`確定核准「${displayName}」的使用者申請？`)) return;
-    } else {
-      const suppliedReason = window.prompt(`請輸入拒絕「${displayName}」的原因（1 至 500 字）：`);
-      if (suppliedReason === null) return;
-      reason = suppliedReason.trim();
-      if (!reason) {
-        adminRegistrationReviewError.textContent = "拒絕申請時必須填寫原因。";
-        return;
-      }
-    }
-
-    const buttons = [...adminRegistrationReviewList.querySelectorAll("button")];
-    buttons.forEach(item => { item.disabled = true; });
-    adminRegistrationReviewError.textContent = "";
-    adminRegistrationReviewStatus.textContent = action === "approve" ? "正在核准申請…" : "正在拒絕申請…";
-    try {
-      await request(`/admin/registrations/${encodeURIComponent(userId)}/${action}`, {
-        method: "POST",
-        body: action === "reject" ? JSON.stringify({ reason }) : "{}"
-      });
-      await loadAdminRegistrations(action === "approve" ? `已核准「${displayName}」。` : `已拒絕「${displayName}」。`);
-    } catch (error) {
-      adminRegistrationReviewError.textContent = error.message;
-      adminRegistrationReviewStatus.textContent = "";
-      buttons.forEach(item => { item.disabled = false; });
-    }
-  }
-
-  async function openAdminOutboundArchive() {
-    if (state.user?.role !== "ADMIN") return;
-    adminOutboundError.textContent = "";
-    adminOutboundList.innerHTML = "<p class=\"backend-archive-empty\">正在載入寄件紀錄…</p>";
-    adminOutboundSubject.textContent = "請從上方選擇一封寄件紀錄";
-    adminOutboundMeta.textContent = "";
-    adminOutboundFrame.srcdoc = "";
-    if (!adminOutboundDialog.open) adminOutboundDialog.showModal();
-    try {
-      renderAdminOutboundList((await request("/admin/outbound-emails?limit=100")).records);
-    } catch (error) {
-      adminOutboundError.textContent = error.message;
-      adminOutboundList.innerHTML = "";
-    }
-  }
-
-  async function openAdminOutboundRecord(batchId) {
-    try {
-      adminOutboundError.textContent = "正在載入郵件內容…";
-      const { record } = await request(`/admin/outbound-emails/${encodeURIComponent(batchId)}`);
-      adminOutboundSubject.textContent = record.subject;
-      adminOutboundMeta.textContent = `${record.sender} → ${record.recipient}｜${record.generatedAt}`;
-      adminOutboundFrame.srcdoc = record.html;
-      adminOutboundError.textContent = "";
-    } catch (error) {
-      adminOutboundError.textContent = error.message;
-      adminOutboundFrame.srcdoc = "";
-    }
-  }
-
-  function formatDuration(value) {
-    if (value === null || value === undefined) return "—";
-    const minutes = Math.floor(value / 60);
-    const seconds = value % 60;
-    return minutes ? `${minutes}分 ${seconds}秒` : `${seconds}秒`;
-  }
-
-  function renderAdminRfqTimelines(records) {
-    if (!records.length) {
-      adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有 RFQ 處理紀錄。</p>";
-      return;
-    }
-    adminTimelinesList.innerHTML = records.map(record => `
-      <article class="backend-timeline-card">
-        <header><div><b>${escapeHtml(record.rfqId)}</b><small>${escapeHtml(record.requester.displayName)}｜${escapeHtml(record.requester.branchName)}｜${record.tradeCount} 筆</small></div><span>${escapeHtml(record.workflowStatus)}</span></header>
-        <div class="backend-timeline-metrics">
-          <span>排隊→寄完：<b>${formatDuration(record.durationsSeconds.queueToSent)}</b></span>
-          <span>寄完→首封回覆：<b>${formatDuration(record.durationsSeconds.sentToFirstInbound)}</b></span>
-          <span>寄完→完成：<b>${formatDuration(record.durationsSeconds.sentToFinalized)}</b></span>
-          <span>完成→最後圖片：<b>${formatDuration(record.durationsSeconds.finalizedToLastArtifact)}</b></span>
-        </div>
-        <p>外寄 ${record.outbound.sent}/${record.outbound.total}｜回信 ${record.inbound.total}（已解析 ${record.inbound.parsed}、逾時 ${record.inbound.late}、待人工 ${record.inbound.manualReview}、未配對 ${record.inbound.unmatched}）｜圖片 ${record.artifacts.ready}/${record.artifacts.total}</p>
-        <div class="backend-timeline-issuers">${record.issuerStates.map(item => `<span class="issuer-state status-${item.status.toLowerCase()}"><b>${escapeHtml(item.issuer)}</b>${escapeHtml(item.status)}</span>`).join("")}</div>
-        <small>建立 ${escapeHtml(formatDateTime(record.timestamps.createdAt))}｜寄完 ${escapeHtml(formatDateTime(record.timestamps.sentAt))}｜截止 ${escapeHtml(formatDateTime(record.timestamps.deadlineAt))}</small>
-        ${record.inbound.late > 0
-          && ["COMPLETED", "NO_VALID_QUOTE"].includes(record.workflowStatus)
-          && (record.finalizationTrigger !== "RECALCULATION"
-            || Date.parse(record.timestamps.lastInboundAt) > Date.parse(record.timestamps.finalizedAt))
-          ? `<button type="button" class="secondary admin-rfq-recalculate" data-admin-recalculate-rfq="${escapeHtml(record.rfqId)}">納入晚到報價重新排名</button>`
-          : ""}
-      </article>`).join("");
-  }
-
-  function renderAdminRfqHealth(health) {
-    if (!health?.issuers?.length) {
-      adminRfqHealth.innerHTML = "";
-      return;
-    }
-    const alertLabels = {
-      ISSUER_ZERO_INBOUND: "完全未收信",
-      ISSUER_PARSE_ERROR: "解析錯誤",
-      ISSUER_TIMEOUT: "逾時",
-      UNMATCHED_INBOUND: "未配對來信",
-      INBOUND_MANUAL_REVIEW: "待人工檢查",
-      FAILED_ARTIFACT: "報價圖失敗"
-    };
-    const alerts = health.alerts?.length
-      ? `<div class="backend-health-alerts">${health.alerts.map(alert => `<span><b>${escapeHtml(alert.issuer || "系統")}</b>${escapeHtml(alertLabels[alert.code] || alert.code)} ${escapeHtml(alert.count)}</span>`).join("")}</div>`
-      : "<p class=\"backend-health-ok\">目前沒有偵測到彙總異常。</p>";
-    adminRfqHealth.innerHTML = `
-      <section class="backend-health-panel">
-        <header><h3>近 ${escapeHtml(health.windowDays)} 天發行機構健康狀態</h3><small>僅為彙總，不含郵件內容與報價數值</small></header>
-        <div class="backend-health-grid">${health.issuers.map(item => `
-          <article>
-            <b>${escapeHtml(item.issuer)}</b>
-            <strong>${item.validRatePct === null ? "—" : `${escapeHtml(item.validRatePct)}%`}</strong>
-            <small>有效 ${escapeHtml(item.validReply)}/${escapeHtml(item.expected)}｜收信 ${escapeHtml(item.inbound)}｜逾時 ${escapeHtml(item.timeout)}｜解析 ${escapeHtml(item.parseError)}｜晚到 ${escapeHtml(item.lateReply)}</small>
-          </article>`).join("")}
-        </div>
-        ${alerts}
-      </section>`;
-  }
-
-  function renderAdminMarketHealth(health) {
-    if (!health) {
-      adminMarketHealth.innerHTML = "";
-      return;
-    }
-    const sources = Array.isArray(health.sources) ? health.sources : [];
-    const providerUsage = Array.isArray(health.providerUsageToday) ? health.providerUsageToday : [];
-    adminMarketHealth.innerHTML = `
-      <section class="backend-health-panel">
-        <header><h3>SEC／Alpha Vantage 公開資料快取</h3><small>不含 API Key、使用者資料或上游回應全文</small></header>
-        ${sources.length ? `<div class="backend-health-grid">${sources.map(item => `
-          <article>
-            <b>${escapeHtml(item.source)}｜${escapeHtml(item.status)}</b>
-            <strong>${escapeHtml(item.row_count)}</strong>
-            <small>新鮮 ${escapeHtml(item.fresh_count)}｜暫用舊資料 ${escapeHtml(item.stale_count)}｜已過期 ${escapeHtml(item.expired_count)}</small>
-          </article>`).join("")}</div>` : "<p class=\"backend-health-ok\">目前尚無公開資料快取。</p>"}
-        <div class="backend-health-alerts">
-          <span><b>待清理</b>${escapeHtml(health.expiredRows)}</span>
-          <span><b>暫用舊資料</b>${escapeHtml(health.staleRows)}</span>
-          <span><b>速率限制紀錄</b>${escapeHtml(health.rateLimitRows)}</span>
-          ${providerUsage.map(item => `<span><b>${escapeHtml(item.provider)} 今日上游請求</b>${escapeHtml(item.request_count)}</span>`).join("")}
-        </div>
-      </section>`;
-  }
-
-  async function openAdminRfqTimelines() {
-    if (state.user?.role !== "ADMIN") return;
-    adminTimelinesError.textContent = "";
-    adminRfqHealth.innerHTML = "";
-    adminMarketHealth.innerHTML = "";
-    adminTimelinesList.innerHTML = "<p class=\"backend-archive-empty\">正在載入 RFQ 時間軸…</p>";
-    if (!adminTimelinesDialog.open) adminTimelinesDialog.showModal();
-    try {
-      const [timelineResult, marketResult] = await Promise.allSettled([
-        request("/admin/rfq-timelines?limit=50"),
-        request("/admin/market-context-health")
-      ]);
-      if (timelineResult.status === "rejected") throw timelineResult.reason;
-      const payload = timelineResult.value;
-      renderAdminRfqHealth(payload.health);
-      renderAdminRfqTimelines(payload.records);
-      if (marketResult.status === "fulfilled") {
-        renderAdminMarketHealth(marketResult.value.health);
-      } else {
-        adminMarketHealth.innerHTML = "<p class=\"backend-archive-empty\">公開資料快取健康狀態目前無法讀取；RFQ 時間軸不受影響。</p>";
-      }
-    } catch (error) {
-      adminTimelinesError.textContent = error.message;
-      adminRfqHealth.innerHTML = "";
-      adminMarketHealth.innerHTML = "";
-      adminTimelinesList.innerHTML = "";
-    }
-  }
-
-  function accountRoleLabel(role) {
-    return role === "ADMIN" ? "管理者" : role === "PS" ? "PS" : "一般";
-  }
-
-  function accountStatusLabel(status) {
-    return { ACTIVE: "使用中", PENDING_APPROVAL: "待審核", REJECTED: "已拒絕", SUSPENDED: "已停權", DISABLED: "已剔除" }[status] || status;
-  }
-
-  function renderAdminAccountList(accounts) {
-    if (!accounts.length) {
-      adminAccountsList.innerHTML = "<p class=\"backend-archive-empty\">目前沒有帳號。</p>";
-      return;
-    }
-    const viewer = state.user?.role;
-    const selfId = state.user?.id;
-    adminAccountsList.innerHTML = `<table><thead><tr><th>建立時間</th><th>使用者</th><th>分行</th><th>身份</th><th>狀態</th><th>上次上線</th><th>操作</th></tr></thead><tbody>${accounts.map(account => {
-      const actions = [];
-      if (viewer === "ADMIN" && account.role === "USER" && account.status === "ACTIVE") {
-        actions.push(`<button type="button" class="primary" data-account-action="promote" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">升級為PS</button>`);
-      }
-      if (viewer === "ADMIN" && account.role === "PS") {
-        actions.push(`<button type="button" class="secondary" data-account-action="demote" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">降級為一般</button>`);
-      }
-      if (account.role === "USER" && account.status !== "DISABLED" && account.id !== selfId) {
-        actions.push(`<button type="button" class="secondary" data-account-action="disable" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}">剔除</button>`);
-      }
-      if ((viewer === "ADMIN" || viewer === "PS") && account.role === "USER" && account.status === "DISABLED" && account.id !== selfId) {
-        actions.push(`<button type="button" class="danger" data-account-action="delete" data-account-id="${escapeHtml(account.id)}" data-account-name="${escapeHtml(account.displayName)}" data-account-username="${escapeHtml(account.username)}">刪除帳號個資</button>`);
-        if (account.rfqCount > 0) actions.push(`<small>匿名保留 ${escapeHtml(account.rfqCount)} 筆詢價</small>`);
-      }
-      return `<tr>
-        <td>${escapeHtml(formatDateTime(account.createdAt))}</td>
-        <td>${escapeHtml(account.displayName)}<br><small>${escapeHtml(account.username)}</small></td>
-        <td>${escapeHtml(account.branchName)}</td>
-        <td>${escapeHtml(accountRoleLabel(account.role))}</td>
-        <td>${escapeHtml(accountStatusLabel(account.status))}</td>
-        <td>${account.lastSeenAt ? escapeHtml(formatDateTime(account.lastSeenAt)) : "尚未登入"}</td>
-        <td class="backend-registration-actions">${actions.join("") || "—"}</td>
-      </tr>`;
-    }).join("")}</tbody></table>`;
-  }
-
-  async function loadAdminAccounts(statusMessage = "") {
-    adminAccountsError.textContent = "";
-    adminAccountsStatus.textContent = statusMessage;
-    adminAccountsList.innerHTML = "<p class=\"backend-archive-empty\">正在載入帳號列表…</p>";
-    try {
-      renderAdminAccountList((await request("/admin/accounts")).accounts);
-    } catch (error) {
-      adminAccountsError.textContent = error.message;
-      adminAccountsList.innerHTML = "";
-    }
-  }
-
-  async function openAdminAccounts() {
-    if (!isSupportRole()) return;
-    accountLookupRow.hidden = state.user?.role !== "ADMIN";
-    accountLookupInput.value = "";
-    accountLookupResult.textContent = "";
-    if (!adminAccountsDialog.open) adminAccountsDialog.showModal();
-    await loadAdminAccounts();
-  }
-
-  async function lookupAccountByEmployee() {
-    if (state.user?.role !== "ADMIN") return;
-    const employeeNumber = accountLookupInput.value.trim();
-    accountLookupResult.textContent = "";
-    if (!/^[0-9]{5}$/.test(employeeNumber)) { accountLookupResult.textContent = "請輸入五碼行編。"; return; }
-    accountLookupBtn.disabled = true;
-    try {
-      const { account } = await request("/admin/accounts/lookup", { method: "POST", body: JSON.stringify({ employeeNumber }) });
-      accountLookupResult.textContent = account
-        ? `行編 ${employeeNumber} → ${account.displayName}（登入帳號 ${account.username}｜${account.branchName}｜${accountRoleLabel(account.role)}｜${accountStatusLabel(account.status)}）`
-        : `行編 ${employeeNumber}：查無帳號。`;
-    } catch (error) {
-      accountLookupResult.textContent = error.message;
-    } finally {
-      accountLookupBtn.disabled = false;
-    }
-  }
-
-  async function accountAction(userId, action, displayName, username = "") {
-    if (!isSupportRole()) return;
-    const prompts = {
-      promote: `確定將「${displayName}」升級為 PS 帳號？PS 可審核申請並剔除一般帳號。`,
-      demote: `確定將「${displayName}」降級為一般帳號？`,
-      disable: `確定剔除（停用）帳號「${displayName}」？該帳號將立即無法登入。`
-    };
-    let body = "{}";
-    if (action === "delete") {
-      if (!window.confirm(`刪除「${displayName}」的帳號個資會移除登入資料、加密行編與所有工作階段，且無法復原；歷史詢價與稽核紀錄將匿名保留。確定繼續？`)) return;
-      const confirmation = window.prompt(`請輸入登入帳號「${username}」確認刪除帳號個資：`);
-      if (confirmation === null) return;
-      if (confirmation.trim().toLowerCase() !== username) {
-        adminAccountsError.textContent = "確認文字與登入帳號不符，未執行刪除。";
-        return;
-      }
-      body = JSON.stringify({ confirmation });
-    } else if (!prompts[action] || !window.confirm(prompts[action])) {
-      return;
-    }
-    const buttons = [...adminAccountsList.querySelectorAll("button")];
-    buttons.forEach(item => { item.disabled = true; });
-    adminAccountsError.textContent = "";
-    adminAccountsStatus.textContent = { promote: "正在升級…", demote: "正在降級…", disable: "正在剔除…", delete: "正在刪除帳號個資…" }[action];
-    try {
-      await request(`/admin/accounts/${encodeURIComponent(userId)}/${action}`, { method: "POST", body });
-      const done = {
-        promote: `已將「${displayName}」升級為 PS。`,
-        demote: `已將「${displayName}」降級為一般帳號。`,
-        disable: `已剔除「${displayName}」。`,
-        delete: `已刪除「${displayName}」的帳號個資；歷史詢價已匿名保留，原行編現在可重新申請。`
-      };
-      await loadAdminAccounts(done[action]);
-    } catch (error) {
-      adminAccountsError.textContent = error.message;
-      adminAccountsStatus.textContent = "";
-      buttons.forEach(item => { item.disabled = false; });
-    }
   }
 
   async function loadSession() {
@@ -1923,277 +1138,6 @@ import {
     issuerPickerDialog.close();
     submitRfq(selected);
   });
-  // ADR 0017: rasterize an authorized quote card in the requesting browser. The server still
-  // decides which quote may be rendered and still owns the card template; only the pixel work
-  // moves to the client, which removes the shared Browser Rendering budget from the hot path.
-  const CARD_RENDER_STEP_TIMEOUT_MS = 12000;
-  const CARD_RENDER_TOTAL_TIMEOUT_MS = 24000;
-  const CARD_FONT_TIMEOUT_MS = 1500;
-  // Keep every device on the phone-size output profile. This also stays below the lower canvas
-  // limits seen on low-memory iOS/iPadOS devices and matches the server fallback's 1.5 scale.
-  const CARD_OUTPUT_CANVAS_PIXELS = 4e6;
-  const CARD_OUTPUT_MAX_SCALE = 1.5;
-
-  // Every step below can stall indefinitely on mobile WebKit. Without this the button would sit
-  // on 「產圖中…」 forever, because an unsettled promise never reaches the caller's catch.
-  function withRenderTimeout(value, step, timeoutMs = CARD_RENDER_STEP_TIMEOUT_MS) {
-    let timer;
-    return Promise.race([
-      Promise.resolve(value).finally(() => clearTimeout(timer)),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`產圖逾時（${step}）`)), timeoutMs);
-      })
-    ]);
-  }
-
-  function withRenderDeadline(start, step, deadlineAt, maximumMs = CARD_RENDER_STEP_TIMEOUT_MS) {
-    const remainingMs = deadlineAt - Date.now();
-    if (remainingMs <= 0) return Promise.reject(new Error(`產圖逾時（${step}）`));
-    return withRenderTimeout(Promise.resolve().then(start), step, Math.min(maximumMs, remainingMs));
-  }
-
-  async function requestForRender(path, options, step, deadlineAt) {
-    const controller = new AbortController();
-    try {
-      return await withRenderDeadline(
-        () => request(path, { ...options, signal: controller.signal }),
-        step,
-        deadlineAt
-      );
-    } catch (error) {
-      if (error?.name === "AbortError") throw new Error(`產圖逾時（${step}）`);
-      throw error;
-    } finally {
-      controller.abort();
-    }
-  }
-
-  function showCardImage(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    progressDialog.querySelector("[data-card-preview] [data-card-close]")?.click();
-    const preview = document.createElement("section");
-    preview.className = "backend-card-preview";
-    preview.dataset.cardPreview = "";
-    preview.setAttribute("role", "dialog");
-    preview.setAttribute("aria-modal", "true");
-    preview.setAttribute("aria-label", "報價圖預覽");
-    preview.innerHTML = `<section class="backend-panel">
-      <div class="backend-results-heading"><div><p class="eyebrow">QUOTE IMAGE</p><h2>報價圖</h2></div><button type="button" class="secondary" data-card-close>關閉</button></div>
-      <p class="backend-archive-note">手機或平板請「長按圖片 → 儲存影像」；電腦可在新頁面檢視，圖片會依螢幕大小縮放。</p>
-      <div class="backend-card-preview-frame"><img alt="報價圖" src="${url}"></div>
-      <div class="backend-card-preview-actions">
-        <a class="artifact-link backend-card-open-link" href="${url}" target="_blank" rel="noopener">在新頁面檢視</a>
-        <a class="artifact-link" href="${url}" download="${escapeHtml(filename)}">下載 PNG</a>
-      </div>
-    </section>`;
-    progressDialog.append(preview);
-    const onKeydown = event => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-      }
-    };
-    const close = () => {
-      document.removeEventListener("keydown", onKeydown, true);
-      preview.remove();
-      URL.revokeObjectURL(url);
-    };
-    preview.querySelector("[data-card-close]").addEventListener("click", close);
-    document.addEventListener("keydown", onKeydown, true);
-    preview.querySelector("[data-card-close]").focus();
-  }
-
-  async function renderCardLocally(tradeCode, quoteId) {
-    const deadlineAt = Date.now() + CARD_RENDER_TOTAL_TIMEOUT_MS;
-    const { card } = await requestForRender(
-      `/rfqs/${state.rfqId}/trades/${encodeURIComponent(tradeCode)}/quotes/${encodeURIComponent(quoteId)}/card`,
-      {},
-      "取得報價資料",
-      deadlineAt
-    );
-    const frame = document.createElement("iframe");
-    // allow-same-origin lets html2canvas read the document; scripts stay blocked.
-    frame.setAttribute("sandbox", "allow-same-origin");
-    frame.setAttribute("aria-hidden", "true");
-    frame.setAttribute("tabindex", "-1");
-    // The frame must stay render-eligible. Mobile WebKit skips layout and paint for `display:none`
-    // and for offscreen `visibility:hidden` frames, which stalls both `fonts.ready` and the clone
-    // iframe html2canvas creates internally. `opacity:0` stays laid out but unseen.
-    frame.style.cssText = `position:fixed;left:0;top:0;width:${card.width}px;height:10px;border:0;opacity:0;pointer-events:none;z-index:0`;
-    document.body.append(frame);
-    try {
-      await withRenderDeadline(() => new Promise((resolve, reject) => {
-        frame.addEventListener("load", resolve, { once: true });
-        frame.addEventListener("error", () => reject(new Error("報價圖載入失敗。")), { once: true });
-        frame.srcdoc = card.html;
-      }), "載入", deadlineAt);
-      const frameDocument = frame.contentDocument;
-      if (!frameDocument?.body) throw new Error("無法讀取報價圖內容。");
-      // Fonts are a nice-to-have: rendering with the fallback face beats failing the whole export.
-      if (frameDocument.fonts?.ready) {
-        try {
-          await withRenderDeadline(
-            () => frameDocument.fonts.ready,
-            "字型",
-            deadlineAt,
-            CARD_FONT_TIMEOUT_MS
-          );
-        } catch {
-          // continue with whatever fonts are already resolved
-        }
-      }
-      const height = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
-      if (!height) throw new Error("報價圖版面尚未完成，請再試一次。");
-      frame.style.height = `${height}px`;
-      const scale = Math.max(
-        0.5,
-        Math.min(CARD_OUTPUT_MAX_SCALE, Math.sqrt(CARD_OUTPUT_CANVAS_PIXELS / (card.width * height)))
-      );
-      const canvas = await withRenderDeadline(() => window.html2canvas(frameDocument.body, {
-        backgroundColor: null,
-        scale,
-        logging: false,
-        useCORS: false,
-        width: card.width,
-        height,
-        windowWidth: card.width,
-        windowHeight: height
-      }), "繪製", deadlineAt);
-      const blob = await withRenderDeadline(
-        () => new Promise(resolve => canvas.toBlob(resolve, "image/png")),
-        "轉檔",
-        deadlineAt
-      );
-      if (!blob) throw new Error("報價圖轉檔失敗。");
-      showCardImage(blob, `${state.rfqId}-${card.tradeCode}-${card.issuer}.png`);
-    } finally {
-      frame.remove();
-    }
-  }
-
-  async function requestArtifactFromButton(event) {
-    const target = event.target.closest("[data-artifact-trade]");
-    if (!target || !state.rfqId || !target.dataset.artifactQuote) return;
-    const originalLabel = target.textContent;
-    const { artifactTrade, artifactQuote } = target.dataset;
-    const status = document.querySelector("#backendCountdown");
-    target.disabled = true;
-    target.textContent = "產圖中…";
-    try {
-      if (typeof window.html2canvas === "function") {
-        try {
-          await renderCardLocally(artifactTrade, artifactQuote);
-          return;
-        } catch (localError) {
-          // Local rasterization is best-effort. Anything from a blocked rasterizer to a mobile
-          // WebKit stall falls through to the server renderer so an image is still produced.
-          const message = localError instanceof Error ? localError.message : "本機產圖失敗。";
-          status.textContent = `${message} 改用伺服器產圖…`;
-        }
-      }
-      await requestForRender(
-        `/rfqs/${state.rfqId}/trades/${encodeURIComponent(artifactTrade)}/quotes/${encodeURIComponent(artifactQuote)}/artifact`,
-        { method: "POST", body: "{}" },
-        "啟動伺服器備援",
-        Date.now() + CARD_RENDER_STEP_TIMEOUT_MS
-      );
-      state.snapshotVersion = null;
-      status.textContent = "已交由伺服器備援產圖；按鈕已恢復，完成後會顯示「查看報價圖」。";
-      scheduleResultRefresh(1000);
-    } catch (error) {
-      status.textContent = error instanceof Error ? error.message : "產圖失敗，請稍後再試。";
-    } finally {
-      target.disabled = false;
-      target.textContent = originalLabel;
-    }
-  }
-  function persistAnalysisSpot(underlying) {
-    const spotField = [...analysisContent.querySelectorAll("[data-analysis-spot]")]
-      .find(field => field.dataset.analysisSpot === underlying);
-    const observedField = [...analysisContent.querySelectorAll("[data-analysis-observed]")]
-      .find(field => field.dataset.analysisObserved === underlying);
-    if (!spotField || !state.analysisInput) return;
-    const spot = parseIndicativeSpot(spotField.value);
-    if (spot !== null && observedField && !observedField.value) observedField.value = localDateTimeValue();
-    saveSpotDraft(
-      state.analysisInput.rfq.id,
-      state.analysisInput.trade.tradeCode,
-      underlying,
-      spot,
-      observedField?.value ?? ""
-    );
-    const source = [...analysisContent.querySelectorAll("[data-analysis-source]")]
-      .find(field => field.dataset.analysisSource === underlying);
-    if (source) source.textContent = "來源：使用者手動輸入（僅儲存在此瀏覽器）";
-    renderAnalysisCalculation();
-  }
-  analysisContent.addEventListener("input", event => {
-    const spot = event.target.closest("[data-analysis-spot]");
-    if (spot) persistAnalysisSpot(spot.dataset.analysisSpot);
-  });
-  analysisContent.addEventListener("change", event => {
-    const select = event.target.closest("#backendAnalysisQuoteSelect");
-    if (select && state.analysisInput) {
-      location.assign(analysisUrl(
-        state.analysisInput.rfq.id,
-        state.analysisInput.trade.tradeCode,
-        select.value
-      ));
-      return;
-    }
-    const observed = event.target.closest("[data-analysis-observed]");
-    if (observed) persistAnalysisSpot(observed.dataset.analysisObserved);
-    const consent = event.target.closest("[data-market-consent]");
-    if (consent) {
-      setMarketResourceConsent(consent.checked);
-      if (!consent.checked) {
-        const container = consent.closest(".backend-market-resources");
-        if (container) unloadMarketWidget(container);
-      }
-    }
-    const symbol = event.target.closest("[data-market-symbol]");
-    if (symbol) {
-      const container = symbol.closest(".backend-market-resources");
-      const context = container?.querySelector("[data-market-context]");
-      if (context) context.replaceChildren();
-      if (container?.querySelector("[data-market-widget]")?.dataset.loaded === "1") {
-        loadMarketWidget(container);
-      }
-    }
-  });
-  analysisContent.addEventListener("click", event => {
-    const previousClose = event.target.closest("[data-apply-previous-close]");
-    if (previousClose) {
-      applyPreviousClose(
-        previousClose.dataset.applyPreviousClose,
-        previousClose.dataset.closePrice,
-        previousClose.dataset.closeDate,
-        true
-      );
-      return;
-    }
-    const contextLoad = event.target.closest("[data-market-context-load]");
-    if (contextLoad) {
-      const container = contextLoad.closest(".backend-market-resources");
-      if (container) loadMarketContext(container, contextLoad);
-      return;
-    }
-    const load = event.target.closest("[data-market-load]");
-    if (load) {
-      const container = load.closest(".backend-market-resources");
-      if (container) loadMarketWidget(container);
-      return;
-    }
-    const unload = event.target.closest("[data-market-unload]");
-    if (unload) {
-      const container = unload.closest(".backend-market-resources");
-      if (container) {
-        unloadMarketWidget(container);
-        const status = container.querySelector("[data-market-status]");
-        if (status) status.textContent = "外部圖表已卸載。";
-      }
-    }
-  });
   document.querySelector("#backendRankings").addEventListener("click", requestArtifactFromButton);
   document.querySelector("#backendRankings").addEventListener("change", event => {
     const select = event.target.closest("[data-custom-fifth-select]");
@@ -2394,46 +1338,10 @@ import {
       recalculateButton.disabled = false;
     }
   });
-  adminRegistrationsButton.addEventListener("click", openAdminRegistrationReview);
-  document.querySelector("#closeBackendRegistrationReview").addEventListener("click", () => adminRegistrationReviewDialog.close());
-  adminRegistrationReviewList.addEventListener("click", event => {
-    const target = event.target.closest("[data-registration-action][data-registration-id]");
-    if (target) reviewRegistration(target.dataset.registrationId, target.dataset.registrationAction, target.dataset.registrationName);
-  });
-  adminOutboundButton.addEventListener("click", openAdminOutboundArchive);
-  document.querySelector("#closeBackendOutboundArchive").addEventListener("click", () => adminOutboundDialog.close());
-  adminOutboundList.addEventListener("click", event => {
-    const target = event.target.closest("[data-outbound-id]");
-    if (target) openAdminOutboundRecord(target.dataset.outboundId);
-  });
-  adminTimelinesButton.addEventListener("click", openAdminRfqTimelines);
-  document.querySelector("#closeBackendRfqTimelines").addEventListener("click", () => adminTimelinesDialog.close());
-  adminTimelinesList.addEventListener("click", async event => {
-    const button = event.target.closest("[data-admin-recalculate-rfq]");
-    if (!button || state.user?.role !== "ADMIN") return;
-    if (!window.confirm("確定要以管理者身份將晚到報價納入新的排名版本嗎？")) return;
-    button.disabled = true;
-    try {
-      await request(`/rfqs/${encodeURIComponent(button.dataset.adminRecalculateRfq)}/recalculate`, {
-        method: "POST",
-        body: "{}"
-      });
-      await openAdminRfqTimelines();
-    } catch (error) {
-      adminTimelinesError.textContent = error.message;
-      button.disabled = false;
-    }
-  });
-  adminAccountsButton.addEventListener("click", openAdminAccounts);
-  document.querySelector("#closeBackendAccounts").addEventListener("click", () => adminAccountsDialog.close());
-  accountLookupBtn.addEventListener("click", lookupAccountByEmployee);
-  accountLookupInput.addEventListener("keydown", event => {
-    if (event.key === "Enter") { event.preventDefault(); void lookupAccountByEmployee(); }
-  });
-  adminAccountsList.addEventListener("click", event => {
-    const target = event.target.closest("[data-account-action][data-account-id]");
-    if (target) accountAction(target.dataset.accountId, target.dataset.accountAction, target.dataset.accountName, target.dataset.accountUsername);
-  });
+  adminRegistrationsButton.addEventListener("click", () => openAdminFeature("openRegistrationReview"));
+  adminOutboundButton.addEventListener("click", () => openAdminFeature("openOutboundArchive"));
+  adminTimelinesButton.addEventListener("click", () => openAdminFeature("openTimelines"));
+  adminAccountsButton.addEventListener("click", () => openAdminFeature("openAccounts"));
   addEventListener("popstate", () => {
     const analysis = currentAnalysisFromUrl();
     if (analysis && state.user) {

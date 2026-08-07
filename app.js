@@ -14,6 +14,7 @@ import {
   buildMailtoUrl,
   buildZimbraComposeUrl,
 } from "./mail-compose.mjs?v=zimbra-compose-v1";
+import { loadHtml2Canvas } from "./html2canvas-loader.mjs?v=lazy-render-v1";
 
 (() => {
   "use strict";
@@ -662,9 +663,6 @@ import {
 
   async function downloadQuoteImage() {
     const generateButton = document.querySelector("#generateQuoteImage");
-    if (typeof window.html2canvas !== "function") {
-      throw new Error("報價圖元件載入失敗，請確認網路連線後重新整理頁面。");
-    }
     renderQuoteSheet();
     generateButton.disabled = true;
     generateButton.classList.add("is-loading");
@@ -672,12 +670,13 @@ import {
     const originalText = generateButton.textContent;
     generateButton.textContent = "產圖中…";
     try {
+      const html2canvas = await loadHtml2Canvas();
       await withRenderTimeout(
         new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
         5_000,
         "產圖逾時（版面），請切回此分頁後再試一次。"
       );
-      const canvas = await withRenderTimeout(window.html2canvas(quoteSheet, {
+      const canvas = await withRenderTimeout(html2canvas(quoteSheet, {
         backgroundColor: "#ffffff",
         scale: Math.max(2, Math.min(3, window.devicePixelRatio || 2)),
         useCORS: true,

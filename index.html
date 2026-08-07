@@ -273,10 +273,13 @@
       </div>
     </dialog>
 
-    <script src="./vendor/html2canvas-1.4.1.min.js" defer></script>
-    <script type="module" src="./app.js?v=static-card-employee-v1"></script>
-    <script type="module" src="./earnings-advisory.mjs?v=earnings-v4"></script>
-    <script type="module" src="./backend-client.js?v=account-recovery-v1"></script>
+    <script type="module" src="./app.js?v=performance-modules-v1"></script>
+    <script type="module" src="./earnings-advisory.mjs?v=earnings-v5"></script>
+    <script type="module">
+      if (location.hostname === "app.yintsun66.com" || new URLSearchParams(location.search).get("backend") === "1") {
+        import("./backend-client.js?v=performance-modules-v1");
+      }
+    </script>
     <script>
       /* Picker wiring. Touches nothing but the stylesheet's media attribute, the root dataset and
          one localStorage key, so no path through the quoting flow can be affected. */

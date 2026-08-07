@@ -1,3 +1,5 @@
+import { loadHtml2Canvas } from "./html2canvas-loader.mjs?v=lazy-render-v1";
+
 const OFFICIAL_FOLLOW_BOARD_URL = "https://app.yintsun66.com/follow-board.html";
 const API_ORIGINS = location.hostname === "app.yintsun66.com"
   ? ["", "https://api.yintsun66.com"]
@@ -6,6 +8,7 @@ const API_ORIGINS = location.hostname === "app.yintsun66.com"
     : ["https://app.yintsun66.com", "https://api.yintsun66.com"];
 const IS_STATIC_SITE = location.hostname === "yintsun66-tech.github.io";
 const PIN_STORAGE_KEY = "fcn-follow-board-pin";
+const API_TIMEOUT_MS = 15_000;
 const previewProductCode = new URLSearchParams(location.search).get("product")?.normalize("NFKC").trim().toUpperCase() || "";
 const THEMES = {
   BNP: ["#008a4b", "#0875a8", "#e7f8ef"],
@@ -52,15 +55,27 @@ async function publicRequest(path, options = {}) {
   if (options.body) headers.set("content-type", "application/json");
   let lastNetworkError = null;
   for (const origin of API_ORIGINS) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, API_TIMEOUT_MS);
     try {
-      const response = await fetch(`${origin}/api/v1${path}`, { ...options, headers });
+      const response = await fetch(`${origin}/api/v1${path}`, { ...options, headers, signal: controller.signal });
       let payload = null;
       try { payload = await response.json(); } catch { /* use fallback */ }
       if (!response.ok) throw new Error(apiError(payload, `跟單專區載入失敗（${response.status}）。`));
       return payload;
     } catch (error) {
+      if (timedOut) {
+        lastNetworkError = new TypeError("FOLLOW_BOARD_REQUEST_TIMEOUT");
+        continue;
+      }
       if (!(error instanceof TypeError)) throw error;
       lastNetworkError = error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
   const error = new Error(
@@ -70,6 +85,28 @@ async function publicRequest(path, options = {}) {
   );
   error.cause = lastNetworkError;
   throw error;
+}
+
+async function authenticatedRequest(path, options = {}) {
+  const { errorMessage = "伺服器回應失敗。", ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const response = await fetch(`/api/v1${path}`, {
+      ...fetchOptions,
+      credentials: "same-origin",
+      signal: controller.signal
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch { /* use fallback */ }
+    if (!response.ok) throw new Error(apiError(payload, errorMessage));
+    return payload;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("伺服器回應逾時，請確認網路後再試一次。");
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function themeStyle(issuer) {
@@ -283,15 +320,15 @@ function withTimeout(promise, milliseconds, message) {
 }
 
 async function downloadProductImage(product, button) {
-  if (typeof window.html2canvas !== "function") throw new Error("圖片元件載入失敗，請重新整理後再試。");
   button.disabled = true;
   const original = button.textContent;
   button.textContent = "產圖中…";
   elements.captureHost.innerHTML = cardMarkup(product);
   const target = elements.captureHost.firstElementChild;
   try {
+    const html2canvas = await loadHtml2Canvas();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const canvas = await withTimeout(window.html2canvas(target, {
+    const canvas = await withTimeout(html2canvas(target, {
       backgroundColor: "#ffffff",
       scale: 1.5,
       useCORS: false,
@@ -333,9 +370,7 @@ function csrfToken() {
 async function detectAdminSession() {
   if (location.hostname !== "app.yintsun66.com") return;
   try {
-    const response = await fetch("/api/v1/auth/session", { credentials: "same-origin" });
-    if (!response.ok) return;
-    const payload = await response.json();
+    const payload = await authenticatedRequest("/auth/session", { errorMessage: "無法確認登入狀態。" });
     state.user = payload.user;
     if (["ADMIN", "PS"].includes(state.user?.role)) {
       elements.adminPanel.hidden = false;
@@ -351,11 +386,10 @@ async function loadAdminInterests() {
   if (!state.user || !["ADMIN", "PS"].includes(state.user.role)) return;
   elements.adminStatus.textContent = "正在載入完整明細…";
   try {
-    const response = await fetch(`/api/v1/admin/follow-board/interests?date=${encodeURIComponent(elements.adminDate.value)}`, {
-      credentials: "same-origin"
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(apiError(payload, "完整明細載入失敗。"));
+    const payload = await authenticatedRequest(
+      `/admin/follow-board/interests?date=${encodeURIComponent(elements.adminDate.value)}`,
+      { errorMessage: "完整明細載入失敗。" }
+    );
     elements.adminInterestRows.innerHTML = payload.interests.length
       ? payload.interests.map(row => `<tr>
         <td>${escapeHtml(row.productCode)}</td><td>${escapeHtml(row.branchCode)}</td>
@@ -372,13 +406,11 @@ async function loadAdminInterests() {
 
 async function archiveProduct(productCode) {
   if (!confirm(`確定下架商品 ${productCode}？下架後公開頁面將不再顯示。`)) return;
-  const response = await fetch(`/api/v1/admin/follow-board/products/${encodeURIComponent(productCode)}/archive`, {
+  await authenticatedRequest(`/admin/follow-board/products/${encodeURIComponent(productCode)}/archive`, {
     method: "POST",
-    credentials: "same-origin",
-    headers: { "x-csrf-token": csrfToken() }
+    headers: { "x-csrf-token": csrfToken() },
+    errorMessage: "商品下架失敗。"
   });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(apiError(payload, "商品下架失敗。"));
   await loadManifest();
 }
 

@@ -28,6 +28,10 @@ const DAY_LABEL = { "-1": "昨日已發布", "0": "今日", "1": "明日", "2": 
 let timer = null;
 let panel = null;
 let inFlight = 0;
+let activeController = null;
+let activeKey = "";
+let lastSuccessfulKey = "";
+let lastSuccessfulPayload = null;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => (
@@ -114,21 +118,36 @@ function render(payload) {
   target.hidden = parts.length === 0;
 }
 
-async function fetchAdvisory(codes) {
+async function fetchWithTimeout(url, signal) {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) forwardAbort();
+  else signal?.addEventListener("abort", forwardAbort, { once: true });
+  const timeoutId = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+async function fetchAdvisory(codes, signal) {
   const query = `${PATH}?symbols=${encodeURIComponent(codes.join(","))}`;
   let lastNetworkError = null;
   for (const origin of API_ORIGINS) {
     try {
-      const response = await fetch(`${origin}${query}`, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      const response = await fetchWithTimeout(`${origin}${query}`, signal);
       if (!response.ok) throw new Error(`HTTP_${response.status}`);
       return await response.json();
     } catch (error) {
       // Only a transport failure is worth trying the next origin for; a real HTTP error means we
       // reached the API and it answered.
-      if (!(error instanceof TypeError)) throw error;
+      if (signal?.aborted) throw error;
+      if (!(error instanceof TypeError) && !["AbortError", "TimeoutError"].includes(error?.name)) throw error;
       lastNetworkError = error;
     }
   }
@@ -136,21 +155,49 @@ async function fetchAdvisory(codes) {
 }
 
 async function refresh() {
-  const codes = currentUnderlyings();
+  const codes = currentUnderlyings().sort();
   if (!codes.length) {
+    activeController?.abort();
+    activeController = null;
+    activeKey = "";
+    inFlight += 1;
     const target = host();
     if (target) { target.innerHTML = ""; target.hidden = true; }
     return;
   }
+  const key = codes.join(",");
+  if (key === activeKey && activeController) return;
+  if (activeController) {
+    activeController.abort();
+    activeController = null;
+    activeKey = "";
+    inFlight += 1;
+  }
+  if (key === lastSuccessfulKey && lastSuccessfulPayload) {
+    render(lastSuccessfulPayload);
+    return;
+  }
+
+  const controller = new AbortController();
+  activeController = controller;
+  activeKey = key;
   const ticket = ++inFlight;
   try {
-    const payload = await fetchAdvisory(codes);
+    const payload = await fetchAdvisory(codes, controller.signal);
     if (ticket !== inFlight) return;   // a newer edit already superseded this answer
+    lastSuccessfulKey = key;
+    lastSuccessfulPayload = payload;
     render(payload);
-  } catch {
+  } catch (error) {
     if (ticket !== inFlight) return;
+    if (controller.signal.aborted) return;
     // Surfaced, not swallowed: an empty advisory would read as "no earnings due".
     render({ available: false, hits: [], unsupported: [], unchecked: [] });
+  } finally {
+    if (activeController === controller) {
+      activeController = null;
+      activeKey = "";
+    }
   }
 }
 

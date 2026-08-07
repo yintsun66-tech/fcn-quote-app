@@ -2,7 +2,7 @@
 
 Updated: 2026-08-07 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; latest implementation commit is `6b4e7b5`, with
+Current branch: `codex/market-analysis-phase2-4`; latest implementation commit is `326dfac`, with
 this deployment-record update immediately after it. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
@@ -58,14 +58,22 @@ HTTP 200 / `{ "status": "ok" }` from the API and confirmed `static-requester-v1`
 `STATIC_IDENTITY_STORAGE_KEY`, and `buildStaticRequesterSubject` on both Cloudflare and GitHub
 Pages. No real RFQ or email was sent as a deployment test.
 
-Follow-up implemented locally on 2026-08-07, not yet committed or deployed: the static PNG no
-longer prints the employee number once in the sheet disclaimer. Every `.quote-card` now prints its
-own `製圖行編：<五碼行編>` as the final row of that card footer, so a multi-trade PNG keeps the
-operator label with every trade. `app.js`, `styles.css`, `index.html`, and `guide.html` changed;
-cache tokens are `static-card-employee-v1`. A two-trade browser run produced two cards and exactly
-two employee labels, verified each label below issuer/date in a footer whose bottom matches its
-card; PNG generation completed with no console errors. `node --check app.js` and `git diff --check`
-pass. No backend ranking card, server-generated image, email subject/body or persistence changed.
+Follow-up committed, pushed and deployed on 2026-08-07: the static PNG no longer prints the employee
+number once in the sheet disclaimer. Every `.quote-card` now prints its own
+`製圖行編：<五碼行編>` as the final row of that card footer, so a multi-trade PNG keeps the operator
+label with every trade. `app.js`, `styles.css`, `index.html`, and `guide.html` changed; cache tokens
+are `static-card-employee-v1`. A two-trade browser run produced two cards and exactly two employee
+labels, verified each label below issuer/date in a footer whose bottom matches its card; PNG
+generation completed with no console errors. `node --check app.js`, `git diff --check`, and the
+Wrangler dry-run build pass. No backend ranking card, server-generated image, email subject/body or
+persistence changed.
+
+Implementation commit `326dfac` is pushed and deployed to Cloudflare as Worker
+`d54d4d32-d32a-4366-ab21-17f450004f09`; Wrangler uploaded the four expected public assets. The
+independent static snapshot is pushed to `yintsun66-tech/fcnV2` as `f4d6c3e`. Cache-bypassed
+readback returned HTTP 200 from both sites and confirmed `static-card-employee-v1`,
+`quote-card-maker`, and its stylesheet rule. GitHub Pages initially returned the prior build and
+then passed after its normal build delay. No real RFQ or email was sent.
 
 ## Dark-mode contrast in the signed-in dialogs (committed, pushed and deployed, 2026-08-07)
 

@@ -2,18 +2,20 @@
 
 Updated: 2026-08-07 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; the latest performance implementation commits
-are `01d811e` and `d95f2ff`, followed by the current documentation commit. The deployed
+Current branch: `codex/market-analysis-phase2-4`; the performance implementation sequence is
+`01d811e`, `d95f2ff` and `24714eb`, followed by the deployment-record commit. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
-feature branch has 32), so neither branch should be described as a simple byte-identical copy or
+feature branch has 33 after this deployment-record commit), so neither branch should be described
+as a simple byte-identical copy or
 merged without first reviewing both sides. Recount with
 `git rev-list --count main..HEAD` rather than trusting the figure written here — it goes stale on
 every commit.
 
-Current production Worker: `805a2fa2-473a-460c-b2c1-6a9ddfb2adbc`, deployed from the tree recorded
-by `827a3c7` on 2026-08-07, not from a branch name. (`ba1a5276` from `f8ff7f8` was the
-account-recovery deploy it replaced; `0aa4f60` on top is documentation only and needed no deploy.)
+Current production Worker: `f4b7dc54-9e7d-49bd-80b2-c01933b45dd7`, deployed from the performance
+source sequence through `24714eb` on 2026-08-07, not from a branch name. The first rollout version
+was `dd6e50d7-64fb-495d-bd57-453499ae7da0`; the final version regenerated the allowlisted assets and
+re-uploaded `backend-analysis.mjs` so the deployed asset is byte-aligned with its source.
 Every
 `wrangler deploy` mints a new version ID even for an asset-only change, so this ID is stale the
 moment anyone deploys again; treat the command as the authority. `version-status.html` records the
@@ -22,13 +24,14 @@ the number that the deploy itself invalidates — this file can carry one only b
 published asset. Current local verification baseline is **28 test files / 218 tests**; lower counts
 recorded elsewhere are historical.
 
-## Frontend startup and outbound telemetry (committed locally, not pushed or deployed)
+## Frontend startup and outbound telemetry (committed, pushed and deployed)
 
-The ADR 0036 performance change is split into `01d811e` (`perf(frontend)`) and `d95f2ff`
-(`feat(admin)`), followed by the current documentation commit. It has **not** been pushed,
-merged, deployed or copied to the independent `fcnV2` static repository. Therefore the live
-Cloudflare and GitHub Pages sites still have their previously deployed behavior, and outbound
-Queue concurrency remains unchanged in production until an explicitly authorized deployment.
+The ADR 0036 performance change is split into `01d811e` (`perf(frontend)`), `d95f2ff`
+(`feat(admin)`) and `24714eb` (`docs(architecture)`). All three commits are pushed to
+`origin/codex/market-analysis-phase2-4`. Cloudflare Worker version
+`f4b7dc54-9e7d-49bd-80b2-c01933b45dd7` is live, including outbound Queue concurrency 8. The exact
+reviewed static assets were copied to the independent `yintsun66-tech/fcnV2` repository and pushed
+as `1275d84`; its existing static-only README and unrelated files were preserved.
 
 Low-risk startup changes:
 
@@ -62,19 +65,22 @@ Outbound measurement and tuning:
   that deployed traffic will remain within 10–20 seconds; confirm that from several real ADMIN
   dashboard samples after deployment without sending a special bank test solely for measurement.
 
-Verification completed: root syntax checks passed for all changed/new JavaScript modules; direct
+Pre-deployment verification completed: root syntax checks passed for all changed/new JavaScript modules; direct
 source/test TypeScript checks passed; focused ADMIN/outbound tests passed 8/8; the complete suite
 passed **28 files / 218 tests**; and the Wrangler dry-run build passed outside the filesystem
 sandbox, reading 25 allowlisted public files. The first sandboxed dry-run failed only because
 Wrangler could not read its parent path/write its own AppData log; the same build passed with
 normal filesystem access. No migration, secret, production dependency, lockfile, auth rule,
-ranking rule, mail format or production data changed. Preserve the untracked user-owned
-`.claude/` and `output/` directories.
+ranking rule, mail format or production data changed. Post-deployment cache-bypassed checks returned
+200 for the Cloudflare app, health endpoint, lazy analysis module, GitHub Pages app, static lazy
+analysis module and html2canvas loader. Both public indexes contain `performance-modules-v1` and
+neither eagerly imports html2canvas; the unauthenticated ADMIN performance endpoint correctly
+returned 401. Preserve the untracked user-owned `.claude/` and `output/` directories.
 
-Smallest safe next step: review the three local commits. Only after explicit authorization should
-they be pushed and deployed;
-after deploy, verify conditional static loading, lazy image/analysis/admin paths and several real
-small-RFQ timing samples.
+Smallest safe next step: use normal authenticated traffic to verify the first-use ADMIN, analysis
+and image paths, then collect several real three-or-fewer-issuer RFQs in the new performance
+dashboard. No special bank email was sent solely for this rollout, so the production 10--20 second
+small-RFQ target is instrumented but still requires real-traffic confirmation.
 
 For the 2026-08-06 account release, the API health endpoint returned 200, the cache-bypassed index
 contained the `account-recovery-v1` token, and the deployed `backend-client.js` SHA-256 matched the

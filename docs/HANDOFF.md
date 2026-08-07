@@ -2,7 +2,8 @@
 
 Updated: 2026-08-07 (Asia/Taipei)
 
-Current branch: `codex/market-analysis-phase2-4`; latest pushed commit is `1a12f82`. The deployed
+Current branch: `codex/market-analysis-phase2-4`; latest implementation commit is `6b4e7b5`, with
+this deployment-record update immediately after it. The deployed
 account-recovery source commit is `f8ff7f8`, followed by the deployment-record commit `b47d01f`.
 Current local `main` is `f11da30`; the histories have diverged (`main` has 8 unique commits and the
 feature branch has 32), so neither branch should be described as a simple byte-identical copy or
@@ -27,7 +28,7 @@ committed local file. Wrangler reported four modified assets uploaded and 14 exi
 reused. Earlier all-asset comparisons are historical evidence, not proof for a future deploy; a
 clean `git status` alone never proves that production is running the committed tree.
 
-## Static requester trace labels (implemented locally, not committed or deployed, 2026-08-07)
+## Static requester trace labels (committed, pushed and deployed, 2026-08-07)
 
 The GitHub Pages/static workflow now requires a branch name and five-digit employee number before
 manual mail preparation or browser quote-image generation. The normalized values are saved only in
@@ -46,9 +47,16 @@ email-format regression test. Browser verification covered first-entry enforceme
 after reload, the exact BMJB subject, quote-image footer, successful PNG generation, and backend
 mode isolation. `node --check app.js` passes; all 28 test files / 218 tests pass; TypeScript checks
 and Wrangler dry-run build pass outside the filesystem sandbox. No migration, dependency, lockfile,
-secret, Cloudflare binding or production resource changed. Preserve the user-owned untracked
-`.claude/` and `output/` directories. Smallest next step: review this diff, then commit/push and
-publish the static mirror only if explicitly requested.
+secret or Cloudflare binding changed. Preserve the user-owned untracked `.claude/` and `output/`
+directories.
+
+Implementation commit `6b4e7b5` is pushed to `origin/codex/market-analysis-phase2-4` and deployed
+to Cloudflare as Worker `959ecdcf-181f-4599-b2d8-b0e7094b5c57`; Wrangler uploaded only
+`index.html`, `app.js`, and `backend/shared/email-formats.js`. The independent allowlisted static
+snapshot is pushed to `yintsun66-tech/fcnV2` `main` as `03b529e`. Cache-bypassed readback returned
+HTTP 200 / `{ "status": "ok" }` from the API and confirmed `static-requester-v1`,
+`STATIC_IDENTITY_STORAGE_KEY`, and `buildStaticRequesterSubject` on both Cloudflare and GitHub
+Pages. No real RFQ or email was sent as a deployment test.
 
 ## Dark-mode contrast in the signed-in dialogs (committed, pushed and deployed, 2026-08-07)
 

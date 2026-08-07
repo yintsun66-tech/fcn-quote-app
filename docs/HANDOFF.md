@@ -58,6 +58,15 @@ HTTP 200 / `{ "status": "ok" }` from the API and confirmed `static-requester-v1`
 `STATIC_IDENTITY_STORAGE_KEY`, and `buildStaticRequesterSubject` on both Cloudflare and GitHub
 Pages. No real RFQ or email was sent as a deployment test.
 
+Follow-up implemented locally on 2026-08-07, not yet committed or deployed: the static PNG no
+longer prints the employee number once in the sheet disclaimer. Every `.quote-card` now prints its
+own `製圖行編：<五碼行編>` as the final row of that card footer, so a multi-trade PNG keeps the
+operator label with every trade. `app.js`, `styles.css`, `index.html`, and `guide.html` changed;
+cache tokens are `static-card-employee-v1`. A two-trade browser run produced two cards and exactly
+two employee labels, verified each label below issuer/date in a footer whose bottom matches its
+card; PNG generation completed with no console errors. `node --check app.js` and `git diff --check`
+pass. No backend ranking card, server-generated image, email subject/body or persistence changed.
+
 ## Dark-mode contrast in the signed-in dialogs (committed, pushed and deployed, 2026-08-07)
 
 Thirteen elements across eight rules were still carrying light-mode ink on dark panels. The one

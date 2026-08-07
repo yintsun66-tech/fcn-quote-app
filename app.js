@@ -598,6 +598,9 @@ import {
     const dacNote = data.isDac && data.guaranteedPeriods
       ? `<p class="quote-dac-note">* DAC 第 ${Number(data.guaranteedPeriods) + 1} 個月起為浮動收益</p>`
       : "";
+    const makerLabel = isStaticSite && staticIdentity
+      ? `<span class="quote-card-maker">製圖行編：${escapeHtml(staticIdentity.employeeNumber)}</span>`
+      : "";
 
     return `<article class="quote-card">
       <header class="quote-card-header">
@@ -615,7 +618,7 @@ import {
         <div class="quote-detail"><span>保證配息期間</span><strong>${displayValue(data.guaranteedPeriods)} 個月</strong>${dacNote}</div>
         <div class="quote-detail"><span>提前出場價 KO</span><strong>${displayPercent(data.koBarrier)}</strong><em>${escapeHtml(displayValue(data.koType))}</em></div>
       </div>
-      <footer class="quote-card-footer"><span>發行機構：${escapeHtml(profile.name)}${profile.disclaimer ? `（${profile.disclaimer}）` : ""}</span><span>報價日期：${escapeHtml(displayValue(data.tradeDate, ""))}</span></footer>
+      <footer class="quote-card-footer"><span>發行機構：${escapeHtml(profile.name)}${profile.disclaimer ? `（${profile.disclaimer}）` : ""}</span><span>報價日期：${escapeHtml(displayValue(data.tradeDate, ""))}</span>${makerLabel}</footer>
     </article>`;
   }
 
@@ -629,7 +632,7 @@ import {
       <div class="quote-sheet-header-note"><strong>${quotes.length}</strong><span>筆詢價條件</span></div>
     </header>
     <div class="quote-card-grid">${quotes.map((quote, index) => quoteCardHtml(quote, index, profile)).join("")}</div>
-    <footer class="quote-sheet-disclaimer">${isStaticSite && staticIdentity ? `製圖行編：${escapeHtml(staticIdentity.employeeNumber)}　｜　` : ""}本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer>`;
+    <footer class="quote-sheet-disclaimer">本報價僅供參考，最終條件以發行機構正式報價及相關文件為準。</footer>`;
   }
 
   function ensureQuoteRowsValid() {

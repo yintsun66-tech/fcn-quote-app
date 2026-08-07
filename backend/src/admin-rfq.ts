@@ -20,12 +20,15 @@ interface TimelineRow {
   finalized_at: string | null;
   finalization_trigger: string | null;
   current_ranking_version: number;
+  expected_issuer_count: number;
+  outbound_batch_count: number;
   username_normalized: string;
   display_name: string;
   branch_name: string;
   outbound_total: number;
   outbound_sent: number;
   outbound_failed: number;
+  first_outbound_sent_at: string | null;
   last_outbound_sent_at: string | null;
   inbound_total: number;
   inbound_parsed: number;
@@ -71,6 +74,25 @@ interface SystemHealthRow {
   failed_artifacts: number;
 }
 
+interface PerformanceSummaryRow {
+  rfq_count: number;
+  sent_count: number;
+  avg_created_to_queued_seconds: number | null;
+  avg_queued_to_first_sent_seconds: number | null;
+  avg_queued_to_last_sent_seconds: number | null;
+  avg_first_to_last_sent_seconds: number | null;
+  small_rfq_count: number;
+  small_rfq_avg_queued_to_last_sent_seconds: number | null;
+  small_rfq_within_20_seconds: number;
+}
+
+interface BatchPerformanceRow {
+  batch_code: string;
+  sent_count: number;
+  avg_queue_to_sent_seconds: number | null;
+  max_queue_to_sent_seconds: number | null;
+}
+
 function listLimit(request: Request): number {
   const raw = new URL(request.url).searchParams.get("limit");
   if (!raw) return DEFAULT_LIMIT;
@@ -95,11 +117,15 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
     `SELECT r.id, r.workflow_status, r.dispatch_status, r.trade_count, r.created_at,
             r.outbound_queued_at, r.sent_at, r.deadline_at, r.finalized_at,
             r.finalization_trigger, r.current_ranking_version,
+            r.expected_issuer_count, r.outbound_batch_count,
             u.username_normalized, u.display_name, u.branch_name,
             (SELECT COUNT(*) FROM outbound_email_batches b WHERE b.rfq_id = r.id) AS outbound_total,
             (SELECT COUNT(*) FROM outbound_email_batches b WHERE b.rfq_id = r.id AND b.status = 'SENT') AS outbound_sent,
             (SELECT COUNT(*) FROM outbound_email_batches b WHERE b.rfq_id = r.id AND b.status = 'FAILED') AS outbound_failed,
-            (SELECT MAX(b.sent_at) FROM outbound_email_batches b WHERE b.rfq_id = r.id) AS last_outbound_sent_at,
+            (SELECT MIN(b.sent_at) FROM outbound_email_batches b
+              WHERE b.rfq_id = r.id AND b.status = 'SENT' AND b.sent_at IS NOT NULL) AS first_outbound_sent_at,
+            (SELECT MAX(b.sent_at) FROM outbound_email_batches b
+              WHERE b.rfq_id = r.id AND b.status = 'SENT' AND b.sent_at IS NOT NULL) AS last_outbound_sent_at,
             (SELECT COUNT(*) FROM inbound_messages m WHERE m.rfq_id = r.id) AS inbound_total,
             (SELECT COUNT(*) FROM inbound_messages m WHERE m.rfq_id = r.id AND m.status = 'PARSED') AS inbound_parsed,
             (SELECT COUNT(*) FROM inbound_messages m WHERE m.rfq_id = r.id AND m.status = 'LATE_REPLY') AS inbound_late,
@@ -133,7 +159,7 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
     }
   }
 
-  const [healthRows, inboundRows, systemHealth] = await Promise.all([
+  const [healthRows, inboundRows, systemHealth, performanceSummary, batchPerformance] = await Promise.all([
     env.DB.prepare(
       `SELECT expected.issuer,
               COUNT(*) AS total,
@@ -166,7 +192,52 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
             WHERE received_at >= ? AND status IN ('MANUAL_REVIEW', 'SENDER_MISMATCH')) AS manual_review_inbound,
           (SELECT COUNT(*) FROM generated_artifacts
             WHERE created_at >= ? AND status = 'FAILED') AS failed_artifacts`
-    ).bind(healthSince, healthSince, healthSince).first<SystemHealthRow>()
+    ).bind(healthSince, healthSince, healthSince).first<SystemHealthRow>(),
+    env.DB.prepare(
+      `WITH outbound AS (
+         SELECT rfq_id, MIN(sent_at) AS first_sent_at, MAX(sent_at) AS last_sent_at
+           FROM outbound_email_batches
+          WHERE status = 'SENT' AND queued_at >= ?
+          GROUP BY rfq_id
+       )
+       SELECT COUNT(*) AS rfq_count,
+              SUM(CASE WHEN outbound.last_sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent_count,
+              ROUND(AVG(CASE WHEN rfq.outbound_queued_at IS NOT NULL
+                              THEN (julianday(rfq.outbound_queued_at) - julianday(rfq.created_at)) * 86400 END), 2)
+                AS avg_created_to_queued_seconds,
+              ROUND(AVG(CASE WHEN outbound.first_sent_at IS NOT NULL AND rfq.outbound_queued_at IS NOT NULL
+                              THEN (julianday(outbound.first_sent_at) - julianday(rfq.outbound_queued_at)) * 86400 END), 2)
+                AS avg_queued_to_first_sent_seconds,
+              ROUND(AVG(CASE WHEN outbound.last_sent_at IS NOT NULL AND rfq.outbound_queued_at IS NOT NULL
+                              THEN (julianday(outbound.last_sent_at) - julianday(rfq.outbound_queued_at)) * 86400 END), 2)
+                AS avg_queued_to_last_sent_seconds,
+              ROUND(AVG(CASE WHEN outbound.last_sent_at IS NOT NULL AND outbound.first_sent_at IS NOT NULL
+                              THEN (julianday(outbound.last_sent_at) - julianday(outbound.first_sent_at)) * 86400 END), 2)
+                AS avg_first_to_last_sent_seconds,
+              SUM(CASE WHEN rfq.expected_issuer_count BETWEEN 1 AND 3 AND outbound.last_sent_at IS NOT NULL THEN 1 ELSE 0 END)
+                AS small_rfq_count,
+              ROUND(AVG(CASE WHEN rfq.expected_issuer_count BETWEEN 1 AND 3
+                                  AND outbound.last_sent_at IS NOT NULL AND rfq.outbound_queued_at IS NOT NULL
+                              THEN (julianday(outbound.last_sent_at) - julianday(rfq.outbound_queued_at)) * 86400 END), 2)
+                AS small_rfq_avg_queued_to_last_sent_seconds,
+              SUM(CASE WHEN rfq.expected_issuer_count BETWEEN 1 AND 3
+                            AND outbound.last_sent_at IS NOT NULL AND rfq.outbound_queued_at IS NOT NULL
+                            AND (julianday(outbound.last_sent_at) - julianday(rfq.outbound_queued_at)) * 86400 <= 20
+                       THEN 1 ELSE 0 END) AS small_rfq_within_20_seconds
+         FROM rfqs rfq
+         LEFT JOIN outbound ON outbound.rfq_id = rfq.id
+        WHERE rfq.created_at >= ?`
+    ).bind(healthSince, healthSince).first<PerformanceSummaryRow>(),
+    env.DB.prepare(
+      `SELECT batch_code,
+              COUNT(*) AS sent_count,
+              ROUND(AVG((julianday(sent_at) - julianday(queued_at)) * 86400), 2) AS avg_queue_to_sent_seconds,
+              ROUND(MAX((julianday(sent_at) - julianday(queued_at)) * 86400), 2) AS max_queue_to_sent_seconds
+         FROM outbound_email_batches
+        WHERE queued_at >= ? AND status = 'SENT' AND sent_at IS NOT NULL
+        GROUP BY batch_code
+        ORDER BY batch_code`
+    ).bind(healthSince).all<BatchPerformanceRow>()
   ]);
   const inboundByIssuer = new Map(inboundRows.results.map(row => [row.issuer, row]));
   const issuerHealth = healthRows.results.map(row => {
@@ -211,6 +282,33 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
     healthWindowDays: HEALTH_WINDOW_DAYS
   });
   return jsonResponse({
+    performance: {
+      windowDays: HEALTH_WINDOW_DAYS,
+      rfqCount: performanceSummary?.rfq_count ?? 0,
+      sentCount: performanceSummary?.sent_count ?? 0,
+      averageSeconds: {
+        createdToQueued: performanceSummary?.avg_created_to_queued_seconds ?? null,
+        queuedToFirstSent: performanceSummary?.avg_queued_to_first_sent_seconds ?? null,
+        queuedToLastSent: performanceSummary?.avg_queued_to_last_sent_seconds ?? null,
+        firstToLastSent: performanceSummary?.avg_first_to_last_sent_seconds ?? null
+      },
+      smallRfq: {
+        maximumIssuerCount: 3,
+        targetSeconds: 20,
+        count: performanceSummary?.small_rfq_count ?? 0,
+        averageQueuedToLastSentSeconds: performanceSummary?.small_rfq_avg_queued_to_last_sent_seconds ?? null,
+        withinTargetCount: performanceSummary?.small_rfq_within_20_seconds ?? 0,
+        withinTargetPct: performanceSummary?.small_rfq_count
+          ? Math.round((performanceSummary.small_rfq_within_20_seconds * 1_000) / performanceSummary.small_rfq_count) / 10
+          : null
+      },
+      batches: batchPerformance.results.map(row => ({
+        batchCode: row.batch_code,
+        sentCount: row.sent_count,
+        averageQueueToSentSeconds: row.avg_queue_to_sent_seconds,
+        maximumQueueToSentSeconds: row.max_queue_to_sent_seconds
+      }))
+    },
     health: {
       windowDays: HEALTH_WINDOW_DAYS,
       since: healthSince,
@@ -228,6 +326,8 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
         branchName: row.branch_name
       },
       tradeCount: row.trade_count,
+      expectedIssuerCount: row.expected_issuer_count,
+      outboundBatchCount: row.outbound_batch_count,
       workflowStatus: row.workflow_status,
       dispatchStatus: row.dispatch_status,
       rankingVersion: row.current_ranking_version,
@@ -243,6 +343,10 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
         lastArtifactAt: row.last_artifact_at
       },
       durationsSeconds: {
+        createdToQueued: elapsedSeconds(row.created_at, row.outbound_queued_at),
+        queueToFirstSent: elapsedSeconds(row.outbound_queued_at, row.first_outbound_sent_at),
+        firstToLastSent: elapsedSeconds(row.first_outbound_sent_at, row.last_outbound_sent_at),
+        queueToLastSent: elapsedSeconds(row.outbound_queued_at, row.last_outbound_sent_at),
         queueToSent: elapsedSeconds(row.outbound_queued_at, row.sent_at),
         sentToFirstInbound: elapsedSeconds(row.sent_at, row.first_inbound_at),
         sentToFinalized: elapsedSeconds(row.sent_at, row.finalized_at),
@@ -252,6 +356,7 @@ export async function listAdminRfqTimelines(request: Request, env: AppEnv, sessi
         total: row.outbound_total,
         sent: row.outbound_sent,
         failed: row.outbound_failed,
+        firstSentAt: row.first_outbound_sent_at,
         lastSentAt: row.last_outbound_sent_at
       },
       inbound: {

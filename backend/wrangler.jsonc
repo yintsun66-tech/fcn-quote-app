@@ -128,7 +128,7 @@
         "max_batch_timeout": 1,
         "max_retries": 3,
         "dead_letter_queue": "fcn-outbound-email-dlq",
-        "max_concurrency": 5
+        "max_concurrency": 8
       },
       {
         "queue": "fcn-email-parse",

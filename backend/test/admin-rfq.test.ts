@@ -10,6 +10,7 @@ const BASE_URL = "https://api.yintsun66.com";
 const ADMIN_ID = "usr_41000000-0000-4000-8000-000000000001";
 const USER_ID = "usr_41000000-0000-4000-8000-000000000002";
 const RFQ_ID = "rfq_41000000-0000-4000-8000-000000000003";
+const SMALL_RFQ_ID = "rfq_41000000-0000-4000-8000-000000000008";
 const ADMIN_TOKEN = "admin-rfq-timeline-token";
 const USER_TOKEN = "user-rfq-timeline-token";
 
@@ -54,6 +55,11 @@ beforeAll(async () => {
   const sent = new Date(Date.now() - 100_000).toISOString();
   const deadline = new Date(Date.now() + 800_000).toISOString();
   const firstInbound = new Date(Date.now() - 70_000).toISOString();
+  const smallCreated = new Date(Date.now() - 60_000).toISOString();
+  const smallQueued = new Date(Date.now() - 50_000).toISOString();
+  const smallFirstSent = new Date(Date.now() - 45_000).toISOString();
+  const smallSecondSent = new Date(Date.now() - 38_000).toISOString();
+  const smallLastSent = new Date(Date.now() - 32_000).toISOString();
   await testEnv.DB.batch([
     testEnv.DB.prepare(
       `INSERT INTO rfqs
@@ -82,7 +88,33 @@ beforeAll(async () => {
        VALUES ('inb_41000000-0000-4000-8000-000000000007', 'private/r2/key',
                '<private-message-id>', 'private-content-hash', 'private@example.invalid',
                'rfq@yintsun66.com', 'private inbound subject', 100, ?, ?, 'BNP', 'PARSED')`
-    ).bind(firstInbound, RFQ_ID)
+    ).bind(firstInbound, RFQ_ID),
+    testEnv.DB.prepare(
+      `INSERT INTO rfqs
+        (id, user_id, status, trade_count, created_at, validated_at, version,
+         dispatch_status, workflow_status, outbound_queued_at, sent_at, deadline_at,
+         expected_issuer_count, outbound_batch_count)
+       VALUES (?, ?, 'VALIDATED', 1, ?, ?, 2, 'WAITING', 'WAITING', ?, ?, ?, 3, 3)`
+    ).bind(
+      SMALL_RFQ_ID,
+      USER_ID,
+      smallCreated,
+      smallCreated,
+      smallQueued,
+      smallLastSent,
+      new Date(Date.now() + 900_000).toISOString()
+    ),
+    ...[
+      ["obm_41000000-0000-4000-8000-000000000009", "BMJB", smallFirstSent],
+      ["obm_41000000-0000-4000-8000-000000000010", "UBS", smallSecondSent],
+      ["obm_41000000-0000-4000-8000-000000000011", "SG", smallLastSent]
+    ].map(([id, batchCode, sentAt]) => testEnv.DB.prepare(
+      `INSERT INTO outbound_email_batches
+        (id, rfq_id, batch_code, sender, recipient, base_subject, correlation_token_hash,
+         status, queued_at, sent_at)
+       VALUES (?, ?, ?, 'rfq@yintsun66.com', 'i14053@firstbank.com.tw',
+               'synthetic performance subject', ?, 'SENT', ?, ?)`
+    ).bind(id, SMALL_RFQ_ID, batchCode, `synthetic-hash-${batchCode}`, smallQueued, sentAt))
   ]);
 });
 
@@ -97,6 +129,25 @@ describe("administrator RFQ timeline", () => {
     const response = await api(ADMIN_TOKEN);
     expect(response.status).toBe(200);
     const payload = await response.json<{
+      performance: {
+        rfqCount: number;
+        sentCount: number;
+        averageSeconds: {
+          createdToQueued: number | null;
+          queuedToFirstSent: number | null;
+          queuedToLastSent: number | null;
+          firstToLastSent: number | null;
+        };
+        smallRfq: {
+          maximumIssuerCount: number;
+          targetSeconds: number;
+          count: number;
+          averageQueuedToLastSentSeconds: number | null;
+          withinTargetCount: number;
+          withinTargetPct: number | null;
+        };
+        batches: Array<Record<string, unknown>>;
+      };
       health: {
         windowDays: number;
         issuers: Array<Record<string, unknown>>;
@@ -104,6 +155,27 @@ describe("administrator RFQ timeline", () => {
       };
       records: Array<Record<string, unknown>>;
     }>();
+    expect(payload.performance).toMatchObject({
+      rfqCount: 2,
+      sentCount: 2,
+      smallRfq: {
+        maximumIssuerCount: 3,
+        targetSeconds: 20,
+        count: 1,
+        averageQueuedToLastSentSeconds: 18,
+        withinTargetCount: 1,
+        withinTargetPct: 100
+      }
+    });
+    expect(payload.performance.averageSeconds.createdToQueued).toBe(10);
+    expect(payload.performance.averageSeconds.queuedToFirstSent).toBe(7.5);
+    expect(payload.performance.averageSeconds.queuedToLastSent).toBe(14);
+    expect(payload.performance.averageSeconds.firstToLastSent).toBe(6.5);
+    expect(payload.performance.batches).toContainEqual(expect.objectContaining({
+      batchCode: "SG",
+      sentCount: 1,
+      averageQueueToSentSeconds: 18
+    }));
     expect(payload.health.windowDays).toBe(7);
     expect(payload.health.issuers).toContainEqual(expect.objectContaining({
       issuer: "BNP",
@@ -116,7 +188,15 @@ describe("administrator RFQ timeline", () => {
     expect(payload.records).toContainEqual(expect.objectContaining({
       rfqId: RFQ_ID,
       tradeCount: 2,
+      expectedIssuerCount: 11,
+      outboundBatchCount: 8,
       workflowStatus: "PARTIAL",
+      durationsSeconds: expect.objectContaining({
+        createdToQueued: 10,
+        queueToFirstSent: 10,
+        firstToLastSent: 0,
+        queueToLastSent: 10
+      }),
       outbound: expect.objectContaining({ total: 1, sent: 1 }),
       inbound: expect.objectContaining({ total: 1, parsed: 1 }),
       issuerStates: [expect.objectContaining({ issuer: "BNP", status: "VALID_REPLY" })]
